@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+/* A till runs one screen all day: dark chrome, bright working area, numbers that line up. */
+:root {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  background: #f1f5f9;
+  color: #0f172a;
+  overscroll-behavior: none;
+}
+
+/* Money and quantities are read in columns, so they get tabular figures. */
+.num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+kbd {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.7rem;
+  padding: 0.05rem 0.3rem;
+  border-radius: 0.25rem;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #475569;
+}
