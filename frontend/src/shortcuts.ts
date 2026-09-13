@@ -13,6 +13,8 @@ export type ShortcutAction =
   | 'takePayment'
   | 'reprintLast'
   | 'customer'
+  | 'editBill'
+  | 'returnBill'
   | 'clearBill'
 
 export const SHORTCUT_LABELS: Record<ShortcutAction, string> = {
@@ -27,6 +29,8 @@ export const SHORTCUT_LABELS: Record<ShortcutAction, string> = {
   takePayment: 'UPI, card or split',
   reprintLast: 'Reprint last bill',
   customer: 'Customer details',
+  editBill: "Edit today's bill",
+  returnBill: 'Return',
   clearBill: 'Clear bill',
 }
 
@@ -46,6 +50,8 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutAction, string> = {
   takePayment: 'F9',
   reprintLast: 'F10',
   customer: 'F1',
+  editBill: 'Insert',
+  returnBill: 'F12',
   clearBill: 'Escape',
 }
 

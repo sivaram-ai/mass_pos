@@ -5,7 +5,8 @@ import {
   api, clockTime, messageOfFailure, milliFromUnits, paiseFromRupees, percent, quantity, rupees, rupeesForInput,
 } from '../api'
 import type {
-  CartLine, Customer, HeldBill, Invoice, PaymentMode, Product, QuotedCart, SaleResponse, SettingsView, Tender,
+  CartLine, Customer, EditResponse, HeldBill, Invoice, PaymentMode, Product, QuotedCart, Refund, Returnable,
+  ReturnResponse, Role, SaleResponse, SettingsView, Tender,
 } from '../types'
 import { WHOLE_UNITS } from '../types'
 import { AskModal, Banner, Button, Empty, Field, inputClass, Modal } from '../components/ui'
@@ -22,14 +23,27 @@ const COLS: Col[] = ['code', 'name', 'rate', 'qty', 'disc']
 /** Typing in these looks an item up; the rest take numbers. */
 const SEARCH_COLS: Col[] = ['code', 'name']
 
-type Row = CartLine & { key: number }
+/**
+ * A bill row. On a return against a bill, `originalLineNo` ties it to the bill's line and `maxMilli`
+ * is how much of that line can still come back.
+ */
+type Row = CartLine & { key: number; originalLineNo?: number; maxMilli?: number }
+
+/** What the grid is building: a new bill, a correction of today's bill, or goods coming back. */
+type Mode =
+  | { kind: 'sale' }
+  | { kind: 'edit'; invoice: Invoice }
+  | { kind: 'return'; invoice: Invoice | null }
+
+/** Another screen asking the billing screen to open a bill for editing or a return. */
+export type BillingRequest = { kind: 'edit' | 'return'; invoiceId: string | null; at: number }
 type Cell = { row: number; col: Col }
 /** The cell the cursor is in. `dirty` once something has been typed that is not applied yet. */
 type Edit = Cell & { text: string; dirty: boolean }
 type Found = Cell & { text: string; items: Product[] }
 
 type Ask = {
-  action: 'hold' | 'drawer'
+  action: 'hold' | 'drawer' | 'edit' | 'return'
   title: string
   label: string
   initial: string
@@ -38,13 +52,20 @@ type Ask = {
 const cellId = (row: number, col: Col) => `${row}:${col}`
 const isSearchCol = (col: Col) => SEARCH_COLS.includes(col)
 
-function cartBody(lines: CartLine[]) {
+function cartBody(lines: Row[]) {
   return lines.map((line) => ({
     productId: line.productId,
     quantityMilli: line.quantityMilli,
     discountPaise: line.discountPaise,
     unitPricePaise: line.unitPricePaise,
+    originalLineNo: line.originalLineNo ?? null,
   }))
+}
+
+/** Today as the till's calendar has it, the way bill dates are written: 2026-09-13. */
+function localToday(): string {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 }
 
 /** A held bill stores the lines as the server knows them, without the screen's row keys. */
@@ -58,6 +79,13 @@ function withoutKey(row: Row): CartLine {
     discountPaise: row.discountPaise,
     unitPricePaise: row.unitPricePaise,
   }
+}
+
+/** Prices the grid by the code that will issue it: a sale (or an edited bill), or a return. */
+function quoteFor(cart: Row[], mode: Mode, placeOfSupply: string): Promise<QuotedCart> {
+  return mode.kind === 'return'
+    ? api.post<QuotedCart>('/api/returns/quote', { againstInvoiceId: mode.invoice?.id ?? null, lines: cartBody(cart) })
+    : api.post<QuotedCart>('/api/sales/quote', { lines: cartBody(cart), placeOfSupply })
 }
 
 /** What the screen keeps of the latest bill: enough to show it and reprint it. */
@@ -80,13 +108,16 @@ const lastBillOf = (invoice: Invoice): LastBill => ({
  *
  * @param blocked    the menu is open over the screen
  * @param headerSlot where the bill type, customer and last bill are shown, in the app header
+ * @param request    a bill another screen wants edited or returned here
  */
-export default function Billing({ settings, onToast, active, blocked, headerSlot }: {
+export default function Billing({ settings, onToast, active, blocked, headerSlot, role, request }: {
   settings: SettingsView | null
   onToast: Toast
   active: boolean
   blocked: boolean
   headerSlot: HTMLElement | null
+  role: Role
+  request: BillingRequest | null
 }) {
   const [lines, setLines] = useState<Row[]>([])
   const [customer, setCustomer] = useState<Customer>(NO_CUSTOMER)
@@ -98,7 +129,10 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
   const [invalid, setInvalid] = useState<Cell | null>(null)
   const [focusRequest, setFocusRequest] = useState<(Cell & { at: number }) | null>(null)
   const [ask, setAsk] = useState<Ask | null>(null)
-  const [payment, setPayment] = useState<{ due: number; cart: Row[] } | null>(null)
+  const [payment, setPayment] = useState<{ due: number; cart: Row[]; purpose: 'sale' | 'edit' } | null>(null)
+  /** A refund to confirm: the whole return, or what an edit gives back. */
+  const [settling, setSettling] = useState<{ kind: 'return' | 'edit'; due: number; cart: Row[]; total: number } | null>(null)
+  const [mode, setMode] = useState<Mode>({ kind: 'sale' })
   const [holds, setHolds] = useState<HeldBill[] | null>(null)
   const [editingCustomer, setEditingCustomer] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
@@ -117,12 +151,18 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
   linesRef.current = lines
   const editRef = useRef(edit)
   editRef.current = edit
+  const modeRef = useRef(mode)
+  modeRef.current = mode
   /** Set while a bill is being taken, so a second Space press can never take it twice. */
   const busy = useRef(false)
 
   const gst = settings?.gstRegistered ?? true
   const notReady = Boolean(settings && !settings.readyToInvoice)
-  const modalOpen = ask !== null || payment !== null || holds !== null || editingCustomer || confirmClear
+  const modalOpen = ask !== null || payment !== null || settling !== null || holds !== null || editingCustomer
+    || confirmClear
+  const canManage = role === 'MANAGER' || role === 'ADMIN'
+  /** A return against a bill: only quantities change, and nothing can be added. */
+  const againstBill = mode.kind === 'return' && mode.invoice !== null
   /** In front and uncovered by the menu: the only time the bill's keys may act. */
   const inFront = active && !blocked
   const blankRow = lines.length
@@ -139,13 +179,13 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
       return
     }
     let current = true
-    api.post<QuotedCart>('/api/sales/quote', { lines: cartBody(lines), placeOfSupply: customer.placeOfSupply })
+    quoteFor(lines, mode, customer.placeOfSupply)
       .then((priced) => current && setQuote(priced))
       .catch((failure) => current && setError(messageOfFailure(failure, 'Could not price the bill')))
     return () => {
       current = false
     }
-  }, [lines, customer.placeOfSupply])
+  }, [lines, mode, customer.placeOfSupply])
 
   // ---- Item lookup while typing in a code or name cell ------------------------------------------
   useEffect(() => {
@@ -210,6 +250,20 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     listItems.current.get(highlight)?.scrollIntoView({ block: 'nearest' })
   }, [highlight, listOpen])
 
+  /**
+   * Where typing carries on: the green row for a new item, or on a return against a bill (which
+   * takes no new items) the quantity of its last row.
+   */
+  const focusEntry = useCallback(() => {
+    const count = linesRef.current.length
+    const current = modeRef.current
+    if (current.kind === 'return' && current.invoice !== null) {
+      requestFocus(Math.max(0, count - 1), 'qty')
+    } else {
+      requestFocus(count, 'code')
+    }
+  }, [requestFocus])
+
   const refuse = (row: number, col: Col, message: string) => {
     setInvalid({ row, col })
     setError(message)
@@ -265,6 +319,10 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
         refuse(row, col, `${line.name} is sold in whole ${line.unit}, not ${value}`)
         return null
       }
+      if (line.maxMilli !== undefined && milli > line.maxMilli) {
+        refuse(row, col, `Only ${quantity(line.maxMilli)} of ${line.name} can come back on this bill`)
+        return null
+      }
       change = { quantityMilli: milli }
     } else {
       const paise = value === '' ? 0 : paiseFromRupees(value)
@@ -287,7 +345,10 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     if (!committed) {
       return
     }
-    const target = Math.max(0, Math.min(row, committed.length))
+    const lastRow = modeRef.current.kind === 'return' && modeRef.current.invoice !== null
+      ? Math.max(0, committed.length - 1)
+      : committed.length
+    const target = Math.max(0, Math.min(row, lastRow))
     let targetCol = col
     if (target === committed.length && !isSearchCol(targetCol)) {
       targetCol = 'code'
@@ -392,23 +453,30 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     replaceLines(updated)
     setInvalid(null)
     setError(null)
-    requestFocus(Math.min(row, updated.length), 'code')
+    if (modeRef.current.kind === 'return' && modeRef.current.invoice !== null) {
+      requestFocus(Math.max(0, Math.min(row, updated.length - 1)), 'qty')
+    } else {
+      requestFocus(Math.min(row, updated.length), 'code')
+    }
   }
 
+  /** Empties the grid. Leaving an edit or a return this way changes nothing already issued. */
   const clearBill = () => {
     replaceLines([])
     setCustomer(NO_CUSTOMER)
     setQuote(null)
     setInvalid(null)
     setConfirmClear(false)
+    modeRef.current = { kind: 'sale' }
+    setMode({ kind: 'sale' })
     requestFocus(0, 'code')
   }
 
   /** The checks every way of taking a bill shares. */
   const readyToBill = (cart: Row[]): boolean => {
     if (cart.length === 0) {
-      setError('Add an item before taking the bill')
-      requestFocus(0, 'code')
+      setError(modeRef.current.kind === 'return' ? 'Nothing is being returned' : 'Add an item before taking the bill')
+      focusEntry()
       return false
     }
     if (notReady) {
@@ -424,8 +492,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     return true
   }
 
-  const priceOf = (cart: Row[]) =>
-    api.post<QuotedCart>('/api/sales/quote', { lines: cartBody(cart), placeOfSupply: customer.placeOfSupply })
+  const priceOf = (cart: Row[]) => quoteFor(cart, modeRef.current, customer.placeOfSupply)
 
   const sell = async (cart: Row[], tenders: Tender[]) => {
     const sale = await api.post<SaleResponse>('/api/sales', {
@@ -445,13 +512,41 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
       : { tone: 'warn', text: `Bill ${sale.invoice.invoiceNumber} taken, but printing failed: ${sale.printError ?? ''}` })
   }
 
-  /** Space: the whole bill in cash, printed straight away. */
+  /**
+   * An edit settles the difference: collected like a payment when the new bill costs more, else
+   * confirmed as a refund (or nothing) before the old bill is cancelled.
+   */
+  const settleEdit = async (cart: Row[], invoice: Invoice) => {
+    const priced = await priceOf(cart)
+    const difference = priced.grandTotalPaise - invoice.grandTotalPaise
+    if (difference > 0) {
+      setPayment({ due: difference, cart, purpose: 'edit' })
+    } else {
+      setSettling({ kind: 'edit', due: -difference, cart, total: priced.grandTotalPaise })
+    }
+  }
+
+  const settleReturn = async (cart: Row[]) => {
+    const priced = await priceOf(cart)
+    setSettling({ kind: 'return', due: priced.grandTotalPaise, cart, total: priced.grandTotalPaise })
+  }
+
+  /** Space: the whole bill in cash, printed straight away. Editing or returning, it asks first. */
   const takeBill = async () => {
     if (busy.current || modalOpen) {
       return
     }
     const cart = commitEdit()
     if (!cart || !readyToBill(cart)) {
+      return
+    }
+    const current = modeRef.current
+    if (current.kind !== 'sale') {
+      try {
+        await (current.kind === 'edit' ? settleEdit(cart, current.invoice) : settleReturn(cart))
+      } catch (failure) {
+        setError(messageOfFailure(failure, 'Could not price the bill'))
+      }
       return
     }
     busy.current = true
@@ -476,13 +571,225 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     if (!cart || !readyToBill(cart)) {
       return
     }
+    const current = modeRef.current
     try {
-      const priced = await priceOf(cart)
-      setPayment({ due: priced.grandTotalPaise, cart })
+      if (current.kind === 'edit') {
+        await settleEdit(cart, current.invoice)
+      } else if (current.kind === 'return') {
+        await settleReturn(cart)
+      } else {
+        const priced = await priceOf(cart)
+        setPayment({ due: priced.grandTotalPaise, cart, purpose: 'sale' })
+      }
     } catch (failure) {
       setError(messageOfFailure(failure, 'Could not price the bill'))
     }
   }
+
+  /** Cancels the bill being edited and issues the corrected one; only the difference changes hands. */
+  const saveEdit = async (cart: Row[], tenders: Tender[]) => {
+    const current = modeRef.current
+    if (current.kind !== 'edit') {
+      return
+    }
+    const refundsCash = current.invoice.payments.some((paid) => paid.mode === 'CASH')
+    const edited = await api.post<EditResponse>(`/api/invoices/${current.invoice.id}/replace`, {
+      lines: cartBody(cart),
+      payments: tenders,
+      buyerGstin: gst ? customer.gstin || null : null,
+      buyerName: customer.name || null,
+      placeOfSupply: gst ? customer.placeOfSupply || null : null,
+      print: true,
+      openDrawer: tenders.some((tender) => tender.mode === 'CASH') || refundsCash,
+    })
+    setLastBill(lastBillOf(edited.invoice))
+    clearBill()
+    setError(null)
+    const money = edited.refundPaise > 0
+      ? `Give back ${rupees(edited.refundPaise)}.`
+      : edited.collectedPaise > 0 ? `Collected ${rupees(edited.collectedPaise)} more.` : 'Nothing more to pay.'
+    onToast({
+      tone: edited.printed ? 'good' : 'warn',
+      text: `Bill ${edited.replacedInvoiceNumber} cancelled and replaced by ${edited.invoice.invoiceNumber}. ${money}`
+        + (edited.printed ? '' : ` Printing failed: ${edited.printError ?? ''}`),
+    })
+  }
+
+  /** Issues the credit note: stock back on the shelf, money back to the customer. */
+  const issueReturn = async (cart: Row[], refund: Refund, reason: string) => {
+    const current = modeRef.current
+    if (current.kind !== 'return') {
+      return
+    }
+    const done = await api.post<ReturnResponse>('/api/returns', {
+      againstInvoiceId: current.invoice?.id ?? null,
+      lines: cartBody(cart),
+      refunds: [refund],
+      reason: reason.trim() || null,
+      print: true,
+      openDrawer: refund.mode === 'CASH',
+    })
+    clearBill()
+    setError(null)
+    onToast({
+      tone: done.printed ? 'good' : 'warn',
+      text: `Return ${done.creditNote.creditNoteNumber}: give back ${rupees(done.creditNote.grandTotalPaise)} by ${refund.mode}.`
+        + (done.printed ? ' Stock is back on the shelf.' : ` Printing failed: ${done.printError ?? ''}`),
+    })
+  }
+
+  const completeSettling = async (refund: Refund, reason: string) => {
+    if (busy.current || !settling) {
+      return
+    }
+    busy.current = true
+    setSaving(true)
+    try {
+      if (settling.kind === 'edit') {
+        await saveEdit(settling.cart, [])
+      } else {
+        await issueReturn(settling.cart, refund, reason)
+      }
+    } catch (failure) {
+      setError(messageOfFailure(failure, settling.kind === 'edit' ? 'Could not save the edit' : 'Could not take the return'))
+    } finally {
+      setSettling(null)
+      busy.current = false
+      setSaving(false)
+      focusEntry()
+    }
+  }
+
+  /**
+   * Puts a bill on the grid to edit or to return from. A new bill already on screen is held first,
+   * never thrown away.
+   */
+  const leaveCurrentBill = async (): Promise<boolean> => {
+    commitEdit()
+    if (modeRef.current.kind !== 'sale' || linesRef.current.length === 0) {
+      return true
+    }
+    try {
+      const held = await holdCurrent('')
+      onToast({ tone: 'good', text: `The bill that was on screen is held as ${held.label}` })
+      return true
+    } catch (failure) {
+      onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not hold the bill on screen') })
+      return false
+    }
+  }
+
+  const startEdit = async (invoice: Invoice) => {
+    if (!canManage) {
+      onToast({ tone: 'warn', text: 'Only a manager can edit a bill' })
+      return
+    }
+    if (invoice.status === 'CANCELLED') {
+      onToast({ tone: 'bad', text: `Bill ${invoice.invoiceNumber} is cancelled, so it cannot be edited` })
+      return
+    }
+    if (invoice.invoiceDate !== localToday()) {
+      onToast({ tone: 'warn', text: `Only today's bills can be edited. For bill ${invoice.invoiceNumber}, take a return with ${shortcuts.returnBill}` })
+      return
+    }
+    if (!(await leaveCurrentBill())) {
+      return
+    }
+    replaceLines(invoice.lines.map((line) => ({
+      key: nextKey.current++,
+      productId: line.productId,
+      sku: line.sku,
+      name: line.name,
+      unit: line.unit,
+      quantityMilli: line.quantityMilli,
+      discountPaise: line.discountPaise,
+      unitPricePaise: line.unitPricePaise,
+    })))
+    setCustomer({
+      name: invoice.buyerName ?? '',
+      gstin: invoice.buyerGstin ?? '',
+      placeOfSupply: invoice.buyerGstin ? invoice.placeOfSupply : '',
+    })
+    const next: Mode = { kind: 'edit', invoice }
+    modeRef.current = next
+    setMode(next)
+    setInvalid(null)
+    setError(null)
+    requestFocus(invoice.lines.length, 'code')
+  }
+
+  const startReturn = async (invoice: Invoice | null) => {
+    if (!canManage) {
+      onToast({ tone: 'warn', text: 'Only a manager can take a return' })
+      return
+    }
+    let rows: Row[] = []
+    if (invoice) {
+      if (invoice.status === 'CANCELLED') {
+        onToast({ tone: 'bad', text: `Bill ${invoice.invoiceNumber} is cancelled: its stock is already back` })
+        return
+      }
+      const returnable = await api.get<Returnable>(`/api/invoices/${invoice.id}/returnable`)
+      rows = returnable.lines
+        .filter((line) => line.soldMilli > line.returnedMilli)
+        .map((line) => ({
+          key: nextKey.current++,
+          productId: line.productId,
+          sku: line.sku,
+          name: line.name,
+          unit: line.unit,
+          quantityMilli: line.soldMilli - line.returnedMilli,
+          discountPaise: 0,
+          unitPricePaise: line.unitPricePaise,
+          originalLineNo: line.lineNo,
+          maxMilli: line.soldMilli - line.returnedMilli,
+        }))
+      if (rows.length === 0) {
+        onToast({ tone: 'warn', text: `Everything on bill ${invoice.invoiceNumber} has already come back` })
+        return
+      }
+    }
+    if (!(await leaveCurrentBill())) {
+      return
+    }
+    replaceLines(rows)
+    setCustomer(NO_CUSTOMER)
+    const next: Mode = { kind: 'return', invoice }
+    modeRef.current = next
+    setMode(next)
+    setInvalid(null)
+    setError(null)
+    if (invoice) {
+      requestFocus(0, 'qty')
+    } else {
+      requestFocus(0, 'code')
+    }
+  }
+
+  const findBill = (number: string) =>
+    api.get<Invoice>(`/api/invoices/lookup?number=${encodeURIComponent(number.trim())}`)
+
+  // Bills screen: "Edit" or "Return" on a bill lands here.
+  useEffect(() => {
+    if (!request) {
+      return
+    }
+    const open = async () => {
+      try {
+        const invoice = request.invoiceId ? await api.get<Invoice>(`/api/invoices/${request.invoiceId}`) : null
+        if (request.kind === 'edit' && invoice) {
+          await startEdit(invoice)
+        } else if (request.kind === 'return') {
+          await startReturn(invoice)
+        }
+      } catch (failure) {
+        onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not open that bill') })
+      }
+    }
+    void open()
+    // Only a new request should run this; the handlers read the latest state through refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request])
 
   const completePayment = async (tenders: Tender[]) => {
     if (busy.current || !payment) {
@@ -491,10 +798,14 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     busy.current = true
     setSaving(true)
     try {
-      await sell(payment.cart, tenders)
+      if (payment.purpose === 'edit') {
+        await saveEdit(payment.cart, tenders)
+      } else {
+        await sell(payment.cart, tenders)
+      }
     } catch (failure) {
-      setError(messageOfFailure(failure, 'Could not take the bill'))
-      requestFocus(linesRef.current.length, 'code')
+      setError(messageOfFailure(failure, payment.purpose === 'edit' ? 'Could not save the edit' : 'Could not take the bill'))
+      focusEntry()
     } finally {
       setPayment(null)
       busy.current = false
@@ -516,6 +827,10 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
   }
 
   const askHold = () => {
+    if (modeRef.current.kind !== 'sale') {
+      onToast({ tone: 'warn', text: 'Finish or clear the edit or return first' })
+      return
+    }
     const cart = commitEdit()
     if (cart && cart.length > 0) {
       setAsk({ action: 'hold', title: 'Hold this bill', label: 'Name it so you can find it again', initial: customer.name })
@@ -523,6 +838,10 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
   }
 
   const openHolds = async () => {
+    if (modeRef.current.kind !== 'sale') {
+      onToast({ tone: 'warn', text: 'Finish or clear the edit or return first' })
+      return
+    }
     try {
       setHolds(await api.get<HeldBill[]>('/api/holds'))
     } catch (failure) {
@@ -592,8 +911,48 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
       } catch (failure) {
         onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not open the drawer') })
       }
+    } else if (pending?.action === 'edit' || pending?.action === 'return') {
+      try {
+        if (pending.action === 'return' && value.trim() === '') {
+          await startReturn(null)
+        } else if (value.trim() === '') {
+          onToast({ tone: 'warn', text: 'Type the number of the bill to edit' })
+        } else {
+          const invoice = await findBill(value)
+          await (pending.action === 'edit' ? startEdit(invoice) : startReturn(invoice))
+        }
+      } catch (failure) {
+        onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not find that bill') })
+      }
+      return
     }
-    requestFocus(linesRef.current.length, 'code')
+    focusEntry()
+  }
+
+  const askEdit = () => {
+    if (!canManage) {
+      onToast({ tone: 'warn', text: 'Only a manager can edit a bill' })
+      return
+    }
+    setAsk({
+      action: 'edit',
+      title: 'Edit a bill',
+      label: "Bill number, or just its serial (today's bills only)",
+      initial: lastBill?.invoiceNumber ?? '',
+    })
+  }
+
+  const askReturn = () => {
+    if (!canManage) {
+      onToast({ tone: 'warn', text: 'Only a manager can take a return' })
+      return
+    }
+    setAsk({
+      action: 'return',
+      title: 'Return',
+      label: 'Bill number or serial the goods were sold on. Leave empty for a return without the bill',
+      initial: '',
+    })
   }
 
   const handlers: Record<ShortcutAction, () => void> = {
@@ -616,8 +975,10 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     takePayment: () => void openPayment(),
     reprintLast: () => void reprintLast(),
     customer: () => setEditingCustomer(true),
+    editBill: askEdit,
+    returnBill: askReturn,
     clearBill: () => {
-      if (linesRef.current.length > 0) {
+      if (linesRef.current.length > 0 || modeRef.current.kind !== 'sale') {
         setConfirmClear(true)
       }
     },
@@ -689,6 +1050,8 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
           } else {
             requestFocus(row, 'qty')
           }
+        } else if (againstBill) {
+          requestFocus(Math.min(row + 1, committed.length - 1), 'qty')
         } else {
           // Quantity or discount done: straight on to the next item.
           requestFocus(committed.length, 'code')
@@ -775,6 +1138,8 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
 
   const cellInput = (row: number, col: Col, options: { align?: 'left' | 'right'; disabled?: boolean } = {}) => {
     const line = lines[row]
+    // A return against a bill takes the items and prices from the bill; only the quantity changes.
+    const readOnly = againstBill && col !== 'qty'
     const active = edit.row === row && edit.col === col
     const needsRate = col === 'rate' && line !== undefined && line.unitPricePaise <= 0
     const bad = invalid?.row === row && invalid.col === col
@@ -790,6 +1155,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
         }}
         value={active && edit.dirty ? edit.text : display(row, col)}
         disabled={options.disabled}
+        readOnly={readOnly}
         inputMode={numeric ? 'decimal' : undefined}
         autoComplete="off"
         spellCheck={false}
@@ -800,7 +1166,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
         onKeyDown={(event) => onCellKeyDown(event, row, col)}
         className={`num h-9 w-full rounded border bg-transparent px-2 text-sm outline-none transition
           ${options.align === 'right' ? 'text-right' : 'text-left'}
-          ${col === 'name' ? 'font-medium uppercase' : ''} ${col === 'code' ? 'uppercase' : ''}
+          ${col === 'name' ? 'font-medium uppercase' : ''} ${col === 'code' ? 'uppercase' : ''} ${readOnly ? 'cursor-default' : ''}
           ${bad ? 'border-rose-500 bg-rose-50 ring-2 ring-rose-200'
             : needsRate ? 'border-amber-400 bg-amber-50 placeholder:text-amber-700'
               : 'border-transparent focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-200'}
@@ -817,10 +1183,20 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
       {/* Bill type, customer and last bill ride in the app header, leaving the height to the bill. */}
       {active && headerSlot && createPortal(
         <>
-          <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
-            gst ? 'bg-sky-500/20 text-sky-200' : 'bg-slate-700 text-slate-200'}`}>
-            {gst ? 'GST tax invoice' : 'Bill without GST'}
-          </span>
+          {mode.kind === 'edit' ? (
+            <span className="rounded-full bg-amber-400 px-2.5 py-0.5 text-xs font-semibold text-amber-950">
+              Editing bill {mode.invoice.invoiceNumber}
+            </span>
+          ) : mode.kind === 'return' ? (
+            <span className="rounded-full bg-rose-500 px-2.5 py-0.5 text-xs font-semibold text-white">
+              {mode.invoice ? `Return on bill ${mode.invoice.invoiceNumber}` : 'Return without a bill'}
+            </span>
+          ) : (
+            <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+              gst ? 'bg-sky-500/20 text-sky-200' : 'bg-slate-700 text-slate-200'}`}>
+              {gst ? 'GST tax invoice' : 'Bill without GST'}
+            </span>
+          )}
           <button
             type="button"
             tabIndex={-1}
@@ -853,6 +1229,27 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
         </Banner>
       )}
       {error && <Banner tone="bad" onDismiss={() => setError(null)}>{error}</Banner>}
+      {mode.kind === 'edit' && (
+        <Banner tone="warn">
+          <span className="font-semibold">Editing bill {mode.invoice.invoiceNumber}</span>
+          {' '}(paid {rupees(mode.invoice.grandTotalPaise)}). Change, add or delete rows, then press
+          {' '}<kbd>{shortcuts.takeBill}</kbd> to save: that bill is cancelled, a new bill is printed in its place,
+          and only the difference is collected or given back. <kbd>{shortcuts.clearBill}</kbd> stops editing.
+        </Banner>
+      )}
+      {mode.kind === 'return' && (
+        <Banner tone="bad">
+          <span className="font-semibold">
+            {mode.invoice ? `Return on bill ${mode.invoice.invoiceNumber}.` : 'Return without a bill.'}
+          </span>
+          {' '}
+          {mode.invoice
+            ? 'Delete the rows not coming back and lower the quantities.'
+            : 'Enter the items coming back and the rate paid.'}
+          {' '}Press <kbd>{shortcuts.takeBill}</kbd> to refund: the stock goes back on the shelf.
+          {' '}<kbd>{shortcuts.clearBill}</kbd> cancels the return.
+        </Banner>
+      )}
 
       {/* The bill */}
       <section className="min-h-64 flex-1 overflow-auto rounded-lg border border-slate-200 bg-white shadow-sm">
@@ -914,6 +1311,9 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
                     <div className="flex items-center">
                       {cellInput(index, 'qty', { align: 'right' })}
                       {!WHOLE_UNITS.includes(line.unit) && <span className="pr-1 text-xs text-slate-400">{line.unit}</span>}
+                      {line.maxMilli !== undefined && (
+                        <span className="num whitespace-nowrap pr-1 text-xs text-slate-400">of {quantity(line.maxMilli)}</span>
+                      )}
                     </div>
                   </td>
                   <td className="px-1 py-0.5">{cellInput(index, 'disc', { align: 'right' })}</td>
@@ -923,7 +1323,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
                 </tr>
               )
             })}
-            <tr className={`border-b border-emerald-100 ${edit.row === blankRow ? 'bg-emerald-50' : 'bg-emerald-50/40'}`}>
+            <tr hidden={againstBill} className={`border-b border-emerald-100 ${edit.row === blankRow ? 'bg-emerald-50' : 'bg-emerald-50/40'}`}>
               <td className="num px-2 text-slate-400">{blankRow + 1}</td>
               <td />
               <td className="px-1 py-0.5">{cellInput(blankRow, 'code')}</td>
@@ -936,7 +1336,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
             </tr>
           </tbody>
         </table>
-        {lines.length === 0 && (
+        {lines.length === 0 && mode.kind === 'sale' && (
           <p className="px-4 py-6 text-center text-sm text-slate-400">
             Type an item code or name in the green row and press <kbd>Enter</kbd>. <kbd>↓</kbd> in an empty
             cell lists every item; <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move between cells.
@@ -987,11 +1387,17 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
             <dt className="text-slate-500">Qty</dt>
             <dd className="num text-right font-semibold text-slate-800">{quantity(totalQuantity)}</dd>
           </dl>
-          <div className="min-w-0 flex-1 rounded-md bg-slate-900 px-3 py-1 text-white">
+          <div className={`min-w-0 flex-1 rounded-md px-3 py-1 text-white ${
+            mode.kind === 'return' ? 'bg-rose-700' : mode.kind === 'edit' ? 'bg-amber-800' : 'bg-slate-900'}`}>
             <div className="flex items-baseline justify-between gap-2">
-              <span className="text-sm text-slate-300">Total</span>
+              <span className="text-sm text-white/70">
+                {mode.kind === 'return' ? 'Refund' : mode.kind === 'edit' ? 'New total' : 'Total'}
+              </span>
               <span className="num text-3xl font-bold leading-tight">{rupees(quote?.grandTotalPaise ?? 0)}</span>
             </div>
+            {mode.kind === 'edit' && (
+              <EditDifference paid={mode.invoice.grandTotalPaise} total={quote?.grandTotalPaise ?? 0} />
+            )}
             <div className="num flex justify-end gap-x-2 truncate text-[11px] leading-4 text-slate-400">
               {gst && quote && (
                 <>
@@ -1013,30 +1419,51 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
               disabled={lines.length === 0 || notReady || saving}
               onClick={() => void takeBill()}
             >
-              {saving ? 'Taking…' : 'Take bill'}
+              {saving ? 'Saving…' : mode.kind === 'edit' ? 'Save edit' : mode.kind === 'return' ? 'Refund' : 'Take bill'}
             </Button>
-            <Button
-              className="justify-between py-1"
-              hint={shortcuts.takePayment}
-              disabled={lines.length === 0 || notReady || saving}
-              onClick={() => void openPayment()}
-            >
-              UPI / Card
-            </Button>
+            {mode.kind === 'sale' ? (
+              <Button
+                className="justify-between py-1"
+                hint={shortcuts.takePayment}
+                disabled={lines.length === 0 || notReady || saving}
+                onClick={() => void openPayment()}
+              >
+                UPI / Card
+              </Button>
+            ) : (
+              <Button className="justify-between py-1" hint={shortcuts.clearBill} onClick={() => setConfirmClear(true)}>
+                {mode.kind === 'edit' ? 'Stop' : 'Cancel'}
+              </Button>
+            )}
           </div>
         </section>
       </div>
 
       {ask && (
         <AskModal title={ask.title} label={ask.label} initial={ask.initial}
-                  onSubmit={runAsk} onClose={() => { setAsk(null); requestFocus(linesRef.current.length, 'code') }} />
+                  onSubmit={runAsk} onClose={() => { setAsk(null); focusEntry() }} />
       )}
 
       {payment && (
         <PaymentDialog
           due={payment.due}
-          onClose={() => { setPayment(null); requestFocus(linesRef.current.length, 'code') }}
+          title={payment.purpose === 'edit' ? 'Collect the difference' : 'Payment'}
+          confirmLabel={payment.purpose === 'edit' ? 'Save edit' : 'Take bill'}
+          onClose={() => { setPayment(null); focusEntry() }}
           onConfirm={(tenders) => void completePayment(tenders)}
+        />
+      )}
+
+      {settling && (
+        <RefundDialog
+          kind={settling.kind}
+          due={settling.due}
+          total={settling.total}
+          defaultMode={mode.kind !== 'sale' && mode.invoice ? mode.invoice.payments[0]?.mode ?? 'CASH' : 'CASH'}
+          number={mode.kind !== 'sale' ? mode.invoice?.invoiceNumber ?? null : null}
+          saving={saving}
+          onClose={() => { setSettling(null); focusEntry() }}
+          onConfirm={(refund, reason) => void completeSettling(refund, reason)}
         />
       )}
 
@@ -1044,25 +1471,35 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
         <CustomerDialog
           customer={customer}
           gst={gst}
-          onClose={() => { setEditingCustomer(false); requestFocus(linesRef.current.length, 'code') }}
+          onClose={() => { setEditingCustomer(false); focusEntry() }}
           onSave={(saved) => {
             setCustomer(saved)
             setEditingCustomer(false)
-            requestFocus(linesRef.current.length, 'code')
+            focusEntry()
           }}
         />
       )}
 
       {confirmClear && (
-        <Modal title="Clear this bill?" onClose={() => { setConfirmClear(false); requestFocus(linesRef.current.length, 'code') }}>
+        <Modal
+          title={mode.kind === 'edit' ? `Stop editing ${mode.invoice.invoiceNumber}?`
+            : mode.kind === 'return' ? 'Cancel this return?' : 'Clear this bill?'}
+          onClose={() => { setConfirmClear(false); focusEntry() }}
+        >
           <p className="text-sm text-slate-600">
-            {lines.length} item{lines.length === 1 ? '' : 's'} will be taken off the screen. Nothing is billed.
+            {mode.kind === 'edit'
+              ? `Your changes are dropped and bill ${mode.invoice.invoiceNumber} stays exactly as it was issued.`
+              : mode.kind === 'return'
+                ? 'Nothing is refunded and no stock comes back.'
+                : `${lines.length} item${lines.length === 1 ? '' : 's'} will be taken off the screen. Nothing is billed.`}
           </p>
           <div className="mt-4 flex justify-end gap-2">
-            <Button onClick={() => { setConfirmClear(false); requestFocus(linesRef.current.length, 'code') }} hint="Esc">
-              Keep it
+            <Button onClick={() => { setConfirmClear(false); focusEntry() }} hint="Esc">
+              {mode.kind === 'sale' ? 'Keep it' : 'Keep going'}
             </Button>
-            <AutoFocusButton tone="danger" onClick={clearBill}>Clear bill</AutoFocusButton>
+            <AutoFocusButton tone="danger" onClick={clearBill}>
+              {mode.kind === 'edit' ? 'Stop editing' : mode.kind === 'return' ? 'Cancel return' : 'Clear bill'}
+            </AutoFocusButton>
           </div>
         </Modal>
       )}
@@ -1290,6 +1727,12 @@ function AutoFocusButton({ children, onClick, tone }: { children: string; onClic
       ref={button}
       type="button"
       onClick={onClick}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          onClick()
+        }
+      }}
       className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-white ${
         tone === 'danger' ? 'bg-rose-600 hover:bg-rose-500' : 'bg-sky-600 hover:bg-sky-500'}`}
     >
@@ -1352,12 +1795,133 @@ function CustomerDialog({ customer, gst, onClose, onSave }: {
   )
 }
 
+/** Under the new total of an edited bill: what was paid, and what changes hands now. */
+function EditDifference({ paid, total }: { paid: number; total: number }) {
+  const difference = total - paid
+  return (
+    <div className="num flex justify-end gap-x-2 text-xs font-medium leading-4">
+      <span className="text-white/70">Paid {rupees(paid)}</span>
+      {difference > 0 && <span className="text-amber-200">Collect {rupees(difference)}</span>}
+      {difference < 0 && <span className="text-emerald-200">Give back {rupees(-difference)}</span>}
+      {difference === 0 && <span className="text-white/70">No difference</span>}
+    </div>
+  )
+}
+
+/**
+ * Money going back: the refund of a return (choose how), or confirming an edit that costs the same or
+ * less, where the difference goes back the way the bill was paid.
+ */
+function RefundDialog({ kind, due, total, defaultMode, number, saving, onClose, onConfirm }: {
+  kind: 'return' | 'edit'
+  due: number
+  total: number
+  defaultMode: PaymentMode
+  number: string | null
+  saving: boolean
+  onClose: () => void
+  onConfirm: (refund: Refund, reason: string) => void
+}) {
+  const [mode, setMode] = useState<PaymentMode>(defaultMode === 'ON_ACCOUNT' ? 'CASH' : defaultMode)
+  const [reference, setReference] = useState('')
+  const [reason, setReason] = useState('')
+  const submitted = useRef(false)
+  const confirm = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => confirm.current?.focus(), [])
+
+  const submit = () => {
+    if (submitted.current || saving) {
+      return
+    }
+    submitted.current = true
+    onConfirm({ mode, amountPaise: due, reference: reference.trim() || undefined }, reason)
+  }
+
+  return (
+    <Modal title={kind === 'edit' ? `Save the edit of ${number ?? 'the bill'}?` : 'Refund'} onClose={onClose}>
+      <form
+        className="space-y-3"
+        onSubmit={(event) => {
+          event.preventDefault()
+          submit()
+        }}
+        // Enter confirms from anywhere in the dialog, on every keyboard, not only via a focused button.
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            if (!event.repeat) {
+              submit()
+            }
+          }
+        }}
+      >
+        <div className={`flex items-baseline justify-between rounded-md px-4 py-3 text-white ${
+          kind === 'edit' ? 'bg-amber-800' : 'bg-rose-700'}`}>
+          <span className="text-sm text-white/80">{due > 0 ? 'Give back' : 'Nothing to give back'}</span>
+          <span className="num text-3xl font-semibold">{rupees(due)}</span>
+        </div>
+
+        {kind === 'edit' ? (
+          <p className="text-sm text-slate-600">
+            Bill {number} is cancelled and a new bill for {rupees(total)} is printed in its place. Its stock comes
+            back and the new items go out.
+            {due > 0 && ' The difference goes back the way the bill was paid.'}
+          </p>
+        ) : (
+          <>
+            {number && <p className="text-sm text-slate-600">Against bill {number}. The stock goes back on the shelf.</p>}
+            <div className="grid grid-cols-3 gap-2">
+              {(['CASH', 'UPI', 'CARD'] as PaymentMode[]).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setMode(option)}
+                  className={`rounded-md border px-2 py-2 text-sm font-medium ${
+                    mode === option ? 'border-rose-500 bg-rose-50 text-rose-700' : 'border-slate-200 text-slate-600'}`}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+            {mode !== 'CASH' && (
+              <Field label="Reference" optional hint="UPI reference or card reversal code">
+                <input className={inputClass} value={reference} onChange={(event) => setReference(event.target.value)} />
+              </Field>
+            )}
+            <Field label="Reason" optional hint="Printed on the return slip">
+              <input className={inputClass} maxLength={200} value={reason}
+                     onChange={(event) => setReason(event.target.value)} />
+            </Field>
+          </>
+        )}
+
+        <div className="flex justify-end gap-2 pt-1">
+          <Button onClick={onClose} hint="Esc">Back</Button>
+          <button
+            ref={confirm}
+            type="submit"
+            disabled={saving}
+            className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-white disabled:opacity-50 ${
+              kind === 'edit' ? 'bg-amber-700 hover:bg-amber-600' : 'bg-rose-600 hover:bg-rose-500'}`}
+          >
+            {saving ? 'Saving…' : kind === 'edit' ? 'Save edit' : `Refund ${rupees(due)}`}
+            <kbd>Enter</kbd>
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 const MODES: PaymentMode[] = ['CASH', 'UPI', 'CARD', 'VOUCHER']
 const QUICK_NOTES = [10000, 20000, 50000, 100000, 200000]
 
 /** Cash, UPI, card, or any mix of them; the parts must add up to the bill exactly. */
-function PaymentDialog({ due, onClose, onConfirm }: {
+function PaymentDialog({ due, title = 'Payment', confirmLabel = 'Take bill', onClose, onConfirm }: {
   due: number
+  title?: string
+  confirmLabel?: string
   onClose: () => void
   onConfirm: (tenders: Tender[]) => void
 }) {
@@ -1408,7 +1972,7 @@ function PaymentDialog({ due, onClose, onConfirm }: {
   }
 
   return (
-    <Modal title="Payment" onClose={onClose}>
+    <Modal title={title} onClose={onClose}>
       <div className="flex items-baseline justify-between rounded-md bg-slate-900 px-4 py-3 text-white">
         <span className="text-sm text-slate-300">{parts.length ? 'Still to pay' : 'Bill total'}</span>
         <span className="num text-3xl font-semibold">{rupees(remaining)}</span>
@@ -1488,7 +2052,7 @@ function PaymentDialog({ due, onClose, onConfirm }: {
         <div className="flex justify-end gap-2 pt-1">
           <Button onClick={onClose}>Cancel</Button>
           <Button type="submit" tone="primary" hint="Enter">
-            {tendered >= remaining || !tenderedText ? 'Take bill' : 'Add part payment'}
+            {tendered >= remaining || !tenderedText ? confirmLabel : 'Add part payment'}
           </Button>
         </div>
       </form>

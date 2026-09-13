@@ -59,10 +59,11 @@ public class HoldController {
                            JsonNode cart) {
     }
 
+    /** Newest first: the table that just asked to wait is the one the cashier looks for. */
     @GetMapping
     @Transactional(readOnly = true)
     public List<HoldView> list() {
-        return holds.findByTerminalCodeOrderByCreatedAtAsc(pos.terminal().code()).stream().map(this::viewOf).toList();
+        return holds.findByTerminalCodeOrderByCreatedAtDesc(pos.terminal().code()).stream().map(this::viewOf).toList();
     }
 
     @PostMapping

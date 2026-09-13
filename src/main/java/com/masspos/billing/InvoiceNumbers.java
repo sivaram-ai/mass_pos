@@ -25,9 +25,20 @@ public final class InvoiceNumbers {
         if (sequenceNo < 1) {
             throw new IllegalArgumentException("Invoice sequence starts at 1, got " + sequenceNo);
         }
-        String number = "%s-%s-%05d".formatted(terminalCode, financialYear, sequenceNo);
+        return checked("%s-%s-%05d".formatted(terminalCode, financialYear, sequenceNo));
+    }
+
+    /** Credit notes run in their own series, marked R for return: {@code T1-2627-R0001}. */
+    public static String formatCreditNote(String terminalCode, String financialYear, long sequenceNo) {
+        if (sequenceNo < 1) {
+            throw new IllegalArgumentException("Credit note sequence starts at 1, got " + sequenceNo);
+        }
+        return checked("%s-%s-R%04d".formatted(terminalCode, financialYear, sequenceNo));
+    }
+
+    private static String checked(String number) {
         if (number.length() > MAX_LENGTH) {
-            throw new IllegalStateException("Invoice number exceeds GST's 16-character limit: " + number);
+            throw new IllegalStateException("Document number exceeds GST's 16-character limit: " + number);
         }
         return number;
     }

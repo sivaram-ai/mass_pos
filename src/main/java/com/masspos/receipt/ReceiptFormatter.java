@@ -1,10 +1,11 @@
 package com.masspos.receipt;
 
+import com.masspos.billing.CreditNote;
 import com.masspos.billing.GstStates;
 import com.masspos.billing.Invoice;
-import com.masspos.billing.InvoiceItem;
-import com.masspos.billing.InvoiceStatus;
 import com.masspos.billing.SellerDetails;
+import com.masspos.billing.TaxDocument;
+import com.masspos.billing.TaxLine;
 import com.masspos.common.IndiaTime;
 import com.masspos.hardware.EscPos;
 import com.masspos.hardware.PrinterProperties;
@@ -32,6 +33,9 @@ import static com.masspos.hardware.EscPos.Align.RIGHT;
  * <p>A shop without a GSTIN gets a plain "BILL" instead: no GSTIN, tax lines, rate summary, place
  * of supply or reverse-charge statement, since it charges no tax.
  *
+ * <p>A credit note (return) prints the same way, titled "CREDIT NOTE" (or "RETURN" without a GSTIN),
+ * with the bill it answers, the reason, and the refund in place of the payments.
+ *
  * <p>Legal identity comes from the invoice's own seller snapshot, never from current settings, so a
  * reprint years later still matches the original. Only the contact lines, UPI ID and footer are
  * taken from settings as they are at print time.
@@ -53,8 +57,11 @@ public class ReceiptFormatter {
         this.printer = printer;
     }
 
-    /** @param openDrawer kick the drawer first, so it opens while the receipt prints */
-    public EscPos format(Invoice invoice, ShopSettings shop, ReceiptCopy copy, boolean openDrawer) {
+    /**
+     * @param invoice    an {@link Invoice} or a {@link CreditNote}
+     * @param openDrawer kick the drawer first, so it opens while the receipt prints
+     */
+    public EscPos format(TaxDocument invoice, ShopSettings shop, ReceiptCopy copy, boolean openDrawer) {
         EscPos doc = new EscPos(printer.codePage(), printer.columns());
         if (openDrawer) {
             doc.openDrawer(printer.drawerPin(), printer.drawerPulse());
@@ -69,7 +76,7 @@ public class ReceiptFormatter {
         return doc.cut();
     }
 
-    private void header(EscPos doc, Invoice invoice, ShopSettings shop, ReceiptCopy copy) {
+    private void header(EscPos doc, TaxDocument invoice, ShopSettings shop, ReceiptCopy copy) {
         SellerDetails seller = invoice.getSeller();
         doc.align(CENTER).line(copy.label());
         doc.size(true, true).bold(true).wrapped(seller.getTradeName()).size(false, false).bold(false);
@@ -96,13 +103,12 @@ public class ReceiptFormatter {
             doc.line("FSSAI Lic. No: " + seller.getFssaiLicense());
         }
         // A shop without a GSTIN cannot issue a tax invoice; its receipt is a plain bill.
-        doc.bold(true).line(invoice.isTaxInvoice() ? "TAX INVOICE" : "BILL").bold(false);
+        doc.bold(true).line(title(invoice)).bold(false);
         if (isCancelled(invoice)) {
             doc.size(false, true).bold(true).line("*** CANCELLED ***").size(false, false).bold(false);
         }
         doc.align(LEFT).separator('-');
-        doc.leftRight((invoice.isTaxInvoice() ? "Invoice: " : "Bill No: ") + invoice.getInvoiceNumber(),
-                "Date: " + DATE.format(invoice.getInvoiceDate()));
+        doc.leftRight(numberLabel(invoice) + invoice.getNumber(), "Date: " + DATE.format(invoice.getDocumentDate()));
         doc.leftRight("Cashier: " + invoice.getCashier().getDisplayName(),
                 "Time: " + TIME.format(invoice.getIssuedAt().atZone(IndiaTime.ZONE)));
         if (invoice.isB2b()) {
@@ -111,12 +117,24 @@ public class ReceiptFormatter {
             }
             doc.line("Buyer GSTIN: " + invoice.getBuyerGstin());
         }
+        if (invoice instanceof Invoice bill && bill.getReplacesInvoiceNumber() != null) {
+            doc.wrapped("Replaces bill: " + bill.getReplacesInvoiceNumber());
+        }
+        if (invoice instanceof CreditNote note) {
+            if (note.getOriginalInvoiceNumber() != null) {
+                doc.wrapped("Against bill: " + note.getOriginalInvoiceNumber() + " of "
+                        + DATE.format(note.getOriginalInvoiceDate()));
+            }
+            if (hasText(note.getReason())) {
+                doc.wrapped("Reason: " + note.getReason());
+            }
+        }
         doc.separator('-');
     }
 
-    private void items(EscPos doc, Invoice invoice) {
+    private void items(EscPos doc, TaxDocument invoice) {
         doc.bold(true).leftRight("Item", "Amount").bold(false);
-        for (InvoiceItem item : invoice.getItems()) {
+        for (TaxLine item : invoice.getLines()) {
             doc.wrapped(item.getLineNo() + ". " + item.getProductName());
             String quantity = Amounts.quantity(item.getQuantityMilli())
                     + (item.getUnit().isWholeUnitsOnly() ? "" : " " + item.getUnit());
@@ -136,7 +154,7 @@ public class ReceiptFormatter {
         doc.separator('-');
     }
 
-    private void totals(EscPos doc, Invoice invoice) {
+    private void totals(EscPos doc, TaxDocument invoice) {
         if (invoice.isTaxInvoice()) {
             doc.leftRight("Taxable value", Amounts.rupees(invoice.getTaxableValuePaise()));
             if (invoice.isInterState()) {
@@ -153,21 +171,27 @@ public class ReceiptFormatter {
             doc.leftRight("Round off", Amounts.rupees(invoice.getRoundOffPaise()));
         }
         doc.size(false, true).bold(true)
-                .leftRight("TOTAL Rs.", Amounts.rupees(invoice.getGrandTotalPaise()))
+                .leftRight(invoice instanceof CreditNote ? "REFUND Rs." : "TOTAL Rs.",
+                        Amounts.rupees(invoice.getGrandTotalPaise()))
                 .size(false, false).bold(false);
-        invoice.getPayments().forEach(payment -> {
-            doc.leftRight("  " + payment.getMode(), Amounts.rupees(payment.getAmountPaise()));
-            long change = payment.getTenderedPaise() - payment.getAmountPaise();
-            if (change > 0) {
-                doc.leftRight("  Tendered", Amounts.rupees(payment.getTenderedPaise()));
-                doc.leftRight("  Change", Amounts.rupees(change));
-            }
-        });
+        if (invoice instanceof Invoice bill) {
+            bill.getPayments().forEach(payment -> {
+                doc.leftRight("  " + payment.getMode(), Amounts.rupees(payment.getAmountPaise()));
+                long change = payment.getTenderedPaise() - payment.getAmountPaise();
+                if (change > 0) {
+                    doc.leftRight("  Tendered", Amounts.rupees(payment.getTenderedPaise()));
+                    doc.leftRight("  Change", Amounts.rupees(change));
+                }
+            });
+        } else if (invoice instanceof CreditNote note) {
+            note.getRefunds().forEach(back ->
+                    doc.leftRight("  Paid back by " + back.getMode(), Amounts.rupees(back.getAmountPaise())));
+        }
         doc.separator('-');
     }
 
     /** Rate-wise tax breakdown, as Rule 46 wants the rate and amount of each tax. */
-    private void gstSummary(EscPos doc, Invoice invoice) {
+    private void gstSummary(EscPos doc, TaxDocument invoice) {
         boolean interState = invoice.isInterState();
         boolean cess = invoice.getCessPaise() > 0;
         List<String> headers = new ArrayList<>(List.of("GST%", "Taxable"));
@@ -178,7 +202,7 @@ public class ReceiptFormatter {
 
         // rate -> {taxable, cgst, sgst, igst, cess}
         Map<Integer, long[]> byRate = new TreeMap<>();
-        for (InvoiceItem item : invoice.getItems()) {
+        for (TaxLine item : invoice.getLines()) {
             long[] sums = byRate.computeIfAbsent(item.getGstRateBp(), rate -> new long[5]);
             sums[0] += item.getTaxableValuePaise();
             sums[1] += item.getCgstPaise();
@@ -205,7 +229,7 @@ public class ReceiptFormatter {
         doc.separator('-');
     }
 
-    private void footer(EscPos doc, Invoice invoice, ShopSettings shop) {
+    private void footer(EscPos doc, TaxDocument invoice, ShopSettings shop) {
         if (invoice.isTaxInvoice()) {
             String placeOfSupply = invoice.getPlaceOfSupply();
             doc.wrapped("Place of supply: " + placeOfSupply
@@ -213,8 +237,8 @@ public class ReceiptFormatter {
             // Retail counter sales are never reverse-charge supplies, but Rule 46 wants it stated.
             doc.line("Reverse charge: No");
         }
-        if (isCancelled(invoice)) {
-            doc.wrapped("Cancelled: " + invoice.getCancelReason());
+        if (invoice instanceof Invoice bill && bill.isCancelled()) {
+            doc.wrapped("Cancelled: " + bill.getCancelReason());
         }
         if (invoice.isB2b()) {
             doc.feed(2).align(RIGHT)
@@ -222,7 +246,8 @@ public class ReceiptFormatter {
                     .line("Authorised Signatory")
                     .align(LEFT);
         }
-        if (!isCancelled(invoice) && !shop.getUpiVpa().isEmpty()) {
+        // Only an open bill asks for money: never a cancelled bill, and never a refund.
+        if (invoice instanceof Invoice bill && !bill.isCancelled() && !shop.getUpiVpa().isEmpty()) {
             doc.align(CENTER).line("Scan to pay with any UPI app")
                     .qrCode(upiUri(invoice, shop), QR_MODULE_DOTS).align(LEFT);
         }
@@ -233,10 +258,10 @@ public class ReceiptFormatter {
         }
     }
 
-    private static String upiUri(Invoice invoice, ShopSettings shop) {
+    private static String upiUri(TaxDocument invoice, ShopSettings shop) {
         return "upi://pay?pa=%s&pn=%s&am=%s&cu=INR&tn=%s".formatted(shop.getUpiVpa(),
                 urlEncode(invoice.getSeller().getTradeName()), Amounts.rupees(invoice.getGrandTotalPaise()),
-                urlEncode(invoice.getInvoiceNumber()));
+                urlEncode(invoice.getNumber()));
     }
 
     private static int[] columnWidths(int lineWidth, int columns) {
@@ -260,8 +285,22 @@ public class ReceiptFormatter {
         return row.toString();
     }
 
-    private static boolean isCancelled(Invoice invoice) {
-        return invoice.getStatus() == InvoiceStatus.CANCELLED;
+    private static boolean isCancelled(TaxDocument document) {
+        return document instanceof Invoice bill && bill.isCancelled();
+    }
+
+    private static String title(TaxDocument document) {
+        if (document instanceof CreditNote) {
+            return document.isTaxInvoice() ? "CREDIT NOTE" : "RETURN";
+        }
+        return document.isTaxInvoice() ? "TAX INVOICE" : "BILL";
+    }
+
+    private static String numberLabel(TaxDocument document) {
+        if (document instanceof CreditNote) {
+            return document.isTaxInvoice() ? "Credit note: " : "Return No: ";
+        }
+        return document.isTaxInvoice() ? "Invoice: " : "Bill No: ";
     }
 
     private static boolean hasText(String value) {

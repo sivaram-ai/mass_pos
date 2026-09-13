@@ -184,6 +184,22 @@ class SaleApiIntegrationTest {
     }
 
     @Test
+    void heldBillsListTheLatestFirst() throws Exception {
+        String productId = newProductWithStock(1_000);
+        String cart = "{\"lines\":[{\"productId\":\"%s\",\"quantityMilli\":1000}]}".formatted(productId);
+        postJson("/api/holds", cashierToken, "{\"label\":\"Older table\",\"estimatedTotalPaise\":100,\"cart\":%s}"
+                .formatted(cart), status().isCreated());
+        postJson("/api/holds", cashierToken, "{\"label\":\"Newer table\",\"estimatedTotalPaise\":100,\"cart\":%s}"
+                .formatted(cart), status().isCreated());
+
+        JsonNode holds = json.readTree(mvc.perform(authed(get("/api/holds"), cashierToken))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString());
+        java.util.List<String> labels = holds.findValuesAsText("label");
+        assertThat(labels.indexOf("Newer table")).isLessThan(labels.indexOf("Older table"));
+    }
+
+    @Test
     void anInterStateBillChargesIgst() throws Exception {
         String productId = newProductWithStock(10_000);
 

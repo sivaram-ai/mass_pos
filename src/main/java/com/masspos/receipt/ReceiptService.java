@@ -1,5 +1,6 @@
 package com.masspos.receipt;
 
+import com.masspos.billing.CreditNote;
 import com.masspos.billing.Invoice;
 import com.masspos.hardware.EscPos;
 import com.masspos.hardware.ThermalPrinter;
@@ -46,6 +47,18 @@ public class ReceiptService {
             }
             return formatter.format(invoice, settings.currentOrEmpty(), copy,
                     openDrawer && copy == ReceiptCopy.ORIGINAL);
+        });
+        return printer.print(receipt);
+    }
+
+    /** A credit note, laid out like a bill; the drawer opens for the ORIGINAL copy only, to pay the refund out. */
+    public CompletableFuture<Void> printCreditNote(UUID creditNoteId, ReceiptCopy copy, boolean openDrawer) {
+        EscPos receipt = readOnlyTx.execute(status -> {
+            CreditNote note = em.find(CreditNote.class, creditNoteId);
+            if (note == null) {
+                throw new EntityNotFoundException("No return " + creditNoteId);
+            }
+            return formatter.format(note, settings.currentOrEmpty(), copy, openDrawer && copy == ReceiptCopy.ORIGINAL);
         });
         return printer.print(receipt);
     }

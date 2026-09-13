@@ -10,13 +10,15 @@ import java.util.UUID;
 /**
  * An invoice as the screens show it.
  *
- * @param taxInvoice false for the bill of a shop without a GSTIN, which carries no tax
+ * @param taxInvoice            false for the bill of a shop without a GSTIN, which carries no tax
+ * @param replacesInvoiceNumber the bill this one was issued in place of, when a bill was edited
  */
 public record InvoiceView(UUID id, String invoiceNumber, LocalDate invoiceDate, Instant issuedAt, InvoiceStatus status,
                           boolean taxInvoice, String terminalCode, String cashier, String buyerName, String buyerGstin,
                           String placeOfSupply, long taxableValuePaise, long cgstPaise, long sgstPaise,
                           long igstPaise, long cessPaise, long roundOffPaise, long grandTotalPaise,
-                          long changePaise, String cancelReason, List<Line> lines, List<Payment> payments) {
+                          long changePaise, String cancelReason, String replacesInvoiceNumber, List<Line> lines,
+                          List<Payment> payments) {
 
     public record Line(int lineNo, UUID productId, String sku, String name, String hsnCode, UnitOfMeasure unit,
                        long quantityMilli, long unitPricePaise, long discountPaise, int gstRateBp,
@@ -45,6 +47,7 @@ public record InvoiceView(UUID id, String invoiceNumber, LocalDate invoiceDate, 
                 invoice.getCashier().getDisplayName(), invoice.getBuyerName(), invoice.getBuyerGstin(),
                 invoice.getPlaceOfSupply(), invoice.getTaxableValuePaise(), invoice.getCgstPaise(),
                 invoice.getSgstPaise(), invoice.getIgstPaise(), invoice.getCessPaise(), invoice.getRoundOffPaise(),
-                invoice.getGrandTotalPaise(), change, invoice.getCancelReason(), lines, payments);
+                invoice.getGrandTotalPaise(), change, invoice.getCancelReason(), invoice.getReplacesInvoiceNumber(), lines,
+                payments);
     }
 }

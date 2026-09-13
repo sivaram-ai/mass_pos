@@ -45,7 +45,7 @@ import java.util.List;
                 @UniqueConstraint(name = "uk_invoice_terminal_fy_seq",
                         columnNames = {"terminal_code", "financial_year", "sequence_no"})},
         indexes = @Index(name = "ix_invoice_date", columnList = "invoice_date"))
-public class Invoice extends BaseEntity {
+public class Invoice extends BaseEntity implements TaxDocument {
 
     @Column(nullable = false, updatable = false, length = InvoiceNumbers.MAX_LENGTH)
     private String invoiceNumber;
@@ -139,6 +139,10 @@ public class Invoice extends BaseEntity {
     @Column(length = 200)
     private String cancelReason;
 
+    /** Set when this bill was issued as the edit of an earlier one, which was cancelled for it. */
+    @Column(updatable = false, length = InvoiceNumbers.MAX_LENGTH)
+    private String replacesInvoiceNumber;
+
     protected Invoice() {
     }
 
@@ -202,17 +206,37 @@ public class Invoice extends BaseEntity {
         this.cancelledAt = at;
     }
 
-    public boolean isInterState() {
-        return seller.isGstRegistered() && !seller.getStateCode().equals(placeOfSupply);
+    /**
+     * Marks this bill as the corrected copy of a bill that was edited, which is cancelled in the same
+     * transaction. Printed on the receipt so the customer's two slips can be matched.
+     */
+    public void replaces(String invoiceNumber) {
+        requireNotYetPersisted();
+        this.replacesInvoiceNumber = invoiceNumber;
     }
 
-    public boolean isB2b() {
-        return buyerGstin != null;
+    public boolean isCancelled() {
+        return status == InvoiceStatus.CANCELLED;
     }
 
-    /** False for a shop without a GSTIN: its bill charges no tax and is not a GST tax invoice. */
-    public boolean isTaxInvoice() {
-        return seller.isGstRegistered();
+    @Override
+    public String getNumber() {
+        return invoiceNumber;
+    }
+
+    @Override
+    public LocalDate getDocumentDate() {
+        return invoiceDate;
+    }
+
+    @Override
+    public List<InvoiceItem> getLines() {
+        return getItems();
+    }
+
+    /** The edited bill this one replaced, or null. */
+    public String getReplacesInvoiceNumber() {
+        return replacesInvoiceNumber;
     }
 
     private void recomputeGrandTotal() {

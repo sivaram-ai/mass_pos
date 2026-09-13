@@ -7,5 +7,5 @@ import java.util.UUID;
 
 public interface HeldBillRepository extends JpaRepository<HeldBill, UUID> {
 
-    List<HeldBill> findByTerminalCodeOrderByCreatedAtAsc(String terminalCode);
+    List<HeldBill> findByTerminalCodeOrderByCreatedAtDesc(String terminalCode);
 }

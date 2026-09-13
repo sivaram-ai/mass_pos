@@ -131,12 +131,77 @@ export interface Invoice {
   grandTotalPaise: number
   changePaise: number
   cancelReason: string | null
+  /** Set on a bill issued in place of an edited one. */
+  replacesInvoiceNumber: string | null
   lines: InvoiceLine[]
   payments: Tender[]
 }
 
 export interface SaleResponse {
   invoice: Invoice
+  printed: boolean
+  printError: string | null
+}
+
+export interface EditResponse extends SaleResponse {
+  replacedInvoiceNumber: string
+  previousTotalPaise: number
+  refundPaise: number
+  collectedPaise: number
+}
+
+/** Each line of a bill, with how much has already come back on returns. */
+export interface Returnable {
+  invoice: Invoice
+  lines: {
+    lineNo: number
+    productId: string
+    sku: string
+    name: string
+    unit: Unit
+    soldMilli: number
+    returnedMilli: number
+    unitPricePaise: number
+    discountPaise: number
+    lineTotalPaise: number
+  }[]
+}
+
+export interface Refund {
+  mode: PaymentMode
+  amountPaise: number
+  reference?: string
+}
+
+/** A return: goods back, money back. */
+export interface CreditNote {
+  id: string
+  creditNoteNumber: string
+  noteDate: string
+  issuedAt: string
+  taxInvoice: boolean
+  terminalCode: string
+  cashier: string
+  originalInvoiceId: string | null
+  originalInvoiceNumber: string | null
+  originalInvoiceDate: string | null
+  buyerName: string | null
+  buyerGstin: string | null
+  placeOfSupply: string
+  reason: string | null
+  taxableValuePaise: number
+  cgstPaise: number
+  sgstPaise: number
+  igstPaise: number
+  cessPaise: number
+  roundOffPaise: number
+  grandTotalPaise: number
+  lines: (InvoiceLine & { originalLineNo: number | null })[]
+  refunds: Refund[]
+}
+
+export interface ReturnResponse {
+  creditNote: CreditNote
   printed: boolean
   printError: string | null
 }
@@ -216,6 +281,10 @@ export interface DayReport {
   date: string
   bills: number
   cancelledBills: number
+  returns: number
+  salesTotals: ReportTotals
+  returnTotals: ReportTotals
+  /** Sales less returns. */
   totals: ReportTotals
   payments: { mode: PaymentMode; bills: number; amountPaise: number }[]
   cashiers: { name: string; bills: number; amountPaise: number }[]

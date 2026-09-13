@@ -83,16 +83,37 @@ Every key can be remapped in Settings; these are the defaults.
 | `F8` | Open the drawer without a sale (asks for a reason, and records it) |
 | `F10` | Reprint the last bill as a duplicate |
 | `F1` | Customer name, and for a GST shop the customer's GSTIN and state |
-| `Esc` | Cancel what is being typed in a cell; otherwise clear the bill (asks first) |
+| `Insert` | Edit today's bill (manager). Asks for the bill number (the last bill is filled in; its serial, e.g. `42`, is enough) |
+| `F12` | Return (manager). Asks for the bill the goods were sold on; leave it empty for a return without the bill |
+| `Esc` | Cancel what is being typed in a cell; otherwise clear the bill, or stop an edit or return (asks first) |
+| `Esc` `Esc` | On any other screen: back to billing |
 
 Parked bills take no invoice number and hold no stock: nothing is sold until the bill is taken.
+Held bills are listed newest first.
+
+### Changing a bill after it was taken
+
+- **Edit** (`Insert`, or Edit on the Bills screen): today's bills only. The bill opens on the grid;
+  change, add or delete rows and press `Space`. In one step the old bill is cancelled (its stock
+  comes back), a new bill is printed marked "Replaces bill …", and only the difference changes
+  hands: collected (cash, or `F9` for UPI/card) when the new bill costs more, or shown as
+  **Give back** when it costs less. Money already paid carries over to the new bill.
+- **Return** (`F12`, or Return / Return without a bill on the Bills screen): issues a credit note
+  numbered in its own series (`T1-2627-R0001`) and prints it with the refund. Against a bill, its
+  lines load with the quantity still returnable; delete what is not coming back and lower the
+  quantities. The refund is that bill's own share for each item, so returns can never add up to
+  more than the bill. Without a bill, items are priced like a sale. The stock goes back either way.
+- A bill that has a return against it can no longer be edited or cancelled (that would put the
+  same stock and money back twice); anything more coming back is another return.
+- Reports and the Bills screen show takings net of returns; the GST summary nets credit notes off
+  the rate-wise and HSN figures.
 
 ## Who may do what
 
 | Role | Can do |
 |---|---|
 | **Cashier** | Bill, park and resume, reprint, open the drawer with a reason |
-| **Manager** | Also products, prices, stock, cancelling a bill, day and GST reports |
+| **Manager** | Also products, prices, stock, cancelling or editing a bill, returns and refunds, day and GST reports |
 | **Auditor** | Read-only: every report, GST figures and the audit trail. Cannot bill or edit. |
 | **Admin** | Everything, plus staff accounts and shop settings |
 
@@ -165,7 +186,8 @@ is not a loopback name are refused. Together these stop a web page open on the t
 | Staff | `GET/POST /api/users`, `PUT /api/users/{id}`, `POST /api/users/{id}/pin` |
 | Catalogue | `GET /api/products?q=`, `POST /api/products`, `PUT /api/products/{id}`, `POST /api/products/{id}/deactivate` |
 | Stock | `GET /api/stock`, `POST /api/stock/receipts`, `/adjustments`, `/damages` |
-| Billing | `POST /api/sales`, `POST /api/sales/quote`, `GET /api/invoices`, `GET /api/invoices/last`, `GET /api/invoices/{id}`, `POST /api/invoices/{id}/cancel`, `POST /api/invoices/{id}/receipt` |
+| Billing | `POST /api/sales`, `POST /api/sales/quote`, `GET /api/invoices`, `GET /api/invoices/last`, `GET /api/invoices/lookup?number=`, `GET /api/invoices/{id}`, `POST /api/invoices/{id}/cancel`, `POST /api/invoices/{id}/replace` (edit), `POST /api/invoices/{id}/receipt` |
+| Returns | `GET /api/invoices/{id}/returnable`, `POST /api/returns/quote`, `POST /api/returns`, `GET /api/returns`, `GET /api/returns/{id}`, `POST /api/returns/{id}/receipt` |
 | Held bills | `GET/POST /api/holds`, `DELETE /api/holds/{id}` |
 | Reports | `GET /api/reports/day`, `/gst`, `/audit` |
 | Settings | `GET/PUT /api/settings` |

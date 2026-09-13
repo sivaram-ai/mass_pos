@@ -73,10 +73,17 @@ export default function Reports({ onToast }: { onToast: Toast }) {
           <Panel title="Takings">
             <div className="mb-3 flex items-baseline justify-between">
               <span className="text-sm text-slate-500">{day.bills} bills
-                {day.cancelledBills > 0 && `, ${day.cancelledBills} cancelled`}</span>
+                {day.cancelledBills > 0 && `, ${day.cancelledBills} cancelled`}
+                {day.returns > 0 && `, ${day.returns} return${day.returns === 1 ? '' : 's'}`}</span>
               <span className="num text-3xl font-semibold">{rupees(day.totals.grandTotalPaise)}</span>
             </div>
             <dl className="space-y-1 text-sm">
+              {day.returns > 0 && (
+                <>
+                  <Line label="Sales" value={rupees(day.salesTotals.grandTotalPaise)} />
+                  <Line label="Less returns" value={`-${rupees(day.returnTotals.grandTotalPaise)}`} />
+                </>
+              )}
               <Line label="Taxable value" value={rupees(day.totals.taxableValuePaise)} />
               <Line label="CGST" value={rupees(day.totals.cgstPaise)} />
               <Line label="SGST" value={rupees(day.totals.sgstPaise)} />

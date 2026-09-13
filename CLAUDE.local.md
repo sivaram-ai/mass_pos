@@ -16,6 +16,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3D | Reports: day takings, GST rate-wise + HSN (GSTR-1 prep), audit-trail viewer | Done |
 | 3E | Shop settings moved into the database (`shop_settings`), editable on screen, seeded once from `pos.company.*` | Done |
 | 3F | Readable field errors (`errors` map), non-GST shops, optional HSN/CIN, grid billing screen with Space bill, one-line header with slide-in menu, compact footer, held-bill keys | Done: 127 tests green, driven in the browser |
+| 3G | Edit today's bill (cancel + reissue), returns as credit notes with refunds, reports net of returns, held bills newest first, Esc Esc back to billing | Done: 136 tests green, driven in the browser |
 | 4 | Counter → master sync over LAN (see [docs/multi-terminal-and-rbac.md](docs/multi-terminal-and-rbac.md)) | Designed, not built |
 | Later | Flyway migrations, cloud sync, composition scheme / bill of supply, desktop shell | Not started |
 
@@ -39,7 +40,12 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 - **The screen never computes tax.** `POST /api/sales/quote` prices the cart with the same code
   that issues the bill; duplicating the rounding rules in TypeScript would drift.
 - Keyboard map lives in `localStorage` (`masspos.shortcuts`), editable on the Settings screen.
-  Function keys, Escape and Space are bound; Space never fires inside a name being typed.
+  Function keys, Insert, Escape and Space are bound; Space never fires inside a name being typed.
+- Billing has a `mode` (sale / edit / return). In a return against a bill only the qty cell is
+  editable (others `readOnly`, still focusable for arrows) and the green row is hidden: use
+  `focusEntry()`, never `requestFocus(lines.length, 'code')`. Quotes go to `/api/returns/quote` then.
+- The in-app browser pane does not activate a focused button on Enter: dialogs handle Enter in
+  `onKeyDown` themselves (AskModal, RefundDialog, AutoFocusButton, the menu drawer).
 - Money is formatted in `api.ts` (`rupees`, `quantity`, `percent`, `rupeesForInput`) with Indian
   grouping; never format money inside a component.
 - **Billing is a grid** (`Billing.tsx`): each row's code/name cells look items up (list rendered
@@ -151,9 +157,22 @@ overridable with `POS_DATA_DIR`. It holds:
 - **Audit.** Every entity is `@Audited`. Envers can never be disabled: `AuditTrailGuard` refuses to
   start. Never use `ValidityAuditStrategy`.
 - **Append-only**, enforced by SQLite triggers recreated on every start:
-  - `*_aud`, `audit_revision`, `inventory_ledger_event` and `invoice_item`: no UPDATE, no DELETE.
+  - `*_aud`, `audit_revision`, `inventory_ledger_event`, `invoice_item`, `invoice_payment`,
+    `credit_note`, `credit_note_item` and `credit_note_refund`: no UPDATE, no DELETE.
   - `invoice`: no DELETE; after issue only cancellation.
-  - `invoice_sequence`: can only move forward.
+  - `invoice_sequence` and `credit_note_sequence`: can only move forward.
+- **Editing a bill = cancel + reissue** (`SaleService.replace`), today's bills only, manager only.
+  Reserve the new number *before* cancelling: a cancelled row is frozen by the trigger, so its
+  reason ("Edited, replaced by …") cannot be written afterwards. Paid amounts carry over in order;
+  only the difference is collected (request `payments`) or refunded (`refundPaise`).
+- **Returns are credit notes** (`CreditNote*`, `ReturnService`), own series `T1-2627-R0001`, manager
+  only. Against a bill, each line's refund is a pro-rata share of that bill line, and the line's
+  last return takes the exact remainder, so returns never exceed the bill. A bill with any credit
+  note against it can no longer be edited or cancelled (`SaleService.requireNoReturns`).
+- **Reports net returns**: day totals, payments per mode, cashiers and tills subtract credit notes;
+  the GST summary nets them off rates and HSN. `DayReport.totals` is the net figure.
+- `Invoice` and `CreditNote` implement `TaxDocument` (`InvoiceItem`/`CreditNoteItem`: `TaxLine`), which
+  is what `ReceiptFormatter` lays out.
   - A new immutable table, or a new fiscal or seller column on `Invoice`, must also be added to
     `AuditTrailGuard.FROZEN_INVOICE_COLUMNS`.
 - **Stock** is `SUM(quantity_delta_milli)` from the ledger. Never add a stock column.

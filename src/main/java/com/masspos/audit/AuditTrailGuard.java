@@ -32,7 +32,7 @@ public class AuditTrailGuard {
             "id", "invoice_number", "terminal_code", "financial_year", "sequence_no", "invoice_date",
             "issued_at", "seller_legal_name", "seller_trade_name", "seller_gstin", "seller_state_code",
             "seller_address", "seller_cin", "seller_fssai_license", "buyer_gstin", "buyer_name",
-            "place_of_supply", "taxable_value_paise", "cgst_paise", "sgst_paise", "igst_paise",
+            "replaces_invoice_number", "place_of_supply", "taxable_value_paise", "cgst_paise", "sgst_paise", "igst_paise",
             "cess_paise", "round_off_paise", "grand_total_paise", "cashier_id", "created_at");
 
     private final JdbcTemplate jdbc;
@@ -76,13 +76,22 @@ public class AuditTrailGuard {
                     "BEFORE UPDATE ON invoice WHEN OLD.status = 'CANCELLED' OR " + fiscalFieldChanged,
                     "invoice: issued invoices are frozen, only cancellation is allowed");
 
+            // A credit note is never edited or removed, nor are its lines or refunds: a mistaken
+            // return is put right with a new bill.
+            for (String table : List.of("credit_note", "credit_note_item", "credit_note_refund")) {
+                forbid(table, "UPDATE");
+                forbid(table, "DELETE");
+            }
+
             // Gapless numbering: a sequence may only move forward.
-            forbid("invoice_sequence", "DELETE");
-            createTrigger("trg_invoice_sequence_forward_only",
-                    "BEFORE UPDATE ON invoice_sequence WHEN NEW.last_issued < OLD.last_issued"
-                            + " OR NEW.terminal_code IS NOT OLD.terminal_code"
-                            + " OR NEW.financial_year IS NOT OLD.financial_year",
-                    "invoice_sequence: numbers can only move forward");
+            for (String sequence : List.of("invoice_sequence", "credit_note_sequence")) {
+                forbid(sequence, "DELETE");
+                createTrigger("trg_%s_forward_only".formatted(sequence),
+                        "BEFORE UPDATE ON %s WHEN NEW.last_issued < OLD.last_issued".formatted(sequence)
+                                + " OR NEW.terminal_code IS NOT OLD.terminal_code"
+                                + " OR NEW.financial_year IS NOT OLD.financial_year",
+                        "%s: numbers can only move forward".formatted(sequence));
+            }
         });
     }
 

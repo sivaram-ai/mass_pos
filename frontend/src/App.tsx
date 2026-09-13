@@ -3,6 +3,7 @@ import { api, billDate, clockTime, saveToken, savedToken } from './api'
 import type { Principal, Role, SettingsView } from './types'
 import { Login, ChangePin } from './screens/Login'
 import Billing from './screens/Billing'
+import type { BillingRequest } from './screens/Billing'
 import Products from './screens/Products'
 import Stock from './screens/Stock'
 import Invoices from './screens/Invoices'
@@ -30,7 +31,9 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>('billing')
   const [booting, setBooting] = useState(true)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [billingRequest, setBillingRequest] = useState<BillingRequest | null>(null)
   const [toast, setToast] = useState<{ tone: 'good' | 'bad' | 'warn'; text: string } | null>(null)
+  const lastEscape = useRef(0)
   // The billing screen puts its bill details into the header through this slot.
   const [headerSlot, setHeaderSlot] = useState<HTMLDivElement | null>(null)
 
@@ -54,6 +57,29 @@ export default function App() {
       refreshSettings()
     }
   }, [user, refreshSettings])
+
+  // Esc twice in quick succession on any other screen goes back to billing. A single Esc keeps
+  // its usual job, and an Esc a dialog or the menu used to close itself never counts.
+  const onBilling = screen === 'billing'
+  useEffect(() => {
+    if (onBilling || menuOpen || !user) {
+      return
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.repeat) {
+        return
+      }
+      const now = performance.now()
+      if (now - lastEscape.current < 600) {
+        lastEscape.current = 0
+        setScreen('billing')
+      } else {
+        lastEscape.current = now
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onBilling, menuOpen, user])
 
   useEffect(() => {
     if (!toast) {
@@ -115,8 +141,17 @@ export default function App() {
         <Clock />
         <div ref={setHeaderSlot} className="flex min-w-0 flex-1 items-center gap-4" />
         {current !== 'billing' && (
-          <span className="ml-auto text-sm font-medium text-slate-300">
+          <span className="ml-auto flex items-center gap-4 text-sm font-medium text-slate-300">
             {allowed.find((item) => item.id === current)?.label}
+            {canBill && (
+              <button
+                type="button"
+                onClick={() => setScreen('billing')}
+                className="flex items-center gap-2 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+              >
+                Back to billing <kbd>Esc</kbd><kbd>Esc</kbd>
+              </button>
+            )}
           </span>
         )}
       </header>
@@ -152,10 +187,21 @@ export default function App() {
               active={current === 'billing'}
               blocked={menuOpen}
               headerSlot={headerSlot}
+              role={user.role}
+              request={billingRequest}
             />
           </div>
         )}
-        {current === 'invoices' && <Invoices role={user.role} onToast={setToast} />}
+        {current === 'invoices' && (
+          <Invoices
+            role={user.role}
+            onToast={setToast}
+            onOpenInBilling={canBill ? (kind, invoiceId) => {
+              setBillingRequest({ kind, invoiceId, at: performance.now() })
+              setScreen('billing')
+            } : undefined}
+          />
+        )}
         {current === 'products' && <Products onToast={setToast} />}
         {current === 'stock' && <Stock onToast={setToast} />}
         {current === 'reports' && <Reports onToast={setToast} />}
@@ -216,6 +262,12 @@ function MenuDrawer({ open, shopName, user, items, current, onPick, onClose, onS
       if (event.key === 'Escape') {
         event.stopPropagation()
         onClose()
+        return
+      }
+      if (event.key === 'Enter' && document.activeElement instanceof HTMLButtonElement
+        && panel.current?.contains(document.activeElement)) {
+        event.preventDefault()
+        document.activeElement.click()
         return
       }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {

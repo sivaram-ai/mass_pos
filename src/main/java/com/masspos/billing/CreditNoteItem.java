@@ -16,23 +16,26 @@ import org.hibernate.annotations.Immutable;
 import org.hibernate.envers.Audited;
 
 /**
- * One invoice line. Amounts are computed by the billing calculator (GST rounding rules live there)
- * and stored as issued; this entity only checks that they add up. Product details are copied at
- * the time of sale so later catalogue edits never alter an issued invoice.
+ * One item taken back. Amounts are positive, as on the credit note itself: the note as a whole is
+ * what reduces the takings and the tax. Product details are copied, as on an invoice line.
  */
 @Entity
 @Immutable
 @Audited
-@Table(name = "invoice_item", uniqueConstraints = @UniqueConstraint(
-        name = "uk_invoice_item_line", columnNames = {"invoice_id", "line_no"}))
-public class InvoiceItem extends BaseEntity implements TaxLine {
+@Table(name = "credit_note_item", uniqueConstraints = @UniqueConstraint(
+        name = "uk_credit_note_item_line", columnNames = {"credit_note_id", "line_no"}))
+public class CreditNoteItem extends BaseEntity implements TaxLine {
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "invoice_id", nullable = false, updatable = false)
-    private Invoice invoice;
+    @JoinColumn(name = "credit_note_id", nullable = false, updatable = false)
+    private CreditNote creditNote;
 
     @Column(nullable = false, updatable = false)
     private int lineNo;
+
+    /** The line of the original bill this item came from; null for a return without a bill. */
+    @Column(updatable = false)
+    private Integer originalLineNo;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "product_id", nullable = false, updatable = false)
@@ -63,7 +66,6 @@ public class InvoiceItem extends BaseEntity implements TaxLine {
     @Column(nullable = false, updatable = false)
     private long taxableValuePaise;
 
-    /** Rate actually applied, which can differ from the product default (e.g. price-based apparel slabs). */
     @Column(nullable = false, updatable = false)
     private int gstRateBp;
 
@@ -85,27 +87,29 @@ public class InvoiceItem extends BaseEntity implements TaxLine {
     @Column(nullable = false, updatable = false)
     private long lineTotalPaise;
 
-    protected InvoiceItem() {
+    protected CreditNoteItem() {
     }
 
-    public InvoiceItem(Product product, long quantityMilli, long unitPricePaise, long discountPaise,
-                       long taxableValuePaise, int gstRateBp, int cessRateBp,
-                       long cgstPaise, long sgstPaise, long igstPaise, long cessPaise) {
+    /** Copies the item's name, code and HSN from the bill line it came back from, else from the catalogue. */
+    public CreditNoteItem(Product product, TaxLine originalLine, long quantityMilli, long unitPricePaise,
+                          long discountPaise, long taxableValuePaise, int gstRateBp, int cessRateBp,
+                          long cgstPaise, long sgstPaise, long igstPaise, long cessPaise) {
         if (quantityMilli <= 0) {
-            throw new IllegalArgumentException("Quantity must be positive; returns are credit notes");
+            throw new IllegalArgumentException("A returned quantity must be positive");
         }
         if (product.getUnit().isWholeUnitsOnly() && quantityMilli % 1000 != 0) {
-            throw new IllegalArgumentException(product.getUnit() + " is sold in whole units only: " + quantityMilli);
+            throw new IllegalArgumentException(product.getName() + " is returned in whole " + product.getUnit() + " only");
         }
         if (unitPricePaise < 0 || discountPaise < 0 || taxableValuePaise < 0
                 || cgstPaise < 0 || sgstPaise < 0 || igstPaise < 0 || cessPaise < 0) {
-            throw new IllegalArgumentException("Invoice line amounts cannot be negative");
+            throw new IllegalArgumentException("Credit note amounts cannot be negative");
         }
         this.product = product;
-        this.sku = product.getSku();
-        this.productName = product.getName();
-        this.hsnCode = product.getHsnCode();
-        this.unit = product.getUnit();
+        this.originalLineNo = originalLine == null ? null : originalLine.getLineNo();
+        this.sku = originalLine == null ? product.getSku() : originalLine.getSku();
+        this.productName = originalLine == null ? product.getName() : originalLine.getProductName();
+        this.hsnCode = originalLine == null ? product.getHsnCode() : originalLine.getHsnCode();
+        this.unit = originalLine == null ? product.getUnit() : originalLine.getUnit();
         this.quantityMilli = quantityMilli;
         this.unitPricePaise = unitPricePaise;
         this.discountPaise = discountPaise;
@@ -119,55 +123,65 @@ public class InvoiceItem extends BaseEntity implements TaxLine {
         this.lineTotalPaise = taxableValuePaise + cgstPaise + sgstPaise + igstPaise + cessPaise;
     }
 
-    void attachTo(Invoice invoice, int lineNo) {
-        this.invoice = invoice;
+    void attachTo(CreditNote creditNote, int lineNo) {
+        this.creditNote = creditNote;
         this.lineNo = lineNo;
     }
 
-    public Invoice getInvoice() {
-        return invoice;
+    public CreditNote getCreditNote() {
+        return creditNote;
     }
 
+    @Override
     public int getLineNo() {
         return lineNo;
     }
 
+    public Integer getOriginalLineNo() {
+        return originalLineNo;
+    }
+
+    @Override
     public Product getProduct() {
         return product;
     }
 
+    @Override
     public String getSku() {
         return sku;
     }
 
+    @Override
     public String getProductName() {
         return productName;
     }
 
+    @Override
     public String getHsnCode() {
         return hsnCode;
     }
 
+    @Override
     public UnitOfMeasure getUnit() {
         return unit;
     }
 
+    @Override
     public long getQuantityMilli() {
         return quantityMilli;
     }
 
+    @Override
     public long getUnitPricePaise() {
         return unitPricePaise;
     }
 
+    @Override
     public long getDiscountPaise() {
         return discountPaise;
     }
 
-    public long getTaxableValuePaise() {
-        return taxableValuePaise;
-    }
-
+    @Override
     public int getGstRateBp() {
         return gstRateBp;
     }
@@ -176,22 +190,32 @@ public class InvoiceItem extends BaseEntity implements TaxLine {
         return cessRateBp;
     }
 
+    @Override
+    public long getTaxableValuePaise() {
+        return taxableValuePaise;
+    }
+
+    @Override
     public long getCgstPaise() {
         return cgstPaise;
     }
 
+    @Override
     public long getSgstPaise() {
         return sgstPaise;
     }
 
+    @Override
     public long getIgstPaise() {
         return igstPaise;
     }
 
+    @Override
     public long getCessPaise() {
         return cessPaise;
     }
 
+    @Override
     public long getLineTotalPaise() {
         return lineTotalPaise;
     }

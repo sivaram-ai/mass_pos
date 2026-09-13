@@ -120,6 +120,46 @@ public class SaleController {
                 .orElseThrow(() -> new EntityNotFoundException("No invoice " + id)));
     }
 
+    /**
+     * A bill looked up by what a cashier types: its full number, or just its serial on this till.
+     * Declared before {@code /{id}} for readability; Spring matches the literal path first anyway.
+     */
+    @GetMapping("/api/invoices/lookup")
+    @RequiresRole({UserRole.CASHIER, UserRole.MANAGER, UserRole.AUDITOR})
+    public InvoiceView lookup(@RequestParam String number) {
+        return sales.lookup(number);
+    }
+
+    /**
+     * @param refundPaise    to hand back to the customer
+     * @param collectedPaise taken on top of what was already paid
+     */
+    public record EditResponse(InvoiceView invoice, String replacedInvoiceNumber, long previousTotalPaise,
+                               long refundPaise, long collectedPaise, boolean printed, String printError) {
+    }
+
+    /**
+     * Edits today's bill: cancels it and issues the corrected bill in its place, settling only the
+     * difference. A manager's job, like cancelling, since it changes money already taken.
+     */
+    @PostMapping("/api/invoices/{id}/replace")
+    @RequiresRole({UserRole.MANAGER})
+    public EditResponse replace(@PathVariable UUID id, @Valid @RequestBody EditRequest request) {
+        SaleService.Edited edited = sales.replace(id, request);
+        InvoiceView invoice = edited.invoice();
+        String printError = null;
+        if (request.print()) {
+            try {
+                printer.await(receipts.print(invoice.id(), ReceiptCopy.ORIGINAL, request.openDrawer()));
+            } catch (PrinterException e) {
+                log.warn("Edited bill {} was issued but could not be printed: {}", invoice.invoiceNumber(), e.getMessage());
+                printError = e.getMessage();
+            }
+        }
+        return new EditResponse(invoice, edited.replacedInvoiceNumber(), edited.previousTotalPaise(),
+                edited.refundPaise(), edited.collectedPaise(), request.print() && printError == null, printError);
+    }
+
     /** Only a manager may undo a sale, and only by cancelling it: the row is never removed. */
     @PostMapping("/api/invoices/{id}/cancel")
     @RequiresRole({UserRole.MANAGER})
