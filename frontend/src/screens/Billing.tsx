@@ -1,15 +1,15 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { createPortal } from 'react-dom'
 import {
-  api, billDate, clockTime, messageOfFailure, milliFromUnits, paiseFromRupees, percent, quantity, rupees,
-  rupeesForInput,
+  api, clockTime, messageOfFailure, milliFromUnits, paiseFromRupees, percent, quantity, rupees, rupeesForInput,
 } from '../api'
 import type {
-  CartLine, Customer, HeldBill, PaymentMode, Product, QuotedCart, SaleResponse, SettingsView, Tender,
+  CartLine, Customer, HeldBill, Invoice, PaymentMode, Product, QuotedCart, SaleResponse, SettingsView, Tender,
 } from '../types'
 import { WHOLE_UNITS } from '../types'
 import { AskModal, Banner, Button, Empty, Field, inputClass, Modal } from '../components/ui'
-import { actionFor, loadShortcuts, SHORTCUT_LABELS, useShortcuts } from '../shortcuts'
+import { actionFor, loadShortcuts, loadShowShortcuts, SHORTCUT_LABELS, useShortcuts } from '../shortcuts'
 import type { ShortcutAction } from '../shortcuts'
 import type { Toast } from '../App'
 
@@ -60,21 +60,34 @@ function withoutKey(row: Row): CartLine {
   }
 }
 
-function useNow(): Date {
-  const [now, setNow] = useState(() => new Date())
-  useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 1000)
-    return () => clearInterval(timer)
-  }, [])
-  return now
-}
+/** What the screen keeps of the latest bill: enough to show it and reprint it. */
+type LastBill = Pick<Invoice, 'id' | 'invoiceNumber' | 'grandTotalPaise' | 'changePaise'>
+
+const lastBillOf = (invoice: Invoice): LastBill => ({
+  id: invoice.id,
+  invoiceNumber: invoice.invoiceNumber,
+  grandTotalPaise: invoice.grandTotalPaise,
+  changePaise: invoice.changePaise,
+})
 
 /**
  * The counter screen. The bill is a grid: every row's code and name cells look an item up as you
  * type, and its rate, quantity and discount cells take numbers directly, so nothing pops up while
  * billing. Arrow keys move between cells, Enter moves on, Space takes the bill.
+ *
+ * Stays mounted while other screens are open (`active` false), so the bill on screen and the last
+ * bill are still there on return. Its keys work only while it is active and nothing covers it.
+ *
+ * @param blocked    the menu is open over the screen
+ * @param headerSlot where the bill type, customer and last bill are shown, in the app header
  */
-export default function Billing({ settings, onToast }: { settings: SettingsView | null; onToast: Toast }) {
+export default function Billing({ settings, onToast, active, blocked, headerSlot }: {
+  settings: SettingsView | null
+  onToast: Toast
+  active: boolean
+  blocked: boolean
+  headerSlot: HTMLElement | null
+}) {
   const [lines, setLines] = useState<Row[]>([])
   const [customer, setCustomer] = useState<Customer>(NO_CUSTOMER)
   const [quote, setQuote] = useState<QuotedCart | null>(null)
@@ -89,12 +102,12 @@ export default function Billing({ settings, onToast }: { settings: SettingsView 
   const [holds, setHolds] = useState<HeldBill[] | null>(null)
   const [editingCustomer, setEditingCustomer] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
-  const [lastSale, setLastSale] = useState<SaleResponse | null>(null)
+  const [lastBill, setLastBill] = useState<LastBill | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [shortcuts, setShortcuts] = useState(loadShortcuts)
+  const [showShortcuts, setShowShortcuts] = useState(loadShowShortcuts)
 
-  const shortcuts = useMemo(loadShortcuts, [])
-  const now = useNow()
   const cells = useRef(new Map<string, HTMLInputElement>())
   const listItems = useRef(new Map<number, HTMLTableRowElement>())
   const nextKey = useRef(1)
@@ -110,12 +123,14 @@ export default function Billing({ settings, onToast }: { settings: SettingsView 
   const gst = settings?.gstRegistered ?? true
   const notReady = Boolean(settings && !settings.readyToInvoice)
   const modalOpen = ask !== null || payment !== null || holds !== null || editingCustomer || confirmClear
+  /** In front and uncovered by the menu: the only time the bill's keys may act. */
+  const inFront = active && !blocked
   const blankRow = lines.length
 
   const inSearchCell = isSearchCol(edit.col)
   const typed = edit.dirty ? edit.text.trim() : ''
   const listFresh = found !== null && found.row === edit.row && found.col === edit.col && found.text === typed
-  const listOpen = dropdownOpen && inSearchCell && listFresh
+  const listOpen = inFront && dropdownOpen && inSearchCell && listFresh
 
   // ---- Server pricing: the screen never computes tax itself -------------------------------------
   useEffect(() => {
@@ -171,9 +186,24 @@ export default function Billing({ settings, onToast }: { settings: SettingsView 
     input?.select()
   }, [focusRequest])
 
+  // Back in front (first open, back from another screen, menu closed): pick up any shortcut
+  // changes made in Settings and put the cursor back where it was.
   useEffect(() => {
-    requestFocus(0, 'code')
-  }, [requestFocus])
+    if (!inFront) {
+      return
+    }
+    setShortcuts(loadShortcuts())
+    setShowShortcuts(loadShowShortcuts())
+    const { row, col } = editRef.current
+    requestFocus(Math.min(row, linesRef.current.length), col)
+  }, [inFront, requestFocus])
+
+  // The till's last bill, so it can be seen and reprinted after a restart or a new sign-in.
+  useEffect(() => {
+    api.get<Invoice | undefined>('/api/invoices/last')
+      .then((invoice) => invoice && setLastBill((current) => current ?? lastBillOf(invoice)))
+      .catch(() => undefined)
+  }, [])
 
   // Keep the highlighted item of the lookup list in view.
   useEffect(() => {
@@ -407,7 +437,7 @@ export default function Billing({ settings, onToast }: { settings: SettingsView 
       print: true,
       openDrawer: tenders.some((tender) => tender.mode === 'CASH'),
     })
-    setLastSale(sale)
+    setLastBill(lastBillOf(sale.invoice))
     clearBill()
     setError(null)
     onToast(sale.printed
@@ -473,13 +503,13 @@ export default function Billing({ settings, onToast }: { settings: SettingsView 
   }
 
   const reprintLast = async () => {
-    if (!lastSale) {
+    if (!lastBill) {
       onToast({ tone: 'warn', text: 'No bill taken on this till yet' })
       return
     }
     try {
-      await api.post(`/api/invoices/${lastSale.invoice.id}/receipt`, { copy: 'DUPLICATE', openDrawer: false })
-      onToast({ tone: 'good', text: `Reprinted ${lastSale.invoice.invoiceNumber} as a duplicate` })
+      await api.post(`/api/invoices/${lastBill.id}/receipt`, { copy: 'DUPLICATE', openDrawer: false })
+      onToast({ tone: 'good', text: `Reprinted ${lastBill.invoiceNumber} as a duplicate` })
     } catch (failure) {
       onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not reprint') })
     }
@@ -500,16 +530,48 @@ export default function Billing({ settings, onToast }: { settings: SettingsView 
     }
   }
 
+  const holdCurrent = (label: string) => api.post<HeldBill>('/api/holds', {
+    label: label.trim() || `Bill ${clockTime(new Date())}`,
+    cart: { lines: linesRef.current.map(withoutKey), customer },
+    estimatedTotalPaise: quote?.grandTotalPaise ?? 0,
+  })
+
+  /** Puts a held bill back on screen. A bill already on screen is held first, never thrown away. */
   const resumeHold = async (held: HeldBill) => {
     try {
+      const swapped = linesRef.current.length > 0 ? await holdCurrent('') : null
       const resumed = await api.delete<HeldBill>(`/api/holds/${held.id}`)
       replaceLines((resumed.cart.lines ?? []).map((line) => ({ ...line, key: nextKey.current++ })))
       setCustomer(resumed.cart.customer ?? NO_CUSTOMER)
+      setInvalid(null)
+      setError(null)
       setHolds(null)
       requestFocus(resumed.cart.lines?.length ?? 0, 'code')
+      onToast({
+        tone: 'good',
+        text: swapped
+          ? `Resumed ${held.label}. The bill that was on screen is held as ${swapped.label}`
+          : `Resumed ${held.label}`,
+      })
     } catch (failure) {
       onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not resume that bill') })
     }
+  }
+
+  /** Throws a held bill away. It was never a sale, so nothing is cancelled or put back in stock. */
+  const deleteHold = async (held: HeldBill) => {
+    try {
+      await api.delete<HeldBill>(`/api/holds/${held.id}`)
+      setHolds((current) => current?.filter((other) => other.id !== held.id) ?? null)
+      onToast({ tone: 'good', text: `Deleted held bill ${held.label}` })
+    } catch (failure) {
+      onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not delete that held bill') })
+    }
+  }
+
+  const closeHolds = () => {
+    setHolds(null)
+    requestFocus(linesRef.current.length, 'code')
   }
 
   const runAsk = async (value: string) => {
@@ -517,11 +579,7 @@ export default function Billing({ settings, onToast }: { settings: SettingsView 
     setAsk(null)
     if (pending?.action === 'hold') {
       try {
-        await api.post('/api/holds', {
-          label: value.trim() || `Bill ${clockTime(new Date())}`,
-          cart: { lines: linesRef.current.map(withoutKey), customer },
-          estimatedTotalPaise: quote?.grandTotalPaise ?? 0,
-        })
+        await holdCurrent(value)
         clearBill()
         onToast({ tone: 'good', text: 'Bill held. Resume it with ' + shortcuts.resumeBill })
       } catch (failure) {
@@ -538,11 +596,19 @@ export default function Billing({ settings, onToast }: { settings: SettingsView 
     requestFocus(linesRef.current.length, 'code')
   }
 
-  useShortcuts(shortcuts, {
+  const handlers: Record<ShortcutAction, () => void> = {
     takeBill: () => void takeBill(),
     focusSearch: () => move(linesRef.current.length, 'code'),
-    setQuantity: () => linesRef.current[edit.row] && move(edit.row, 'qty'),
-    setDiscount: () => linesRef.current[edit.row] && move(edit.row, 'disc'),
+    setQuantity: () => {
+      if (linesRef.current[edit.row]) {
+        move(edit.row, 'qty')
+      }
+    },
+    setDiscount: () => {
+      if (linesRef.current[edit.row]) {
+        move(edit.row, 'disc')
+      }
+    },
     removeLine: () => removeRow(edit.row),
     holdBill: askHold,
     resumeBill: () => void openHolds(),
@@ -550,8 +616,13 @@ export default function Billing({ settings, onToast }: { settings: SettingsView 
     takePayment: () => void openPayment(),
     reprintLast: () => void reprintLast(),
     customer: () => setEditingCustomer(true),
-    clearBill: () => linesRef.current.length > 0 && setConfirmClear(true),
-  }, !modalOpen)
+    clearBill: () => {
+      if (linesRef.current.length > 0) {
+        setConfirmClear(true)
+      }
+    },
+  }
+  useShortcuts(shortcuts, handlers, inFront && !modalOpen)
 
   // ---- Grid keyboard -------------------------------------------------------------------------------
   const onCellKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>, row: number, col: Col) => {
@@ -742,7 +813,39 @@ export default function Billing({ settings, onToast }: { settings: SettingsView 
   const anchorInput = listOpen ? cells.current.get(cellId(edit.row, edit.col)) : undefined
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      {/* Bill type, customer and last bill ride in the app header, leaving the height to the bill. */}
+      {active && headerSlot && createPortal(
+        <>
+          <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+            gst ? 'bg-sky-500/20 text-sky-200' : 'bg-slate-700 text-slate-200'}`}>
+            {gst ? 'GST tax invoice' : 'Bill without GST'}
+          </span>
+          <button
+            type="button"
+            tabIndex={-1}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => setEditingCustomer(true)}
+            className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-slate-800"
+          >
+            <span className="text-slate-400">Customer</span>
+            <span className="truncate font-medium text-white">{customer.name || 'Walk-in'}</span>
+            {customer.gstin && <span className="num hidden text-xs text-slate-400 xl:inline">{customer.gstin}</span>}
+            <kbd>{shortcuts.customer}</kbd>
+          </button>
+          <div className="ml-auto flex items-center gap-4 text-sm text-slate-400">
+            <span>Last bill <span className="num font-medium text-white">{lastBill?.invoiceNumber ?? '—'}</span></span>
+            <span className="hidden lg:inline">
+              Last amount <span className="num font-medium text-white">{lastBill ? rupees(lastBill.grandTotalPaise) : '—'}</span>
+              {lastBill && lastBill.changePaise > 0 && (
+                <span className="num ml-2 text-emerald-300">change {rupees(lastBill.changePaise)}</span>
+              )}
+            </span>
+          </div>
+        </>,
+        headerSlot,
+      )}
+
       {notReady && (
         <Banner tone="warn">
           Billing is blocked until the shop's {settings?.missingForInvoicing.join(', ')} are filled in on the
@@ -751,39 +854,9 @@ export default function Billing({ settings, onToast }: { settings: SettingsView 
       )}
       {error && <Banner tone="bad" onDismiss={() => setError(null)}>{error}</Banner>}
 
-      {/* Date, running clock, bill type and customer */}
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-slate-200 bg-white px-4 py-2 shadow-sm">
-        <div className="flex items-baseline gap-3">
-          <span className="num text-lg font-semibold text-slate-800">{billDate(now)}</span>
-          <span className="num rounded-md bg-slate-900 px-2.5 py-1 font-mono text-lg font-semibold tracking-wide text-emerald-300">
-            {clockTime(now)}
-          </span>
-        </div>
-        <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
-          gst ? 'bg-sky-100 text-sky-800' : 'bg-slate-200 text-slate-700'}`}>
-          {gst ? 'GST tax invoice' : 'Bill without GST'}
-        </span>
-        <button
-          type="button"
-          tabIndex={-1}
-          onClick={() => setEditingCustomer(true)}
-          className="flex items-center gap-2 rounded-md px-2 py-1 text-sm text-slate-600 hover:bg-slate-100"
-        >
-          <span className="text-slate-400">Customer</span>
-          <span className="font-medium text-slate-800">{customer.name || 'Walk-in'}</span>
-          {customer.gstin && <span className="num text-xs text-slate-500">{customer.gstin}</span>}
-          <kbd>{shortcuts.customer}</kbd>
-        </button>
-        <div className="ml-auto flex items-center gap-4 text-sm text-slate-500">
-          <span>Last bill <span className="num font-medium text-slate-800">{lastSale?.invoice.invoiceNumber ?? '—'}</span></span>
-          <span>Last amount <span className="num font-medium text-slate-800">
-            {lastSale ? rupees(lastSale.invoice.grandTotalPaise) : '—'}</span></span>
-        </div>
-      </div>
-
       {/* The bill */}
       <section className="min-h-64 flex-1 overflow-auto rounded-lg border border-slate-200 bg-white shadow-sm">
-        <table className="w-full table-fixed border-collapse text-sm">
+        <table className="w-full min-w-[46rem] table-fixed border-collapse text-sm">
           <colgroup>
             <col className="w-12" />
             <col className="w-10" />
@@ -865,7 +938,8 @@ export default function Billing({ settings, onToast }: { settings: SettingsView 
         </table>
         {lines.length === 0 && (
           <p className="px-4 py-6 text-center text-sm text-slate-400">
-            Type an item code or name in the green row. <kbd>↓</kbd> lists every item.
+            Type an item code or name in the green row and press <kbd>Enter</kbd>. <kbd>↓</kbd> in an empty
+            cell lists every item; <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move between cells.
           </p>
         )}
       </section>
@@ -881,74 +955,68 @@ export default function Billing({ settings, onToast }: { settings: SettingsView 
         />
       )}
 
-      {/* Shortcuts · bill actions · total */}
-      <div className="grid shrink-0 gap-3 lg:grid-cols-[1.3fr_1fr_1.1fr]">
-        <section className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
-          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Shortcuts</h2>
-          <ul className="grid grid-cols-2 gap-x-5 gap-y-1 text-xs text-slate-600">
-            {(Object.keys(SHORTCUT_LABELS) as ShortcutAction[]).map((action) => (
-              <li key={action} className="flex items-center justify-between gap-2">
-                <span className="truncate">{SHORTCUT_LABELS[action]}</span>
-                <kbd>{shortcuts[action]}</kbd>
-              </li>
-            ))}
-            <li className="flex items-center justify-between gap-2">
-              <span>Move between cells</span><kbd>← → ↑ ↓</kbd>
-            </li>
-            <li className="flex items-center justify-between gap-2">
-              <span>Pick item / next cell</span><kbd>Enter</kbd>
-            </li>
-          </ul>
-        </section>
+      {/* Shortcut list (clickable) · items and quantity · total · take bill */}
+      <div className="flex shrink-0 flex-wrap items-stretch gap-2">
+        {showShortcuts && (
+          <section className="min-w-[18rem] flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm">
+            <ul className="grid grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] gap-x-2 text-xs text-slate-600">
+              {(Object.keys(SHORTCUT_LABELS) as ShortcutAction[]).map((action) => (
+                <li key={action}>
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    // Keeps the cursor in its cell, so a click works like the key.
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={handlers[action]}
+                    className="flex w-full items-center justify-between gap-2 rounded px-1.5 py-0.5 text-left hover:bg-sky-50 hover:text-sky-800"
+                  >
+                    <span className="truncate">{SHORTCUT_LABELS[action]}</span>
+                    <kbd>{shortcuts[action]}</kbd>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
-        <section className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Bill</h2>
-          <div className="grid flex-1 grid-cols-2 gap-2">
-            <ActionButton label="Hold" hint={shortcuts.holdBill} disabled={lines.length === 0} onClick={askHold} />
-            <ActionButton label="Resume" hint={shortcuts.resumeBill} onClick={() => void openHolds()} />
-            <ActionButton label="Reprint" hint={shortcuts.reprintLast} disabled={!lastSale} onClick={() => void reprintLast()} />
-            <ActionButton label="Clear" hint={shortcuts.clearBill} tone="danger" disabled={lines.length === 0}
-                          onClick={() => setConfirmClear(true)} />
-          </div>
-          {lastSale && lastSale.invoice.changePaise > 0 && (
-            <p className="num text-sm text-emerald-700">
-              Change to give on {lastSale.invoice.invoiceNumber}: {rupees(lastSale.invoice.changePaise)}
-            </p>
-          )}
-        </section>
-
-        <section className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
-          <div className="flex items-baseline justify-between text-sm text-slate-500">
-            <span>Items <span className="num font-semibold text-slate-800">{lines.length}</span></span>
-            <span>Qty <span className="num font-semibold text-slate-800">{quantity(totalQuantity)}</span></span>
-          </div>
-          {gst && quote && (
-            <div className="num flex flex-wrap justify-between gap-x-3 text-xs text-slate-500">
-              <span>Taxable {rupees(quote.taxableValuePaise)}</span>
-              {quote.interState
-                ? <span>IGST {rupees(quote.igstPaise)}</span>
-                : <span>CGST {rupees(quote.cgstPaise)} · SGST {rupees(quote.sgstPaise)}</span>}
-              {!!quote.cessPaise && <span>Cess {rupees(quote.cessPaise)}</span>}
+        <section className={`flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-1.5 shadow-sm ${
+          showShortcuts ? 'w-[34rem] max-w-full' : 'ml-auto w-full max-w-[40rem]'}`}>
+          <dl className="grid shrink-0 grid-cols-[auto_auto] gap-x-2 text-sm leading-6">
+            <dt className="text-slate-500">Items</dt>
+            <dd className="num text-right font-semibold text-slate-800">{lines.length}</dd>
+            <dt className="text-slate-500">Qty</dt>
+            <dd className="num text-right font-semibold text-slate-800">{quantity(totalQuantity)}</dd>
+          </dl>
+          <div className="min-w-0 flex-1 rounded-md bg-slate-900 px-3 py-1 text-white">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-sm text-slate-300">Total</span>
+              <span className="num text-3xl font-bold leading-tight">{rupees(quote?.grandTotalPaise ?? 0)}</span>
             </div>
-          )}
-          <div className="flex items-baseline justify-between rounded-md bg-slate-900 px-4 py-2 text-white">
-            <span className="text-sm text-slate-300">
-              Total{quote?.roundOffPaise ? <span className="num ml-2 text-xs">(round off {rupees(quote.roundOffPaise)})</span> : null}
-            </span>
-            <span className="num text-3xl font-bold">{rupees(quote?.grandTotalPaise ?? 0)}</span>
+            <div className="num flex justify-end gap-x-2 truncate text-[11px] leading-4 text-slate-400">
+              {gst && quote && (
+                <>
+                  <span>Taxable {rupees(quote.taxableValuePaise)}</span>
+                  {quote.interState
+                    ? <span>IGST {rupees(quote.igstPaise)}</span>
+                    : <span>CGST {rupees(quote.cgstPaise)} · SGST {rupees(quote.sgstPaise)}</span>}
+                  {!!quote.cessPaise && <span>Cess {rupees(quote.cessPaise)}</span>}
+                </>
+              )}
+              {!!quote?.roundOffPaise && <span>Round off {rupees(quote.roundOffPaise)}</span>}
+            </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex w-36 shrink-0 flex-col gap-1">
             <Button
               tone="primary"
-              className="flex-[2] justify-center py-3 text-base"
+              className="justify-between py-1.5"
               hint={shortcuts.takeBill}
               disabled={lines.length === 0 || notReady || saving}
               onClick={() => void takeBill()}
             >
-              {saving ? 'Taking bill…' : 'Take bill'}
+              {saving ? 'Taking…' : 'Take bill'}
             </Button>
             <Button
-              className="flex-1 justify-center"
+              className="justify-between py-1"
               hint={shortcuts.takePayment}
               disabled={lines.length === 0 || notReady || saving}
               onClick={() => void openPayment()}
@@ -1000,28 +1068,7 @@ export default function Billing({ settings, onToast }: { settings: SettingsView 
       )}
 
       {holds !== null && (
-        <Modal title="Held bills" onClose={() => { setHolds(null); requestFocus(linesRef.current.length, 'code') }} wide>
-          {holds.length === 0 ? (
-            <Empty>No bills are held on this till</Empty>
-          ) : (
-            <ul className="divide-y divide-slate-100">
-              {holds.map((held) => (
-                <li key={held.id} className="flex items-center justify-between gap-4 py-2">
-                  <div>
-                    <div className="font-medium text-slate-800">{held.label}</div>
-                    <div className="text-xs text-slate-400">
-                      {held.cashier} · {new Date(held.heldAt).toLocaleTimeString()} · {held.cart.lines?.length ?? 0} items
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="num text-slate-600">{rupees(held.estimatedTotalPaise)}</span>
-                    <Button tone="primary" onClick={() => void resumeHold(held)}>Resume</Button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Modal>
+        <HeldBillsDialog holds={holds} onClose={closeHolds} onResume={resumeHold} onDelete={deleteHold} />
       )}
     </div>
   )
@@ -1112,27 +1159,126 @@ function LookupList({ anchor, found, highlight, itemRefs, onHover, onPick }: {
   )
 }
 
-function ActionButton({ label, hint, onClick, disabled, tone = 'default' }: {
-  label: string
-  hint: string
-  onClick: () => void
-  disabled?: boolean
-  tone?: 'default' | 'danger'
+/**
+ * Held bills of this till. Up and down pick one, Enter resumes it, Delete throws it away. Takes the
+ * focus when it opens, so those keys never reach the bill behind it.
+ */
+function HeldBillsDialog({ holds, onClose, onResume, onDelete }: {
+  holds: HeldBill[]
+  onClose: () => void
+  onResume: (held: HeldBill) => Promise<void>
+  onDelete: (held: HeldBill) => Promise<void>
 }) {
+  const [highlight, setHighlight] = useState(0)
+  const list = useRef<HTMLUListElement>(null)
+  const rows = useRef(new Map<number, HTMLLIElement>())
+  const working = useRef(false)
+  const at = Math.min(highlight, Math.max(holds.length - 1, 0))
+
+  useEffect(() => {
+    list.current?.focus()
+  }, [])
+
+  useEffect(() => {
+    rows.current.get(at)?.scrollIntoView({ block: 'nearest' })
+  }, [at])
+
+  const run = async (action: (held: HeldBill) => Promise<void>, held: HeldBill | undefined) => {
+    if (!held || working.current) {
+      return
+    }
+    working.current = true
+    try {
+      await action(held)
+    } finally {
+      working.current = false
+      list.current?.focus()
+    }
+  }
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        setHighlight(Math.min(at + 1, holds.length - 1))
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        setHighlight(Math.max(at - 1, 0))
+      } else if (event.key === 'Enter') {
+        event.preventDefault()
+        if (!event.repeat) {
+          void run(onResume, holds[at])
+        }
+      } else if (event.key === 'Delete') {
+        event.preventDefault()
+        if (!event.repeat) {
+          void run(onDelete, holds[at])
+        }
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
   return (
-    <button
-      type="button"
-      tabIndex={-1}
-      onClick={onClick}
-      disabled={disabled}
-      className={`flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm font-medium transition
-        disabled:cursor-not-allowed disabled:opacity-40 ${tone === 'danger'
-          ? 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100'
-          : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
-    >
-      {label}
-      <kbd>{hint}</kbd>
-    </button>
+    <Modal title="Held bills" onClose={onClose} wide>
+      {holds.length === 0 ? (
+        <Empty>No bills are held on this till</Empty>
+      ) : (
+        <>
+          <ul ref={list} tabIndex={-1} className="max-h-[60vh] divide-y divide-slate-100 overflow-auto outline-none">
+            {holds.map((held, index) => (
+              <li
+                key={held.id}
+                ref={(element) => {
+                  if (element) {
+                    rows.current.set(index, element)
+                  } else {
+                    rows.current.delete(index)
+                  }
+                }}
+                onMouseEnter={() => setHighlight(index)}
+                className={`flex items-center justify-between gap-4 rounded-md px-3 py-2 ${
+                  index === at ? 'bg-sky-600 text-white' : ''}`}
+              >
+                <div className="min-w-0">
+                  <div className="truncate font-medium">{held.label}</div>
+                  <div className={`text-xs ${index === at ? 'text-sky-100' : 'text-slate-400'}`}>
+                    {held.cashier} · {new Date(held.heldAt).toLocaleTimeString()} · {held.cart.lines?.length ?? 0}
+                    {held.cart.lines?.length === 1 ? ' item' : ' items'}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className="num mr-2">{rupees(held.estimatedTotalPaise)}</span>
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => void run(onResume, held)}
+                    className={`rounded-md px-3 py-1.5 text-sm font-medium ${
+                      index === at ? 'bg-white text-sky-700' : 'bg-sky-600 text-white hover:bg-sky-500'}`}
+                  >
+                    Resume
+                  </button>
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    aria-label={`Delete held bill ${held.label}`}
+                    title="Delete (Delete key)"
+                    onClick={() => void run(onDelete, held)}
+                    className={`rounded-md p-1.5 ${index === at ? 'text-white hover:bg-sky-500' : 'text-rose-500 hover:bg-rose-50'}`}
+                  >
+                    <TrashIcon />
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-xs text-slate-400">
+            <kbd>↑</kbd> <kbd>↓</kbd> choose · <kbd>Enter</kbd> resume · <kbd>Delete</kbd> delete · <kbd>Esc</kbd> close
+          </p>
+        </>
+      )}
+    </Modal>
   )
 }
 

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { api, saveToken, savedToken } from './api'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { api, billDate, clockTime, saveToken, savedToken } from './api'
 import type { Principal, Role, SettingsView } from './types'
 import { Login, ChangePin } from './screens/Login'
 import Billing from './screens/Billing'
@@ -29,7 +29,10 @@ export default function App() {
   const [settings, setSettings] = useState<SettingsView | null>(null)
   const [screen, setScreen] = useState<Screen>('billing')
   const [booting, setBooting] = useState(true)
+  const [menuOpen, setMenuOpen] = useState(false)
   const [toast, setToast] = useState<{ tone: 'good' | 'bad' | 'warn'; text: string } | null>(null)
+  // The billing screen puts its bill details into the header through this slot.
+  const [headerSlot, setHeaderSlot] = useState<HTMLDivElement | null>(null)
 
   const refreshSettings = useCallback(() => {
     api.get<SettingsView>('/api/settings').then(setSettings).catch(() => setSettings(null))
@@ -61,6 +64,7 @@ export default function App() {
   }, [toast])
 
   const signOut = async () => {
+    setMenuOpen(false)
     try {
       await api.post('/api/auth/logout')
     } finally {
@@ -83,48 +87,74 @@ export default function App() {
 
   const allowed = SCREENS.filter((item) => user.role === 'ADMIN' || item.roles.includes(user.role))
   const current = allowed.some((item) => item.id === screen) ? screen : allowed[0]?.id ?? 'settings'
+  const canBill = allowed.some((item) => item.id === 'billing')
+  const shopName = settings?.shop.tradeName || settings?.shop.legalName || 'Mass POS'
 
   return (
     <div className="flex h-screen flex-col">
-      <header className="flex items-center gap-4 bg-slate-900 px-4 py-2 text-slate-100">
-        <div className="flex items-baseline gap-2">
-          <span className="text-base font-semibold">{settings?.shop.tradeName || settings?.shop.legalName || 'Mass POS'}</span>
-          <span className="text-xs text-slate-400">
-            {settings?.thisTerminal.name} ({settings?.thisTerminal.code})
-            {settings?.thisTerminal.section ? ` · ${settings.thisTerminal.section}` : ''}
-          </span>
+      <header className="flex h-12 shrink-0 items-center gap-4 overflow-hidden whitespace-nowrap bg-slate-900 px-3 text-slate-100">
+        <button
+          type="button"
+          onClick={() => setMenuOpen(true)}
+          aria-label="Open menu"
+          aria-expanded={menuOpen}
+          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-slate-800"
+        >
+          <MenuIcon />
+          Menu
+        </button>
+        <div className="flex min-w-0 items-baseline gap-2">
+          <span className="truncate text-base font-semibold">{shopName}</span>
+          {settings && (
+            <span className="text-xs text-slate-400">
+              {settings.thisTerminal.name} ({settings.thisTerminal.code})
+              {settings.thisTerminal.section ? ` · ${settings.thisTerminal.section}` : ''}
+            </span>
+          )}
         </div>
-        <nav className="flex flex-1 items-center gap-1">
-          {allowed.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setScreen(item.id)}
-              className={`rounded px-3 py-1.5 text-sm transition ${
-                current === item.id ? 'bg-slate-700 font-medium text-white' : 'text-slate-300 hover:bg-slate-800'
-              }`}
-            >
-              {item.label}
-            </button>
-          ))}
-        </nav>
-        <div className="flex items-center gap-3 text-sm">
-          <span className="text-slate-300">
-            {user.displayName} <span className="text-xs text-slate-500">{user.role.toLowerCase()}</span>
+        <Clock />
+        <div ref={setHeaderSlot} className="flex min-w-0 flex-1 items-center gap-4" />
+        {current !== 'billing' && (
+          <span className="ml-auto text-sm font-medium text-slate-300">
+            {allowed.find((item) => item.id === current)?.label}
           </span>
-          <button onClick={signOut} className="rounded border border-slate-600 px-3 py-1 text-xs hover:bg-slate-800">
-            Log out
-          </button>
-        </div>
+        )}
       </header>
 
+      <MenuDrawer
+        open={menuOpen}
+        shopName={shopName}
+        user={user}
+        items={allowed}
+        current={current}
+        onPick={(id) => {
+          setScreen(id)
+          setMenuOpen(false)
+        }}
+        onClose={() => setMenuOpen(false)}
+        onSignOut={signOut}
+      />
+
       {toast && (
-        <div className="px-4 pt-3">
+        <div className="fixed right-4 top-14 z-40 w-[28rem] max-w-[calc(100vw-2rem)] shadow-lg">
           <Banner tone={toast.tone} onDismiss={() => setToast(null)}>{toast.text}</Banner>
         </div>
       )}
 
-      <main className="flex-1 overflow-auto p-4">
-        {current === 'billing' && <Billing settings={settings} onToast={setToast} />}
+      <main className="min-h-0 flex-1 overflow-auto p-3">
+        {/* Billing stays mounted while other screens are open, so the bill on screen and the last
+            bill survive a look at Bills or Products. */}
+        {canBill && (
+          <div hidden={current !== 'billing'} className="h-full">
+            <Billing
+              settings={settings}
+              onToast={setToast}
+              active={current === 'billing'}
+              blocked={menuOpen}
+              headerSlot={headerSlot}
+            />
+          </div>
+        )}
         {current === 'invoices' && <Invoices role={user.role} onToast={setToast} />}
         {current === 'products' && <Products onToast={setToast} />}
         {current === 'stock' && <Stock onToast={setToast} />}
@@ -143,6 +173,122 @@ export default function App() {
         )}
       </main>
     </div>
+  )
+}
+
+/** Its own component, so the once-a-second tick re-renders only the clock, not the bill. */
+function Clock() {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+  return (
+    <div className="flex items-center gap-2">
+      <span className="num text-sm font-medium text-slate-200">{billDate(now)}</span>
+      <span className="num rounded bg-slate-800 px-2 py-0.5 font-mono text-sm font-semibold text-emerald-300">
+        {clockTime(now)}
+      </span>
+    </div>
+  )
+}
+
+/** The screens, the signed-in user and Log out, sliding in from the left. */
+function MenuDrawer({ open, shopName, user, items, current, onPick, onClose, onSignOut }: {
+  open: boolean
+  shopName: string
+  user: Principal
+  items: { id: Screen; label: string }[]
+  current: Screen
+  onPick: (screen: Screen) => void
+  onClose: () => void
+  onSignOut: () => void
+}) {
+  const panel = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+    // Focus leaves the bill, so keys typed now drive the menu and never reach a bill cell.
+    panel.current?.querySelector<HTMLButtonElement>('[data-current="true"]')?.focus()
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation()
+        onClose()
+        return
+      }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        const buttons = [...(panel.current?.querySelectorAll<HTMLButtonElement>('button[data-menu-item]') ?? [])]
+        const at = buttons.indexOf(document.activeElement as HTMLButtonElement)
+        const next = event.key === 'ArrowDown' ? Math.min(at + 1, buttons.length - 1) : Math.max(at - 1, 0)
+        buttons[next]?.focus()
+        event.preventDefault()
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [open, onClose])
+
+  return (
+    <div className={`fixed inset-0 z-50 ${open ? '' : 'pointer-events-none'}`} aria-hidden={!open}>
+      <div
+        className={`absolute inset-0 bg-slate-900/50 transition-opacity duration-200 ${open ? 'opacity-100' : 'opacity-0'}`}
+        onMouseDown={onClose}
+      />
+      <nav
+        ref={panel}
+        inert={!open}
+        className={`absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col bg-slate-900 text-slate-100 shadow-2xl transition-transform duration-200 ${
+          open ? 'translate-x-0' : '-translate-x-full'}`}
+      >
+        <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+          <div className="min-w-0">
+            <div className="truncate font-semibold">{shopName}</div>
+            <div className="truncate text-xs text-slate-400">
+              {user.displayName} · {user.role.toLowerCase()}
+            </div>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close menu"
+                  className="rounded p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white">✕</button>
+        </div>
+        <ul className="flex-1 space-y-1 overflow-auto p-2">
+          {items.map((item) => (
+            <li key={item.id}>
+              <button
+                type="button"
+                data-menu-item
+                data-current={item.id === current}
+                onClick={() => onPick(item.id)}
+                className={`w-full rounded-md px-3 py-2.5 text-left text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-sky-400 ${
+                  item.id === current ? 'bg-slate-700 font-medium text-white' : 'text-slate-300 hover:bg-slate-800'}`}
+              >
+                {item.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+        <div className="border-t border-slate-800 p-2">
+          <button
+            type="button"
+            data-menu-item
+            onClick={onSignOut}
+            className="w-full rounded-md px-3 py-2.5 text-left text-sm text-rose-300 outline-none hover:bg-slate-800 focus-visible:ring-2 focus-visible:ring-sky-400"
+          >
+            Log out
+          </button>
+        </div>
+      </nav>
+    </div>
+  )
+}
+
+function MenuIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5" aria-hidden="true">
+      <path fillRule="evenodd" clipRule="evenodd"
+            d="M2 4.75A.75.75 0 0 1 2.75 4h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 4.75ZM2 10a.75.75 0 0 1 .75-.75h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 10Zm0 5.25a.75.75 0 0 1 .75-.75h14.5a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1-.75-.75Z" />
+    </svg>
   )
 }
 

@@ -126,6 +126,17 @@ class SaleApiIntegrationTest {
     }
 
     @Test
+    void theTillRemembersItsLastBillForAReprint() throws Exception {
+        String productId = newProductWithStock(10_000);
+        String invoiceNumber = sellOne(productId);
+
+        mvc.perform(authed(get("/api/invoices/last"), cashierToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.invoiceNumber").value(invoiceNumber))
+                .andExpect(jsonPath("$.grandTotalPaise").value(10_000));
+    }
+
+    @Test
     void splitPaymentsMustAddUpToTheBill() throws Exception {
         String productId = newProductWithStock(10_000);
 

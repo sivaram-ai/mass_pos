@@ -27,7 +27,8 @@ function labelOf(field: string): string {
   return index === undefined ? label : `${label} line ${Number(index) + 1}`
 }
 import {
-  ASSIGNABLE_KEYS, DEFAULT_SHORTCUTS, loadShortcuts, saveShortcuts, SHORTCUT_LABELS,
+  ASSIGNABLE_KEYS, DEFAULT_SHORTCUTS, loadShortcuts, loadShowShortcuts, saveShortcuts, saveShowShortcuts,
+  SHORTCUT_LABELS,
 } from '../shortcuts'
 import type { ShortcutAction } from '../shortcuts'
 import type { Toast } from '../App'
@@ -41,6 +42,7 @@ export default function Settings({ role, settings, onSaved, onToast }: {
   const canEdit = role === 'ADMIN'
   const [form, setForm] = useState<ShopSettingsForm | null>(settings?.shop ?? null)
   const [shortcuts, setShortcuts] = useState(loadShortcuts)
+  const [showShortcuts, setShowShortcuts] = useState(loadShowShortcuts)
   const [printer, setPrinter] = useState<PrinterStatus | null>(null)
   const [printerError, setPrinterError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -250,6 +252,17 @@ export default function Settings({ role, settings, onSaved, onToast }: {
         }}>Reset</Button>
       }>
         <p className="mb-3 text-xs text-slate-400">Saved on this machine, for whoever bills at this counter.</p>
+        <label className="mb-3 flex items-center gap-2 text-sm text-slate-600">
+          <input
+            type="checkbox"
+            checked={showShortcuts}
+            onChange={(event) => {
+              setShowShortcuts(event.target.checked)
+              saveShowShortcuts(event.target.checked)
+            }}
+          />
+          Show the shortcut list at the bottom of the billing screen
+        </label>
         <div className="grid gap-2 md:grid-cols-2">
           {(Object.keys(SHORTCUT_LABELS) as ShortcutAction[]).map((action) => (
             <label key={action} className="flex items-center justify-between gap-2 text-sm">

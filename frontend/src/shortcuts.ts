@@ -72,6 +72,25 @@ export function saveShortcuts(shortcuts: Record<ShortcutAction, string>) {
   }
 }
 
+const SHOW_LIST_KEY = 'masspos.showShortcuts'
+
+/** Whether the billing screen lists the shortcuts in its footer. On unless turned off in Settings. */
+export function loadShowShortcuts(): boolean {
+  try {
+    return localStorage.getItem(SHOW_LIST_KEY) !== 'false'
+  } catch {
+    return true
+  }
+}
+
+export function saveShowShortcuts(show: boolean) {
+  try {
+    localStorage.setItem(SHOW_LIST_KEY, String(show))
+  } catch {
+    // Not fatal: the list shows by default.
+  }
+}
+
 /** The name a key is stored under: the space bar reports " ", which reads badly on screen. */
 export function keyName(event: { key: string }): string {
   return event.key === ' ' ? 'Space' : event.key

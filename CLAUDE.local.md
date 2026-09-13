@@ -15,7 +15,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3C | React UI: login, billing with configurable shortcuts, products, stock, bills, reports, staff, settings | Done: driven end to end in the browser |
 | 3D | Reports: day takings, GST rate-wise + HSN (GSTR-1 prep), audit-trail viewer | Done |
 | 3E | Shop settings moved into the database (`shop_settings`), editable on screen, seeded once from `pos.company.*` | Done |
-| 3F | Readable field errors (`errors` map), non-GST shops, optional HSN/CIN, grid billing screen with Space bill | Done: 126 tests green, driven in the browser |
+| 3F | Readable field errors (`errors` map), non-GST shops, optional HSN/CIN, grid billing screen with Space bill, one-line header with slide-in menu, compact footer, held-bill keys | Done: 127 tests green, driven in the browser |
 | 4 | Counter → master sync over LAN (see [docs/multi-terminal-and-rbac.md](docs/multi-terminal-and-rbac.md)) | Designed, not built |
 | Later | Flyway migrations, cloud sync, composition scheme / bill of supply, desktop shell | Not started |
 
@@ -27,10 +27,19 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 - **The `node` on PATH here is v16, too old for Vite 6.** Use the Maven build, or `npm run dev`
   with a newer Node.
 - No router: the shell keeps a `screen` state. One page is served, so no SPA fallback is needed.
+- **Billing stays mounted** (inside a `hidden` div) while other screens show, so the bill on screen
+  and the last bill survive navigation. Its keys must therefore be gated: `active` (screen shown)
+  and `blocked` (menu open) → `inFront`. Anything global it adds must respect `inFront`.
+- **Header slot**: Billing portals its bill type, customer and last bill into a `<div>` in the App
+  header (`headerSlot`). The clock is its own component so its tick never re-renders the bill.
+- Shortcut map and the "show shortcut list" flag (`masspos.showShortcuts`) are per machine in
+  `localStorage`; Billing re-reads both each time it comes back in front.
+- Every modal must take focus when it opens (autofocus input, button or list): a grid cell that
+  keeps focus behind a modal would still receive arrows, Enter and Space.
 - **The screen never computes tax.** `POST /api/sales/quote` prices the cart with the same code
   that issues the bill; duplicating the rounding rules in TypeScript would drift.
 - Keyboard map lives in `localStorage` (`masspos.shortcuts`), editable on the Settings screen.
-  Only function keys and Escape are bound, so typing at the counter is never hijacked.
+  Function keys, Escape and Space are bound; Space never fires inside a name being typed.
 - Money is formatted in `api.ts` (`rupees`, `quantity`, `percent`, `rupeesForInput`) with Indian
   grouping; never format money inside a component.
 - **Billing is a grid** (`Billing.tsx`): each row's code/name cells look items up (list rendered

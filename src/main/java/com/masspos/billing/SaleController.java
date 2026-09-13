@@ -1,6 +1,7 @@
 package com.masspos.billing;
 
 import com.masspos.auth.RequiresRole;
+import com.masspos.config.PosProperties;
 import com.masspos.hardware.PrinterException;
 import com.masspos.hardware.ThermalPrinter;
 import com.masspos.receipt.ReceiptCopy;
@@ -14,6 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -37,13 +39,15 @@ public class SaleController {
     private final InvoiceRepository invoices;
     private final ReceiptService receipts;
     private final ThermalPrinter printer;
+    private final PosProperties pos;
 
     public SaleController(SaleService sales, InvoiceRepository invoices, ReceiptService receipts,
-                          ThermalPrinter printer) {
+                          ThermalPrinter printer, PosProperties pos) {
         this.sales = sales;
         this.invoices = invoices;
         this.receipts = receipts;
         this.printer = printer;
+        this.pos = pos;
     }
 
     /**
@@ -93,6 +97,19 @@ public class SaleController {
         return invoices.findByInvoiceDateBetweenOrderByIssuedAtDesc(start, end).stream()
                 .map(InvoiceView::of)
                 .toList();
+    }
+
+    /**
+     * The latest bill taken on this till, whatever the day, so the billing screen can show it and
+     * reprint it after a restart. 204 before the till's first bill.
+     */
+    @GetMapping("/api/invoices/last")
+    @RequiresRole({UserRole.CASHIER, UserRole.MANAGER, UserRole.AUDITOR})
+    @Transactional(readOnly = true)
+    public ResponseEntity<InvoiceView> last() {
+        return invoices.findFirstByTerminalCodeOrderByIssuedAtDesc(pos.terminal().code())
+                .map(invoice -> ResponseEntity.ok(InvoiceView.of(invoice)))
+                .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
     @GetMapping("/api/invoices/{id}")

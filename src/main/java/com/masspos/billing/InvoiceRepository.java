@@ -17,6 +17,8 @@ public interface InvoiceRepository extends JpaRepository<Invoice, UUID> {
 
     List<Invoice> findByInvoiceDateOrderByIssuedAtDesc(LocalDate date);
 
+    Optional<Invoice> findFirstByTerminalCodeOrderByIssuedAtDesc(String terminalCode);
+
     long countByInvoiceDateBetweenAndStatus(LocalDate from, LocalDate to, InvoiceStatus status);
 
     @Query("""

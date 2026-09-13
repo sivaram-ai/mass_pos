@@ -63,8 +63,14 @@ Every row stays editable: `←`/`→` move across its cells, `↑`/`↓` move to
 and typing a new code or name in an old row replaces that item. The red bin (or `F5`) deletes any
 row.
 
-The bottom of the screen holds the shortcut list, the Hold / Resume / Reprint / Clear buttons,
-and the total with **Take bill**. Every key can be remapped in Settings; these are the defaults.
+The header is one line: **Menu** (the screens, and Log out, slide in from the left), the shop and
+till, date and clock, whether bills carry GST, the customer, and the till's last bill and amount.
+The footer lists the shortcuts, which can also be clicked (hide the list under Settings → Keyboard
+shortcuts), then items and quantity, the total, and **Take bill**. The bill on screen and the last
+bill stay put while another screen is open, and the last bill is fetched again after a restart,
+so `F10` always has something to reprint.
+
+Every key can be remapped in Settings; these are the defaults.
 
 | Key | Action |
 |---|---|
@@ -73,7 +79,7 @@ and the total with **Take bill**. Every key can be remapped in Settings; these a
 | `F2` | Go to the new item row |
 | `F3` / `F4` | Go to the quantity / discount of the current row |
 | `F5` | Delete the current row |
-| `F6` / `F7` | Hold a bill / resume one |
+| `F6` / `F7` | Hold a bill / list held bills: `↑` `↓` choose, `Enter` resumes (a bill already on screen is held first), `Delete` deletes |
 | `F8` | Open the drawer without a sale (asks for a reason, and records it) |
 | `F10` | Reprint the last bill as a duplicate |
 | `F1` | Customer name, and for a GST shop the customer's GSTIN and state |
@@ -159,7 +165,7 @@ is not a loopback name are refused. Together these stop a web page open on the t
 | Staff | `GET/POST /api/users`, `PUT /api/users/{id}`, `POST /api/users/{id}/pin` |
 | Catalogue | `GET /api/products?q=`, `POST /api/products`, `PUT /api/products/{id}`, `POST /api/products/{id}/deactivate` |
 | Stock | `GET /api/stock`, `POST /api/stock/receipts`, `/adjustments`, `/damages` |
-| Billing | `POST /api/sales`, `POST /api/sales/quote`, `GET /api/invoices`, `GET /api/invoices/{id}`, `POST /api/invoices/{id}/cancel`, `POST /api/invoices/{id}/receipt` |
+| Billing | `POST /api/sales`, `POST /api/sales/quote`, `GET /api/invoices`, `GET /api/invoices/last`, `GET /api/invoices/{id}`, `POST /api/invoices/{id}/cancel`, `POST /api/invoices/{id}/receipt` |
 | Held bills | `GET/POST /api/holds`, `DELETE /api/holds/{id}` |
 | Reports | `GET /api/reports/day`, `/gst`, `/audit` |
 | Settings | `GET/PUT /api/settings` |
