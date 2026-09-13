@@ -27,8 +27,8 @@ function labelOf(field: string): string {
   return index === undefined ? label : `${label} line ${Number(index) + 1}`
 }
 import {
-  ASSIGNABLE_KEYS, DEFAULT_SHORTCUTS, loadShortcuts, loadShowShortcuts, saveShortcuts, saveShowShortcuts,
-  SHORTCUT_LABELS,
+  ASSIGNABLE_KEYS, DEFAULT_SHORTCUTS, loadAskCashReceived, loadShortcuts, loadShowShortcuts, saveAskCashReceived,
+  saveShortcuts, saveShowShortcuts, SHORTCUT_LABELS,
 } from '../shortcuts'
 import type { ShortcutAction } from '../shortcuts'
 import type { Toast } from '../App'
@@ -43,6 +43,7 @@ export default function Settings({ role, settings, onSaved, onToast }: {
   const [form, setForm] = useState<ShopSettingsForm | null>(settings?.shop ?? null)
   const [shortcuts, setShortcuts] = useState(loadShortcuts)
   const [showShortcuts, setShowShortcuts] = useState(loadShowShortcuts)
+  const [askCashReceived, setAskCashReceived] = useState(loadAskCashReceived)
   const [printer, setPrinter] = useState<PrinterStatus | null>(null)
   const [printerError, setPrinterError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -262,6 +263,23 @@ export default function Settings({ role, settings, onSaved, onToast }: {
             }}
           />
           Show the shortcut list at the bottom of the billing screen
+        </label>
+        <label className="mb-3 flex items-start gap-2 text-sm text-slate-600">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={askCashReceived}
+            onChange={(event) => {
+              setAskCashReceived(event.target.checked)
+              saveAskCashReceived(event.target.checked)
+            }}
+          />
+          <span>
+            Ask for the cash received before taking a cash bill
+            <span className="block text-xs text-slate-400">
+              Off: pressing Enter with the cash amount empty takes the bill for the exact total.
+            </span>
+          </span>
         </label>
         <div className="grid gap-2 md:grid-cols-2">
           {(Object.keys(SHORTCUT_LABELS) as ShortcutAction[]).map((action) => (

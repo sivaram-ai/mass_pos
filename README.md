@@ -70,12 +70,17 @@ shortcuts), then items and quantity, the total, and **Take bill**. The bill on s
 bill stay put while another screen is open, and the last bill is fetched again after a restart,
 so `F10` always has something to reprint.
 
+On the payment screen the modes run down the left: Cash, UPI, Card, Voucher. `↑` `↓` change the
+mode, `Enter` (or `Space` in the amount) takes the bill, and an amount below the total splits the
+bill across modes. For cash, type what the customer hands over to see the change. With the amount
+left empty, a cash bill is taken for the exact total, unless **Ask for the cash received before
+taking a cash bill** is ticked under Settings → Keyboard shortcuts (per machine): then it asks.
+
 Every key can be remapped in Settings; these are the defaults.
 
 | Key | Action |
 |---|---|
-| `Space` | Take the bill in cash for the exact total and print it. Inside a name being typed, Space is just a space |
-| `F9` | UPI, card, change for a note, or a split payment |
+| `Space` | Take the bill: opens the payment screen. Inside a name being typed, Space is just a space |
 | `F2` | Go to the new item row |
 | `F3` / `F4` | Go to the quantity / discount of the current row |
 | `F5` | Delete the current row |
@@ -96,7 +101,7 @@ Held bills are listed newest first.
 - **Edit** (`Insert`, or Edit on the Bills screen): today's bills only. The bill opens on the grid;
   change, add or delete rows and press `Space`. In one step the old bill is cancelled (its stock
   comes back), a new bill is printed marked "Replaces bill …", and only the difference changes
-  hands: collected (cash, or `F9` for UPI/card) when the new bill costs more, or shown as
+  hands: collected on the payment screen when the new bill costs more, or shown as
   **Give back** when it costs less. Money already paid carries over to the new bill.
 - **Return** (`F12`, or Return / Return without a bill on the Bills screen): issues a credit note
   numbered in its own series (`T1-2627-R0001`) and prints it with the refund. Against a bill, its

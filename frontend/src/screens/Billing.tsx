@@ -10,7 +10,9 @@ import type {
 } from '../types'
 import { WHOLE_UNITS } from '../types'
 import { AskModal, Banner, Button, Empty, Field, inputClass, Modal } from '../components/ui'
-import { actionFor, loadShortcuts, loadShowShortcuts, SHORTCUT_LABELS, useShortcuts } from '../shortcuts'
+import {
+  actionFor, loadAskCashReceived, loadShortcuts, loadShowShortcuts, SHORTCUT_LABELS, useShortcuts,
+} from '../shortcuts'
 import type { ShortcutAction } from '../shortcuts'
 import type { Toast } from '../App'
 
@@ -141,6 +143,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
   const [saving, setSaving] = useState(false)
   const [shortcuts, setShortcuts] = useState(loadShortcuts)
   const [showShortcuts, setShowShortcuts] = useState(loadShowShortcuts)
+  const [askCashReceived, setAskCashReceived] = useState(loadAskCashReceived)
 
   const cells = useRef(new Map<string, HTMLInputElement>())
   const listItems = useRef(new Map<number, HTMLTableRowElement>())
@@ -234,6 +237,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     }
     setShortcuts(loadShortcuts())
     setShowShortcuts(loadShowShortcuts())
+    setAskCashReceived(loadAskCashReceived())
     const { row, col } = editRef.current
     requestFocus(Math.min(row, linesRef.current.length), col)
   }, [inFront, requestFocus])
@@ -531,39 +535,11 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     setSettling({ kind: 'return', due: priced.grandTotalPaise, cart, total: priced.grandTotalPaise })
   }
 
-  /** Space: the whole bill in cash, printed straight away. Editing or returning, it asks first. */
+  /**
+   * Space: the payment screen for the bill (cash, UPI, card, voucher, or a split). Editing, it
+   * collects or gives back the difference; on a return, it asks how the refund goes back.
+   */
   const takeBill = async () => {
-    if (busy.current || modalOpen) {
-      return
-    }
-    const cart = commitEdit()
-    if (!cart || !readyToBill(cart)) {
-      return
-    }
-    const current = modeRef.current
-    if (current.kind !== 'sale') {
-      try {
-        await (current.kind === 'edit' ? settleEdit(cart, current.invoice) : settleReturn(cart))
-      } catch (failure) {
-        setError(messageOfFailure(failure, 'Could not price the bill'))
-      }
-      return
-    }
-    busy.current = true
-    setSaving(true)
-    try {
-      const priced = await priceOf(cart)
-      await sell(cart, [{ mode: 'CASH', amountPaise: priced.grandTotalPaise, tenderedPaise: priced.grandTotalPaise }])
-    } catch (failure) {
-      setError(messageOfFailure(failure, 'Could not take the bill'))
-    } finally {
-      busy.current = false
-      setSaving(false)
-    }
-  }
-
-  /** F9: UPI, card, change for a note, or a split. */
-  const openPayment = async () => {
     if (busy.current || modalOpen) {
       return
     }
@@ -972,7 +948,6 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     holdBill: askHold,
     resumeBill: () => void openHolds(),
     openDrawer: () => setAsk({ action: 'drawer', title: 'Open drawer', label: 'Reason', initial: '' }),
-    takePayment: () => void openPayment(),
     reprintLast: () => void reprintLast(),
     customer: () => setEditingCustomer(true),
     editBill: askEdit,
@@ -1358,8 +1333,8 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
       {/* Shortcut list (clickable) · items and quantity · total · take bill */}
       <div className="flex shrink-0 flex-wrap items-stretch gap-2">
         {showShortcuts && (
-          <section className="min-w-[18rem] flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm">
-            <ul className="grid grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] gap-x-2 text-xs text-slate-600">
+          <section className="min-w-[18rem] flex-1 rounded-lg border border-slate-200 bg-white px-1.5 py-1 shadow-sm">
+            <ul className="grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] gap-x-1 text-[11px] leading-4 text-slate-600 [&_kbd]:py-0 [&_kbd]:text-[10px] [&_kbd]:leading-[14px]">
               {(Object.keys(SHORTCUT_LABELS) as ShortcutAction[]).map((action) => (
                 <li key={action}>
                   <button
@@ -1368,7 +1343,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
                     // Keeps the cursor in its cell, so a click works like the key.
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={handlers[action]}
-                    className="flex w-full items-center justify-between gap-2 rounded px-1.5 py-0.5 text-left hover:bg-sky-50 hover:text-sky-800"
+                    className="flex w-full items-center justify-between gap-1 rounded px-1 py-px text-left hover:bg-sky-50 hover:text-sky-800"
                   >
                     <span className="truncate">{SHORTCUT_LABELS[action]}</span>
                     <kbd>{shortcuts[action]}</kbd>
@@ -1379,63 +1354,45 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
           </section>
         )}
 
-        <section className={`flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-1.5 shadow-sm ${
-          showShortcuts ? 'w-[34rem] max-w-full' : 'ml-auto w-full max-w-[40rem]'}`}>
-          <dl className="grid shrink-0 grid-cols-[auto_auto] gap-x-2 text-sm leading-6">
+        <section className={`flex items-stretch gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1 shadow-sm ${
+          showShortcuts ? 'w-[30rem] max-w-full' : 'ml-auto w-full max-w-[36rem]'}`}>
+          <dl className="grid shrink-0 grid-cols-[auto_auto] content-center gap-x-2 text-xs leading-4">
             <dt className="text-slate-500">Items</dt>
             <dd className="num text-right font-semibold text-slate-800">{lines.length}</dd>
             <dt className="text-slate-500">Qty</dt>
             <dd className="num text-right font-semibold text-slate-800">{quantity(totalQuantity)}</dd>
           </dl>
-          <div className={`min-w-0 flex-1 rounded-md px-3 py-1 text-white ${
+          <div className={`flex min-w-0 flex-1 items-center justify-between gap-2 rounded-md px-2.5 py-1 text-white ${
             mode.kind === 'return' ? 'bg-rose-700' : mode.kind === 'edit' ? 'bg-amber-800' : 'bg-slate-900'}`}>
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="text-sm text-white/70">
+            <div className="min-w-0 leading-4">
+              <div className="text-xs text-white/70">
                 {mode.kind === 'return' ? 'Refund' : mode.kind === 'edit' ? 'New total' : 'Total'}
-              </span>
-              <span className="num text-3xl font-bold leading-tight">{rupees(quote?.grandTotalPaise ?? 0)}</span>
-            </div>
-            {mode.kind === 'edit' && (
-              <EditDifference paid={mode.invoice.grandTotalPaise} total={quote?.grandTotalPaise ?? 0} />
-            )}
-            <div className="num flex justify-end gap-x-2 truncate text-[11px] leading-4 text-slate-400">
-              {gst && quote && (
-                <>
-                  <span>Taxable {rupees(quote.taxableValuePaise)}</span>
-                  {quote.interState
-                    ? <span>IGST {rupees(quote.igstPaise)}</span>
-                    : <span>CGST {rupees(quote.cgstPaise)} · SGST {rupees(quote.sgstPaise)}</span>}
-                  {!!quote.cessPaise && <span>Cess {rupees(quote.cessPaise)}</span>}
-                </>
+              </div>
+              {mode.kind === 'edit' ? (
+                <EditDifference paid={mode.invoice.grandTotalPaise} total={quote?.grandTotalPaise ?? 0} />
+              ) : (
+                <div className="num truncate text-[11px] text-white/55">
+                  {[
+                    gst && quote ? `Taxable ${rupees(quote.taxableValuePaise)}` : '',
+                    gst && quote ? (quote.interState ? `IGST ${rupees(quote.igstPaise)}`
+                      : `CGST ${rupees(quote.cgstPaise)} · SGST ${rupees(quote.sgstPaise)}`) : '',
+                    gst && quote?.cessPaise ? `Cess ${rupees(quote.cessPaise)}` : '',
+                    quote?.roundOffPaise ? `Round off ${rupees(quote.roundOffPaise)}` : '',
+                  ].filter(Boolean).join(' · ')}
+                </div>
               )}
-              {!!quote?.roundOffPaise && <span>Round off {rupees(quote.roundOffPaise)}</span>}
             </div>
+            <span className="num shrink-0 text-2xl font-bold leading-none">{rupees(quote?.grandTotalPaise ?? 0)}</span>
           </div>
-          <div className="flex w-36 shrink-0 flex-col gap-1">
-            <Button
-              tone="primary"
-              className="justify-between py-1.5"
-              hint={shortcuts.takeBill}
-              disabled={lines.length === 0 || notReady || saving}
-              onClick={() => void takeBill()}
-            >
-              {saving ? 'Saving…' : mode.kind === 'edit' ? 'Save edit' : mode.kind === 'return' ? 'Refund' : 'Take bill'}
-            </Button>
-            {mode.kind === 'sale' ? (
-              <Button
-                className="justify-between py-1"
-                hint={shortcuts.takePayment}
-                disabled={lines.length === 0 || notReady || saving}
-                onClick={() => void openPayment()}
-              >
-                UPI / Card
-              </Button>
-            ) : (
-              <Button className="justify-between py-1" hint={shortcuts.clearBill} onClick={() => setConfirmClear(true)}>
-                {mode.kind === 'edit' ? 'Stop' : 'Cancel'}
-              </Button>
-            )}
-          </div>
+          <Button
+            tone="primary"
+            className="shrink-0 justify-between px-3"
+            hint={shortcuts.takeBill}
+            disabled={lines.length === 0 || notReady || saving}
+            onClick={() => void takeBill()}
+          >
+            {saving ? 'Saving…' : mode.kind === 'edit' ? 'Save edit' : mode.kind === 'return' ? 'Refund' : 'Take bill'}
+          </Button>
         </section>
       </div>
 
@@ -1449,6 +1406,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
           due={payment.due}
           title={payment.purpose === 'edit' ? 'Collect the difference' : 'Payment'}
           confirmLabel={payment.purpose === 'edit' ? 'Save edit' : 'Take bill'}
+          askCashReceived={askCashReceived}
           onClose={() => { setPayment(null); focusEntry() }}
           onConfirm={(tenders) => void completePayment(tenders)}
         />
@@ -1799,7 +1757,7 @@ function CustomerDialog({ customer, gst, onClose, onSave }: {
 function EditDifference({ paid, total }: { paid: number; total: number }) {
   const difference = total - paid
   return (
-    <div className="num flex justify-end gap-x-2 text-xs font-medium leading-4">
+    <div className="num flex gap-x-2 text-[11px] font-medium leading-4">
       <span className="text-white/70">Paid {rupees(paid)}</span>
       {difference > 0 && <span className="text-amber-200">Collect {rupees(difference)}</span>}
       {difference < 0 && <span className="text-emerald-200">Give back {rupees(-difference)}</span>}
@@ -1822,7 +1780,7 @@ function RefundDialog({ kind, due, total, defaultMode, number, saving, onClose, 
   onClose: () => void
   onConfirm: (refund: Refund, reason: string) => void
 }) {
-  const [mode, setMode] = useState<PaymentMode>(defaultMode === 'ON_ACCOUNT' ? 'CASH' : defaultMode)
+  const [mode, setMode] = useState<PaymentMode>(REFUND_MODES.includes(defaultMode) ? defaultMode : 'CASH')
   const [reference, setReference] = useState('')
   const [reason, setReason] = useState('')
   const submitted = useRef(false)
@@ -1847,12 +1805,16 @@ function RefundDialog({ kind, due, total, defaultMode, number, saving, onClose, 
           submit()
         }}
         // Enter confirms from anywhere in the dialog, on every keyboard, not only via a focused button.
+        // Up and down change how the refund goes back.
         onKeyDown={(event) => {
           if (event.key === 'Enter') {
             event.preventDefault()
             if (!event.repeat) {
               submit()
             }
+          } else if (kind === 'return' && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+            event.preventDefault()
+            setMode(stepMode(REFUND_MODES, mode, event.key))
           }
         }}
       >
@@ -1871,28 +1833,20 @@ function RefundDialog({ kind, due, total, defaultMode, number, saving, onClose, 
         ) : (
           <>
             {number && <p className="text-sm text-slate-600">Against bill {number}. The stock goes back on the shelf.</p>}
-            <div className="grid grid-cols-3 gap-2">
-              {(['CASH', 'UPI', 'CARD'] as PaymentMode[]).map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  onClick={() => setMode(option)}
-                  className={`rounded-md border px-2 py-2 text-sm font-medium ${
-                    mode === option ? 'border-rose-500 bg-rose-50 text-rose-700' : 'border-slate-200 text-slate-600'}`}
-                >
-                  {option}
-                </button>
-              ))}
+            <div className="flex gap-4">
+              <ModeList modes={REFUND_MODES} value={mode} tone="rose" onChange={setMode} />
+              <div className="min-w-0 flex-1 space-y-3">
+                {mode !== 'CASH' && (
+                  <Field label="Reference" optional hint="UPI reference or card reversal code">
+                    <input className={inputClass} value={reference} onChange={(event) => setReference(event.target.value)} />
+                  </Field>
+                )}
+                <Field label="Reason" optional hint="Printed on the return slip">
+                  <input className={inputClass} maxLength={200} value={reason}
+                         onChange={(event) => setReason(event.target.value)} />
+                </Field>
+              </div>
             </div>
-            {mode !== 'CASH' && (
-              <Field label="Reference" optional hint="UPI reference or card reversal code">
-                <input className={inputClass} value={reference} onChange={(event) => setReference(event.target.value)} />
-              </Field>
-            )}
-            <Field label="Reason" optional hint="Printed on the return slip">
-              <input className={inputClass} maxLength={200} value={reason}
-                     onChange={(event) => setReason(event.target.value)} />
-            </Field>
           </>
         )}
 
@@ -1915,13 +1869,64 @@ function RefundDialog({ kind, due, total, defaultMode, number, saving, onClose, 
 }
 
 const MODES: PaymentMode[] = ['CASH', 'UPI', 'CARD', 'VOUCHER']
+const REFUND_MODES: PaymentMode[] = ['CASH', 'UPI', 'CARD']
+const MODE_LABELS: Record<PaymentMode, string> = {
+  CASH: 'Cash', UPI: 'UPI', CARD: 'Card', VOUCHER: 'Voucher', ON_ACCOUNT: 'On account',
+}
 const QUICK_NOTES = [10000, 20000, 50000, 100000, 200000]
 
-/** Cash, UPI, card, or any mix of them; the parts must add up to the bill exactly. */
-function PaymentDialog({ due, title = 'Payment', confirmLabel = 'Take bill', onClose, onConfirm }: {
+/** The mode above or below, stopping at the ends of the list. */
+function stepMode(modes: PaymentMode[], current: PaymentMode, key: 'ArrowUp' | 'ArrowDown'): PaymentMode {
+  const at = Math.max(0, modes.indexOf(current))
+  return modes[Math.max(0, Math.min(modes.length - 1, at + (key === 'ArrowDown' ? 1 : -1)))]
+}
+
+/** Payment modes stacked down the left of a dialog. The dialog moves through them with up and down. */
+function ModeList({ modes, value, tone, onChange }: {
+  modes: PaymentMode[]
+  value: PaymentMode
+  tone: 'sky' | 'rose'
+  onChange: (mode: PaymentMode) => void
+}) {
+  const chosen = tone === 'rose' ? 'border-rose-600 bg-rose-600 text-white' : 'border-sky-600 bg-sky-600 text-white'
+  return (
+    <div className="flex w-32 shrink-0 flex-col gap-1.5">
+      <ul role="listbox" aria-label="Payment mode" className="flex flex-col gap-1.5">
+        {modes.map((option) => (
+          <li key={option}>
+            <button
+              type="button"
+              role="option"
+              aria-selected={value === option}
+              tabIndex={-1}
+              onClick={() => onChange(option)}
+              className={`flex w-full items-center justify-between rounded-md border px-3 py-2.5 text-left text-sm font-medium transition ${
+                value === option ? chosen : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+            >
+              {MODE_LABELS[option]}
+              {value === option && <span aria-hidden="true">›</span>}
+            </button>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1 text-center text-xs text-slate-400"><kbd>↑</kbd> <kbd>↓</kbd> change</p>
+    </div>
+  )
+}
+
+/**
+ * Cash, UPI, card, voucher, or any mix of them; the parts must add up to the bill exactly. The modes
+ * run down the left and up and down move between them from anywhere in the dialog. Enter (or Space
+ * in the amount) takes the bill.
+ *
+ * @param askCashReceived a cash bill needs the amount handed over typed in; otherwise an empty
+ *                        amount means the exact total
+ */
+function PaymentDialog({ due, title = 'Payment', confirmLabel = 'Take bill', askCashReceived, onClose, onConfirm }: {
   due: number
   title?: string
   confirmLabel?: string
+  askCashReceived: boolean
   onClose: () => void
   onConfirm: (tenders: Tender[]) => void
 }) {
@@ -1929,19 +1934,43 @@ function PaymentDialog({ due, title = 'Payment', confirmLabel = 'Take bill', onC
   const [tenderedText, setTenderedText] = useState('')
   const [reference, setReference] = useState('')
   const [parts, setParts] = useState<Tender[]>([])
+  const [prompt, setPrompt] = useState<string | null>(null)
   const submitted = useRef(false)
+  const amountInput = useRef<HTMLInputElement>(null)
 
   const paid = parts.reduce((sum, part) => sum + part.amountPaise, 0)
   const remaining = due - paid
   const tendered = tenderedText ? paiseFromRupees(tenderedText) : remaining
   const change = mode === 'CASH' ? Math.max(0, tendered - remaining) : 0
 
+  // The amount box takes the cursor whenever the mode changes or a part is paid.
+  useEffect(() => {
+    amountInput.current?.focus()
+    amountInput.current?.select()
+  }, [mode, parts.length])
+
+  const choose = (next: PaymentMode) => {
+    if (next === mode) {
+      return
+    }
+    setMode(next)
+    setTenderedText('')
+    setReference('')
+    setPrompt(null)
+  }
+
   const settle = () => {
     if (submitted.current) {
       return
     }
+    if (mode === 'CASH' && askCashReceived && tenderedText.trim() === '') {
+      setPrompt('is needed: type what the customer hands over')
+      amountInput.current?.focus()
+      return
+    }
     const amount = Math.min(remaining, mode === 'CASH' ? Math.max(tendered, 0) : tendered || remaining)
     if (amount <= 0) {
+      setPrompt('must be more than zero')
       return
     }
     const tender: Tender = {
@@ -1958,10 +1987,11 @@ function PaymentDialog({ due, title = 'Payment', confirmLabel = 'Take bill', onC
       setParts(all)
       setTenderedText('')
       setReference('')
+      setPrompt(null)
     }
   }
 
-  /** Space in an amount box settles, as it takes the bill on the billing grid. */
+  /** Space in an amount box settles, as it opened this screen from the billing grid. */
   const spaceSettles = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (event.key === ' ') {
       event.preventDefault()
@@ -1971,89 +2001,118 @@ function PaymentDialog({ due, title = 'Payment', confirmLabel = 'Take bill', onC
     }
   }
 
+  const amountClass = `${inputClass} num text-lg ${prompt ? 'border-rose-500 ring-2 ring-rose-200 focus:border-rose-500 focus:ring-rose-200' : ''}`
+
   return (
-    <Modal title={title} onClose={onClose}>
-      <div className="flex items-baseline justify-between rounded-md bg-slate-900 px-4 py-3 text-white">
-        <span className="text-sm text-slate-300">{parts.length ? 'Still to pay' : 'Bill total'}</span>
-        <span className="num text-3xl font-semibold">{rupees(remaining)}</span>
-      </div>
-
-      {parts.length > 0 && (
-        <ul className="mt-3 space-y-1 text-sm">
-          {parts.map((part, index) => (
-            <li key={index} className="flex justify-between text-slate-600">
-              <span>{part.mode}</span>
-              <span className="num">{rupees(part.amountPaise)}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div className="mt-4 grid grid-cols-4 gap-2">
-        {MODES.map((option) => (
-          <button
-            key={option}
-            type="button"
-            onClick={() => setMode(option)}
-            className={`rounded-md border px-2 py-2 text-sm font-medium ${
-              mode === option ? 'border-sky-500 bg-sky-50 text-sky-700' : 'border-slate-200 text-slate-600'
-            }`}
-          >
-            {option}
-          </button>
-        ))}
-      </div>
-
+    <Modal title={title} onClose={onClose} size="xl">
       <form
-        className="mt-4 space-y-3"
+        className="flex gap-4"
         onSubmit={(event) => {
           event.preventDefault()
           settle()
         }}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault()
+            choose(stepMode(MODES, mode, event.key))
+          } else if (event.key === 'Enter') {
+            // Handled here so Enter works on every keyboard: a button under the cursor does its
+            // own job (a note, Exact, Cancel), anywhere else Enter takes the bill.
+            event.preventDefault()
+            if (event.repeat) {
+              return
+            }
+            if (event.target instanceof HTMLButtonElement && event.target.type === 'button') {
+              event.target.click()
+            } else {
+              settle()
+            }
+          }
+        }}
       >
-        {mode === 'CASH' ? (
-          <>
-            <Field label="Cash received" hint="Leave empty for the exact amount">
-              <input
-                className={`${inputClass} num text-lg`}
-                inputMode="decimal"
-                autoFocus
-                value={tenderedText}
-                onKeyDown={spaceSettles}
-                onChange={(event) => setTenderedText(event.target.value)}
-              />
-            </Field>
-            <div className="flex flex-wrap gap-2">
-              {QUICK_NOTES.filter((note) => note >= remaining).slice(0, 4).map((note) => (
-                <Button key={note} onClick={() => setTenderedText((note / 100).toFixed(0))}>
-                  {rupees(note)}
-                </Button>
-              ))}
-              <Button onClick={() => setTenderedText((remaining / 100).toFixed(2))}>Exact</Button>
-            </div>
-            <div className="flex items-baseline justify-between rounded-md bg-emerald-50 px-3 py-2">
-              <span className="text-sm text-emerald-800">Change to give</span>
-              <span className="num text-xl font-semibold text-emerald-900">{rupees(change)}</span>
-            </div>
-          </>
-        ) : (
-          <>
-            <Field label="Amount" hint="Less than the total splits the bill">
-              <input className={`${inputClass} num text-lg`} inputMode="decimal" autoFocus value={tenderedText}
-                     onKeyDown={spaceSettles}
-                     onChange={(event) => setTenderedText(event.target.value)} />
-            </Field>
-            <Field label="Reference" optional hint="UPI reference, card approval code, voucher number">
-              <input className={inputClass} value={reference} onChange={(event) => setReference(event.target.value)} />
-            </Field>
-          </>
-        )}
+        <ModeList modes={MODES} value={mode} tone="sky" onChange={choose} />
 
-        <div className="flex justify-end gap-2 pt-1">
-          <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" tone="primary" hint="Enter">
-            {tendered >= remaining || !tenderedText ? confirmLabel : 'Add part payment'}
-          </Button>
+        <div className="min-w-0 flex-1 space-y-3">
+          <div className="flex items-baseline justify-between rounded-md bg-slate-900 px-4 py-3 text-white">
+            <span className="text-sm text-slate-300">{parts.length ? 'Still to pay' : 'Bill total'}</span>
+            <span className="num text-3xl font-semibold">{rupees(remaining)}</span>
+          </div>
+
+          {parts.length > 0 && (
+            <ul className="space-y-1 text-sm">
+              {parts.map((part, index) => (
+                <li key={index} className="flex justify-between text-slate-600">
+                  <span>{MODE_LABELS[part.mode]}</span>
+                  <span className="num">{rupees(part.amountPaise)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {mode === 'CASH' ? (
+            <>
+              <Field
+                label="Cash received"
+                error={prompt ?? undefined}
+                hint={askCashReceived ? 'Type what the customer hands over' : 'Leave empty for the exact amount'}
+              >
+                <input
+                  ref={amountInput}
+                  className={amountClass}
+                  inputMode="decimal"
+                  autoComplete="off"
+                  value={tenderedText}
+                  onKeyDown={spaceSettles}
+                  onChange={(event) => {
+                    setTenderedText(event.target.value)
+                    setPrompt(null)
+                  }}
+                />
+              </Field>
+              <div className="flex flex-wrap gap-2">
+                {QUICK_NOTES.filter((note) => note >= remaining).slice(0, 4).map((note) => (
+                  <Button key={note} onClick={() => { setTenderedText((note / 100).toFixed(0)); setPrompt(null) }}>
+                    {rupees(note)}
+                  </Button>
+                ))}
+                <Button onClick={() => { setTenderedText((remaining / 100).toFixed(2)); setPrompt(null) }}>Exact</Button>
+              </div>
+              <div className="flex items-baseline justify-between rounded-md bg-emerald-50 px-3 py-2">
+                <span className="text-sm text-emerald-800">Change to give</span>
+                <span className="num text-xl font-semibold text-emerald-900">{rupees(change)}</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <Field label={`${MODE_LABELS[mode]} amount`} error={prompt ?? undefined}
+                     hint="Leave empty for the full amount; less splits the bill">
+                <input
+                  ref={amountInput}
+                  className={amountClass}
+                  inputMode="decimal"
+                  autoComplete="off"
+                  value={tenderedText}
+                  onKeyDown={spaceSettles}
+                  onChange={(event) => {
+                    setTenderedText(event.target.value)
+                    setPrompt(null)
+                  }}
+                />
+              </Field>
+              <Field label="Reference" optional
+                     hint={mode === 'VOUCHER' ? 'Voucher number' : 'UPI reference or card approval code'}>
+                <input className={inputClass} autoComplete="off" value={reference}
+                       onChange={(event) => setReference(event.target.value)} />
+              </Field>
+            </>
+          )}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <Button onClick={onClose} hint="Esc">Cancel</Button>
+            <Button type="submit" tone="primary" hint="Enter">
+              {tendered >= remaining || !tenderedText ? confirmLabel : 'Add part payment'}
+            </Button>
+          </div>
         </div>
       </form>
     </Modal>

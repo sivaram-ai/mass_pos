@@ -132,7 +132,7 @@ export default function App() {
         <div className="flex min-w-0 items-baseline gap-2">
           <span className="truncate text-base font-semibold">{shopName}</span>
           {settings && (
-            <span className="text-xs text-slate-400">
+            <span className="hidden text-xs text-slate-400 lg:inline">
               {settings.thisTerminal.name} ({settings.thisTerminal.code})
               {settings.thisTerminal.section ? ` · ${settings.thisTerminal.section}` : ''}
             </span>

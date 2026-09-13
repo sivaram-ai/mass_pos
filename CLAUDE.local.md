@@ -16,7 +16,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3D | Reports: day takings, GST rate-wise + HSN (GSTR-1 prep), audit-trail viewer | Done |
 | 3E | Shop settings moved into the database (`shop_settings`), editable on screen, seeded once from `pos.company.*` | Done |
 | 3F | Readable field errors (`errors` map), non-GST shops, optional HSN/CIN, grid billing screen with Space bill, one-line header with slide-in menu, compact footer, held-bill keys | Done: 127 tests green, driven in the browser |
-| 3G | Edit today's bill (cancel + reissue), returns as credit notes with refunds, reports net of returns, held bills newest first, Esc Esc back to billing | Done: 136 tests green, driven in the browser |
+| 3G | Edit today's bill (cancel + reissue), returns as credit notes with refunds, reports net of returns, held bills newest first, Esc Esc back to billing | Done: 137 tests green, driven in the browser |
 | 4 | Counter → master sync over LAN (see [docs/multi-terminal-and-rbac.md](docs/multi-terminal-and-rbac.md)) | Designed, not built |
 | Later | Flyway migrations, cloud sync, composition scheme / bill of supply, desktop shell | Not started |
 
@@ -52,7 +52,10 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
   `fixed` so the grid's scroll never clips it), rate/qty/disc cells take numbers. Handlers read
   `linesRef`/`editRef`, not render state: a key can change the bill and move on before React
   renders. `commitEdit()` returns the committed bill or null when a value is refused.
-- **Space takes the bill in cash** unless a code/name is being typed. `busy` ref guards every
+- **Space opens the payment screen** (`takeBill`; the separate F9 action is gone, and unknown saved
+  shortcut keys are dropped on load) unless a code/name is being typed. `PaymentDialog` stacks
+  the modes with arrow keys; `masspos.askCashReceived` (Settings) makes an empty cash amount prompt
+  instead of meaning the exact total. `busy` ref guards every
   sale path: without it a second Space issues a second invoice. The total is re-quoted just before
   selling, never taken from a possibly stale `quote`.
 - The global shortcut hook ignores printable keys inside text fields; the grid handles Space itself
@@ -224,6 +227,10 @@ overridable with `POS_DATA_DIR`. It holds:
 - `transaction_mode=IMMEDIATE` makes gapless numbering and concurrent writers safe.
 - Stock `SQLiteDialect` silently drops all foreign keys. `PosSqliteDialect` declares them inline,
   but only for tables Hibernate creates.
+- **`jdbc_metadata_extraction_strategy=individually` is required.** The default (grouped) makes
+  sqlite-jdbc's `getColumns` one UNION ALL term per column of every table; SQLite allows 500. Past
+  500 columns (the credit note tables took it to 600) the app starts once on a new database and
+  never again. `RestartOnExistingDatabaseTest` starts the app twice on one data dir to guard it.
 - `ddl-auto=update` is for development only. Delete a local dev `pos.db` after entity changes, such
   as the new `seller_*` columns: SQLite cannot add NOT NULL columns to a table that has rows. Move
   to Flyway + `validate` before the first real install.

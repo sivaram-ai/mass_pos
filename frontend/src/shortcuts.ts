@@ -10,7 +10,6 @@ export type ShortcutAction =
   | 'holdBill'
   | 'resumeBill'
   | 'openDrawer'
-  | 'takePayment'
   | 'reprintLast'
   | 'customer'
   | 'editBill'
@@ -18,7 +17,7 @@ export type ShortcutAction =
   | 'clearBill'
 
 export const SHORTCUT_LABELS: Record<ShortcutAction, string> = {
-  takeBill: 'Take bill (cash)',
+  takeBill: 'Take bill (payment)',
   focusSearch: 'New item row',
   setQuantity: 'Go to quantity',
   setDiscount: 'Go to discount',
@@ -26,7 +25,6 @@ export const SHORTCUT_LABELS: Record<ShortcutAction, string> = {
   holdBill: 'Hold bill',
   resumeBill: 'Resume held bill',
   openDrawer: 'Open drawer (no sale)',
-  takePayment: 'UPI, card or split',
   reprintLast: 'Reprint last bill',
   customer: 'Customer details',
   editBill: "Edit today's bill",
@@ -47,7 +45,6 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutAction, string> = {
   holdBill: 'F6',
   resumeBill: 'F7',
   openDrawer: 'F8',
-  takePayment: 'F9',
   reprintLast: 'F10',
   customer: 'F1',
   editBill: 'Insert',
@@ -64,7 +61,10 @@ const STORAGE_KEY = 'masspos.shortcuts'
 export function loadShortcuts(): Record<ShortcutAction, string> {
   try {
     const saved = localStorage.getItem(STORAGE_KEY)
-    return saved ? { ...DEFAULT_SHORTCUTS, ...JSON.parse(saved) } : { ...DEFAULT_SHORTCUTS }
+    const merged: Record<string, string> = saved ? { ...DEFAULT_SHORTCUTS, ...JSON.parse(saved) } : { ...DEFAULT_SHORTCUTS }
+    // Keys saved for actions that no longer exist (such as the old F9 payment key) are dropped.
+    return Object.fromEntries((Object.keys(DEFAULT_SHORTCUTS) as ShortcutAction[])
+      .map((action) => [action, merged[action]])) as Record<ShortcutAction, string>
   } catch {
     return { ...DEFAULT_SHORTCUTS }
   }
@@ -94,6 +94,28 @@ export function saveShowShortcuts(show: boolean) {
     localStorage.setItem(SHOW_LIST_KEY, String(show))
   } catch {
     // Not fatal: the list shows by default.
+  }
+}
+
+const ASK_CASH_KEY = 'masspos.askCashReceived'
+
+/**
+ * Whether a cash bill needs the amount the customer hands over typed in. Off (the default), an empty
+ * amount takes the bill for the exact total. Per machine, like the keys.
+ */
+export function loadAskCashReceived(): boolean {
+  try {
+    return localStorage.getItem(ASK_CASH_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+export function saveAskCashReceived(ask: boolean) {
+  try {
+    localStorage.setItem(ASK_CASH_KEY, String(ask))
+  } catch {
+    // Not fatal: the till falls back to taking the exact amount.
   }
 }
 

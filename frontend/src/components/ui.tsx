@@ -86,12 +86,15 @@ export function errorFor(errors: Record<string, string>, prefix: string): string
 export const inputClass =
   'w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100'
 
-export function Modal({ title, children, onClose, wide }: {
+export function Modal({ title, children, onClose, wide, size }: {
   title: string
   children: ReactNode
   onClose: () => void
   wide?: boolean
+  /** Overrides `wide`: md (default), xl for a two-column dialog, 3xl for a table. */
+  size?: 'md' | 'xl' | '3xl'
 }) {
+  const width = { md: 'max-w-md', xl: 'max-w-xl', '3xl': 'max-w-3xl' }[size ?? (wide ? '3xl' : 'md')]
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -106,7 +109,7 @@ export function Modal({ title, children, onClose, wide }: {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onMouseDown={onClose}>
       <div
-        className={`w-full ${wide ? 'max-w-3xl' : 'max-w-md'} rounded-lg bg-white shadow-xl`}
+        className={`w-full ${width} rounded-lg bg-white shadow-xl`}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
