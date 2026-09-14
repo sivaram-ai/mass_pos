@@ -138,6 +138,64 @@ function isTextEntry(target: EventTarget | null): boolean {
   return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
 }
 
+/** F1 to F24. */
+function isFunctionKey(event: { key: string }): boolean {
+  return /^F\d{1,2}$/.test(event.key)
+}
+
+/** Ctrl letters a text box needs: select all, copy, cut, paste, undo, redo. */
+const EDITING_LETTERS = 'ACVXYZ'
+/** With Shift: redo, paste as plain text, and the developer tools (Ctrl+Shift+C/I/J) for support. */
+const EDITING_SHIFT_LETTERS = 'CIJVZ'
+
+/**
+ * True for a key press the browser would act on as a web page: F1 opening help in a new tab, F5 or
+ * Ctrl+R reloading away the bill, F11 going full screen, Ctrl+P printing the screen, Ctrl+F finding
+ * in the page, Alt+Left going back, Alt+D jumping to the address bar. Letters are matched by key
+ * position (`code`), as the browser does. Typing, AltGr characters, editing and zoom are left alone.
+ */
+function isBrowserKey(event: KeyboardEvent): boolean {
+  if (isFunctionKey(event)) {
+    return true
+  }
+  if (event.ctrlKey && event.altKey) {
+    // AltGr on Windows reports Ctrl+Alt: it types characters such as ₹.
+    return false
+  }
+  const letter = /^Key([A-Z])$/.exec(event.code)?.[1]
+  if (event.ctrlKey || event.metaKey) {
+    if (letter) {
+      return !(event.shiftKey ? EDITING_SHIFT_LETTERS : EDITING_LETTERS).includes(letter)
+    }
+    // Ctrl+1 to Ctrl+9 switch browser tabs; Ctrl+0 resets the zoom and stays.
+    return /^Digit[1-9]$/.test(event.code)
+  }
+  if (event.altKey) {
+    return letter !== undefined || ['ArrowLeft', 'ArrowRight', 'Home'].includes(event.key)
+  }
+  return false
+}
+
+/**
+ * Makes the till behave like an application, not a web page: keys the browser would act on do nothing
+ * beyond what the screen itself does with them, and the right-click menu (Back, Reload, Print, Save as)
+ * appears only in text boxes, for cut, copy and paste. Installed once, in the capture phase on window,
+ * so it runs before every other handler and no stopPropagation can get past it. Handlers still see
+ * every key. Ctrl+T, Ctrl+W, Ctrl+N and Alt+F4 are kept by the browser and cannot be cancelled by a page.
+ */
+export function blockBrowserKeys() {
+  window.addEventListener('keydown', (event) => {
+    if (isBrowserKey(event)) {
+      event.preventDefault()
+    }
+  }, true)
+  window.addEventListener('contextmenu', (event) => {
+    if (!isTextEntry(event.target)) {
+      event.preventDefault()
+    }
+  }, true)
+}
+
 /**
  * Binds the configured keys for as long as the screen is mounted. Function keys fire wherever the
  * cursor is. Printable keys such as Space fire only outside text boxes: the bill grid handles its own
@@ -153,7 +211,10 @@ export function useShortcuts(
       return
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey) {
+      // blockBrowserKeys cancels every function key before any handler runs, so for those
+      // defaultPrevented does not mean another handler has already taken the key.
+      const taken = event.defaultPrevented && !isFunctionKey(event)
+      if (taken || event.ctrlKey || event.altKey || event.metaKey) {
         return
       }
       if (event.key.length === 1 && (isTextEntry(event.target) || event.repeat)) {

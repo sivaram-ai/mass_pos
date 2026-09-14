@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, fieldErrorsOf, messageOfFailure, paiseFromRupees, percent, quantity, rupees } from '../api'
 import type { Product, Unit } from '../types'
+import { UNIT_NAMES } from '../types'
 import { Banner, Button, Empty, errorFor, Field, inputClass, Modal, Panel } from '../components/ui'
 import type { Toast } from '../App'
 
@@ -215,7 +216,7 @@ function ProductDialog({ id, draft, errors, onClose, onSave }: {
         <Field label="Sold by" error={err('unit')}>
           <select className={inputClass} value={form.unit}
                   onChange={(event) => set({ unit: event.target.value as Unit })}>
-            {UNITS.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+            {UNITS.map((unit) => <option key={unit} value={unit}>{unit} - {UNIT_NAMES[unit]}</option>)}
           </select>
         </Field>
         <Field label="GST rate" error={err('gstRateBp')} hint="Ignored when the shop has no GSTIN">

@@ -9,6 +9,20 @@ export type Unit = 'NOS' | 'PCS' | 'BOX' | 'PAC' | 'DOZ' | 'KGS' | 'GMS' | 'LTR'
 /** Units sold in whole pieces; the rest can be weighed or measured. */
 export const WHOLE_UNITS: Unit[] = ['NOS', 'PCS', 'BOX', 'PAC', 'DOZ']
 
+/** What each GST unit code stands for, shown beside the code wherever a unit is picked. */
+export const UNIT_NAMES: Record<Unit, string> = {
+  NOS: 'Numbers',
+  PCS: 'Pieces',
+  BOX: 'Boxes',
+  PAC: 'Packs',
+  DOZ: 'Dozens',
+  KGS: 'Kilograms',
+  GMS: 'Grams',
+  LTR: 'Litres',
+  MLT: 'Millilitres',
+  MTR: 'Metres',
+}
+
 export interface Principal {
   userId: string
   username: string

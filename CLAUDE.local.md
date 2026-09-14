@@ -64,6 +64,11 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
   selling, never taken from a possibly stale `quote`.
 - The global shortcut hook ignores printable keys inside text fields; the grid handles Space itself
   and calls `preventDefault`, which the global hook respects.
+- **`blockBrowserKeys()`** (`shortcuts.ts`, installed in `main.tsx`) cancels the browser's meaning of
+  F1–F12, Ctrl+letter (except editing keys and Ctrl+Shift+C/I/J), Ctrl+1–9, Alt+letter/Left/Right/Home
+  and the right-click menu outside text boxes, in the capture phase on window, before any handler.
+  So **`defaultPrevented` is always true for a function key**: never use it to tell whether another
+  handler took one (`useShortcuts` ignores it for function keys).
 - **Bills screen is keyboard-first** (`Invoices.tsx`): the list `div` holds focus (`role=grid`) and
   handles arrows/Enter; row actions come from `actionsFor`, which gives each action its blocked
   reason, and ←/→ skip blocked ones. F2 (window listener, off while a dialog is open) focuses the
