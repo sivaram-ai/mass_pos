@@ -230,6 +230,47 @@ class ReturnsAndEditsApiIntegrationTest {
     }
 
     @Test
+    void everyVersionOfAnEditedBillIsListedOldestFirst() throws Exception {
+        String productId = newProductWithStock(10_000);
+        JsonNode first = sell(productId, 3_000, 30_000, "CASH");
+        String body = """
+                {"lines":[{"productId":"%s","quantityMilli":%d,"discountPaise":0}],"payments":[],"print":false}
+                """;
+        JsonNode second = call(post("/api/invoices/" + first.get("id").asText() + "/replace"), managerToken,
+                body.formatted(productId, 2_000), status().isOk()).get("invoice");
+        JsonNode third = call(post("/api/invoices/" + second.get("id").asText() + "/replace"), managerToken,
+                body.formatted(productId, 1_000), status().isOk()).get("invoice");
+        java.util.List<String> chain = java.util.List.of(first.get("invoiceNumber").asText(),
+                second.get("invoiceNumber").asText(), third.get("invoiceNumber").asText());
+
+        // Opened from any version, the whole chain comes back in the order the bills were made.
+        for (JsonNode opened : java.util.List.of(first, second, third)) {
+            JsonNode history = call(get("/api/invoices/" + opened.get("id").asText() + "/history"), cashierToken,
+                    null, status().isOk());
+            assertThat(history.findValuesAsText("invoiceNumber")).containsExactlyElementsOf(chain);
+        }
+
+        JsonNode alone = sell(productId, 1_000, 10_000, "CASH");
+        assertThat(call(get("/api/invoices/" + alone.get("id").asText() + "/history"), cashierToken, null,
+                status().isOk()).findValuesAsText("invoiceNumber")).containsExactly(alone.get("invoiceNumber").asText());
+    }
+
+    @Test
+    void aReturnIsFoundByItsNumberOrJustItsSerial() throws Exception {
+        String productId = newProductWithStock(1_000);
+        JsonNode note = call(post("/api/returns"), managerToken, returnOf(null, productId, 1_000, 10_000),
+                status().isCreated()).get("creditNote");
+        String number = note.get("creditNoteNumber").asText();
+        String serial = "R" + Long.parseLong(number.substring(number.lastIndexOf('R') + 1));
+
+        assertThat(call(get("/api/returns/lookup?number=" + number), cashierToken, null, status().isOk())
+                .get("id").asText()).isEqualTo(note.get("id").asText());
+        assertThat(call(get("/api/returns/lookup?number=" + serial.toLowerCase()), cashierToken, null, status().isOk())
+                .get("id").asText()).isEqualTo(note.get("id").asText());
+        call(get("/api/returns/lookup?number=R9999"), cashierToken, null, status().isNotFound());
+    }
+
+    @Test
     void aBillIsFoundByItsNumberOrJustItsSerial() throws Exception {
         String productId = newProductWithStock(1_000);
         JsonNode bill = sell(productId, 1_000, 10_000, "CASH");

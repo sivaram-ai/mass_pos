@@ -16,7 +16,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3D | Reports: day takings, GST rate-wise + HSN (GSTR-1 prep), audit-trail viewer | Done |
 | 3E | Shop settings moved into the database (`shop_settings`), editable on screen, seeded once from `pos.company.*` | Done |
 | 3F | Readable field errors (`errors` map), non-GST shops, optional HSN/CIN, grid billing screen with Space bill, one-line header with slide-in menu, compact footer, held-bill keys | Done: 127 tests green, driven in the browser |
-| 3G | Edit today's bill (cancel + reissue), returns as credit notes with refunds, reports net of returns, held bills newest first, Esc Esc back to billing | Done: 137 tests green, driven in the browser |
+| 3G | Edit today's bill (cancel + reissue), returns as credit notes with refunds, reports net of returns, held bills newest first, Esc Esc back to billing | Done: 139 tests green, driven in the browser |
 | 4 | Counter → master sync over LAN (see [docs/multi-terminal-and-rbac.md](docs/multi-terminal-and-rbac.md)) | Designed, not built |
 | Later | Flyway migrations, cloud sync, composition scheme / bill of supply, desktop shell | Not started |
 
@@ -64,6 +64,12 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
   selling, never taken from a possibly stale `quote`.
 - The global shortcut hook ignores printable keys inside text fields; the grid handles Space itself
   and calls `preventDefault`, which the global hook respects.
+- **Bills screen is keyboard-first** (`Invoices.tsx`): the list `div` holds focus (`role=grid`) and
+  handles arrows/Enter; row actions come from `actionsFor`, which gives each action its blocked
+  reason, and ←/→ skip blocked ones. F2 (window listener, off while a dialog is open) focuses the
+  search; Esc there calls `stopPropagation` so it never counts toward Esc Esc. Dialogs return focus to
+  the list on close. Edit chains come from `GET /api/invoices/{id}/history` (walks
+  `replacesInvoiceNumber` back and `findFirstByReplacesInvoiceNumber` forward).
 - **Forms show server field errors**: `ApiError.fieldErrors` + `errorFor()` + `<Field error>`.
   Keep new forms on that pattern rather than toasting the message.
 - The in-app browser pane cannot send a real Space keydown or edit text with Backspace; test those

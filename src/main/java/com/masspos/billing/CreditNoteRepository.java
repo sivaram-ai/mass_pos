@@ -14,6 +14,8 @@ public interface CreditNoteRepository extends JpaRepository<CreditNote, UUID> {
 
     long countByNoteDateBetween(LocalDate from, LocalDate to);
 
+    java.util.Optional<CreditNote> findByCreditNoteNumber(String creditNoteNumber);
+
     List<CreditNote> findByOriginalInvoiceIdOrderByIssuedAtAsc(UUID invoiceId);
 
     @Query("""

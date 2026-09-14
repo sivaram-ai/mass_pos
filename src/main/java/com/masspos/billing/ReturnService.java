@@ -147,6 +147,23 @@ public class ReturnService {
         return creditNotes.findByNoteDateBetweenOrderByIssuedAtDesc(from, to).stream().map(CreditNoteView::of).toList();
     }
 
+    /**
+     * A return by its number, or by R and its serial on this till in the current financial year, so
+     * "R3" finds T1-2627-R0003.
+     */
+    @Transactional(readOnly = true)
+    public CreditNoteView lookup(String number) {
+        String text = number == null ? "" : number.trim().toUpperCase(java.util.Locale.ROOT);
+        String full = text.matches("R?\\d{1,9}")
+                ? InvoiceNumbers.formatCreditNote(pos.terminal().code(),
+                        InvoiceNumbers.financialYearCode(LocalDate.now(IndiaTime.ZONE)),
+                        Long.parseLong(text.replace("R", "")))
+                : text;
+        return creditNotes.findByCreditNoteNumber(full)
+                .map(CreditNoteView::of)
+                .orElseThrow(() -> new EntityNotFoundException("No return numbered " + full));
+    }
+
     @Transactional(readOnly = true)
     public CreditNoteView byId(UUID id) {
         return CreditNoteView.of(creditNotes.findById(id)

@@ -19,6 +19,9 @@ public interface InvoiceRepository extends JpaRepository<Invoice, UUID> {
 
     Optional<Invoice> findFirstByTerminalCodeOrderByIssuedAtDesc(String terminalCode);
 
+    /** The bill issued in place of this one when it was edited. */
+    Optional<Invoice> findFirstByReplacesInvoiceNumber(String invoiceNumber);
+
     long countByInvoiceDateBetweenAndStatus(LocalDate from, LocalDate to, InvoiceStatus status);
 
     @Query("""

@@ -112,6 +112,13 @@ public class SaleController {
                 .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
+    /** Every version of an edited bill, oldest first; just the bill when it was never edited. */
+    @GetMapping("/api/invoices/{id}/history")
+    @RequiresRole({UserRole.CASHIER, UserRole.MANAGER, UserRole.AUDITOR})
+    public List<InvoiceView> history(@PathVariable UUID id) {
+        return sales.history(id);
+    }
+
     @GetMapping("/api/invoices/{id}")
     @RequiresRole({UserRole.CASHIER, UserRole.MANAGER, UserRole.AUDITOR})
     @Transactional(readOnly = true)

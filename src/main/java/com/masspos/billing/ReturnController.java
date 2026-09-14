@@ -84,6 +84,13 @@ public class ReturnController {
         return returns.list(start, to == null ? start : to);
     }
 
+    /** A return by its full number, or R and its serial on this till. */
+    @GetMapping("/api/returns/lookup")
+    @RequiresRole({UserRole.CASHIER, UserRole.MANAGER, UserRole.AUDITOR})
+    public CreditNoteView lookup(@RequestParam String number) {
+        return returns.lookup(number);
+    }
+
     @GetMapping("/api/returns/{id}")
     @RequiresRole({UserRole.CASHIER, UserRole.MANAGER, UserRole.AUDITOR})
     public CreditNoteView byId(@PathVariable UUID id) {

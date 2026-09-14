@@ -19,7 +19,7 @@ on different floors.
 | Billing | Keyboard-first grid: code or name lookup in each row, rate, quantity and discount cells, Space to take the bill, hold and resume, split payments (cash / UPI / card / voucher), change due, print |
 | GST | Tax-inclusive or exclusive pricing, CGST + SGST or IGST by place of supply, cess, round-off to the rupee, gapless numbering per till. Shops without a GSTIN bill without tax |
 | Stock | Goods receipts, corrections, damages; stock is the sum of movements, never a number that gets overwritten |
-| Bills | Day list, full bill view, reprint as DUPLICATE, cancel with a reason (stock goes back) |
+| Bills | Day list of bills and returns worked from the keyboard, search by bill number, full bill view with every version of an edited bill, reprint as DUPLICATE, edit, return, cancel with a reason (stock goes back) |
 | Reports | Day takings by tender, cashier and till; best sellers; GST rate-wise and HSN summaries for GSTR-1; the audit trail |
 | Staff | Cashier, manager, auditor and admin accounts; PIN sign-in that lasts the shift |
 | Settings | Company and GST details, receipt footer, service contact, rounding, keyboard shortcuts, the shop's tills |
@@ -111,6 +111,20 @@ Every key can be remapped in Settings; these are the defaults.
 
 Parked bills take no invoice number and hold no stock: nothing is sold until the bill is taken.
 Held bills are listed newest first.
+
+### The Bills and returns screen
+
+The cursor starts in the list: `↑` `↓` choose a bill or return, `←` `→` choose **Open**, **Reprint**,
+**Edit**, **Return** or **Cancel** (Open is picked by default; what a bill cannot do is greyed out and
+skipped), and `Enter` does it. A click on a row opens it.
+
+`F2` goes to the bill number search. Typing filters the day's list; `Enter` goes back to the list on
+the first match, and a number not in that day (the full number, or just its serial such as `59` or
+`R3` for a return) is found on whatever day it belongs to. `Esc` or `↓` leaves the search box for
+the list; `Esc` `Esc` from the list goes back to billing.
+
+Opening a bill that was edited shows every version, oldest first, with the one opened marked
+**(Opened)**, so the cancelled original and its replacement read side by side.
 
 ### Changing a bill after it was taken
 
@@ -207,8 +221,8 @@ is not a loopback name are refused. Together these stop a web page open on the t
 | Staff | `GET/POST /api/users`, `PUT /api/users/{id}`, `POST /api/users/{id}/pin` |
 | Catalogue | `GET /api/products?q=`, `POST /api/products`, `PUT /api/products/{id}`, `POST /api/products/{id}/deactivate` |
 | Stock | `GET /api/stock`, `POST /api/stock/receipts`, `/adjustments`, `/damages` |
-| Billing | `POST /api/sales`, `POST /api/sales/quote`, `GET /api/invoices`, `GET /api/invoices/last`, `GET /api/invoices/lookup?number=`, `GET /api/invoices/{id}`, `POST /api/invoices/{id}/cancel`, `POST /api/invoices/{id}/replace` (edit), `POST /api/invoices/{id}/receipt` |
-| Returns | `GET /api/invoices/{id}/returnable`, `POST /api/returns/quote`, `POST /api/returns`, `GET /api/returns`, `GET /api/returns/{id}`, `POST /api/returns/{id}/receipt` |
+| Billing | `POST /api/sales`, `POST /api/sales/quote`, `GET /api/invoices`, `GET /api/invoices/last`, `GET /api/invoices/lookup?number=`, `GET /api/invoices/{id}`, `GET /api/invoices/{id}/history`, `POST /api/invoices/{id}/cancel`, `POST /api/invoices/{id}/replace` (edit), `POST /api/invoices/{id}/receipt` |
+| Returns | `GET /api/invoices/{id}/returnable`, `POST /api/returns/quote`, `POST /api/returns`, `GET /api/returns`, `GET /api/returns/lookup?number=`, `GET /api/returns/{id}`, `POST /api/returns/{id}/receipt` |
 | Held bills | `GET/POST /api/holds`, `DELETE /api/holds/{id}` |
 | Reports | `GET /api/reports/day`, `/gst`, `/audit` |
 | Settings | `GET/PUT /api/settings` |

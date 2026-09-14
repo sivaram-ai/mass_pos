@@ -35,6 +35,7 @@ import java.util.UUID;
 public class SaleService {
 
     private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("dd-MM-yyyy");
+    private static final int MAX_EDITS = 100;
 
     private final InvoiceRepository invoices;
     private final InvoiceSequenceRepository sequences;
@@ -216,6 +217,33 @@ public class SaleService {
         return sequences.findByTerminalCodeAndFinancialYear(terminalCode, financialYear)
                 .orElseGet(() -> sequences.save(new InvoiceSequence(terminalCode, financialYear)))
                 .next();
+    }
+
+    /**
+     * Every version of a bill that was edited, oldest first: back through the bills it replaced and
+     * on through the bills that replaced it. A bill never edited comes back on its own.
+     */
+    @Transactional(readOnly = true)
+    public List<InvoiceView> history(UUID invoiceId) {
+        Invoice opened = invoices.findById(invoiceId)
+                .orElseThrow(() -> new EntityNotFoundException("No bill " + invoiceId));
+        java.util.LinkedList<Invoice> chain = new java.util.LinkedList<>(List.of(opened));
+        // Each step is one edit; the cap only guards against a loop in hand-edited data.
+        for (int step = 0; step < MAX_EDITS && chain.getFirst().getReplacesInvoiceNumber() != null; step++) {
+            Invoice earlier = invoices.findByInvoiceNumber(chain.getFirst().getReplacesInvoiceNumber()).orElse(null);
+            if (earlier == null || chain.contains(earlier)) {
+                break;
+            }
+            chain.addFirst(earlier);
+        }
+        for (int step = 0; step < MAX_EDITS; step++) {
+            Invoice later = invoices.findFirstByReplacesInvoiceNumber(chain.getLast().getInvoiceNumber()).orElse(null);
+            if (later == null || chain.contains(later)) {
+                break;
+            }
+            chain.addLast(later);
+        }
+        return chain.stream().map(InvoiceView::of).toList();
     }
 
     /** Builds a complete, unpaid invoice under a reserved number: lines, tax and round-off. */
