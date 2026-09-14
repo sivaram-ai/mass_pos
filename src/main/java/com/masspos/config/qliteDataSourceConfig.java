@@ -10,7 +10,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 
 @Configuration(proxyBeanMethods = false)
-public class SqliteDataSourceConfig {
+public class qliteDataSourceConfig {
 
     /**
      * Boot's standard Hikari pool, declared here only so that {@code pos.data-dir} exists before the

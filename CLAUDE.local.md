@@ -48,6 +48,10 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
   `onKeyDown` themselves (AskModal, RefundDialog, AutoFocusButton, the menu drawer).
 - Money is formatted in `api.ts` (`rupees`, `quantity`, `percent`, `rupeesForInput`) with Indian
   grouping; never format money inside a component.
+- **Repeats fold by code + rate, neighbours only** (`foldIntoRowAbove`). Only the newest row folds,
+  and only when the cursor leaves it (`move`, `onCellFocus`) or the bill is taken/held
+  (`foldNewest` after `commitEdit`), never while it is being filled in. Never key on name or code
+  alone; rows from a bill being returned (`originalLineNo`) never fold. Discounts add up.
 - **Billing is a grid** (`Billing.tsx`): each row's code/name cells look items up (list rendered
   `fixed` so the grid's scroll never clips it), rate/qty/disc cells take numbers. Handlers read
   `linesRef`/`editRef`, not render state: a key can change the bill and move on before React

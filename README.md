@@ -63,6 +63,22 @@ Every row stays editable: `←`/`→` move across its cells, `↑`/`↓` move to
 and typing a new code or name in an old row replaces that item. The red bin (or `F5`) deletes any
 row.
 
+Ringing up the same item again straight after itself adds to that row instead of starting a new
+one. Rows fold only when **both the code and the rate** match, and only into the row directly
+above, so the bill keeps the order items were rung up in:
+
+| Rung up | Rows on the bill |
+|---|---|
+| 2, 2 | 2 × 2 |
+| 2, 1, 1 | 2, 1 × 2 |
+| 2, 1, 1, 2 | 2, 1 × 2, 2 |
+| 2, 1, 1, 2, 2 | 2, 1 × 2, 2 × 2 |
+| 2 at ₹70, 2 at ₹75 | two rows (different rate) |
+| 2 at ₹70, 3 at ₹70 | two rows (different code) |
+
+The new row folds when the cursor leaves it (`Enter` after the quantity, an arrow key, a click) or
+when the bill is taken or held, so its quantity and rate can still be typed first.
+
 The header is one line: **Menu** (the screens, and Log out, slide in from the left), the shop and
 till, date and clock, whether bills carry GST, the customer, and the till's last bill and amount.
 The footer lists the shortcuts, which can also be clicked (hide the list under Settings → Keyboard

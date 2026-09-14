@@ -54,6 +54,30 @@ type Ask = {
 const cellId = (row: number, col: Col) => `${row}:${col}`
 const isSearchCol = (col: Col) => SEARCH_COLS.includes(col)
 
+/**
+ * The same item rung up again straight after itself becomes one row: the row at `index` folds into
+ * the row directly above it when both carry the same code and the same rate, adding up quantity and
+ * discount. The key is strictly code + rate: the same code at another rate, or another code at the
+ * same rate, stays its own row. Only neighbours fold, so the bill keeps the order items were rung up
+ * in (2, 1, 2 stays three rows). Rows taken from a bill being returned never fold.
+ *
+ * @return the folded bill, or null when nothing folds
+ */
+function foldIntoRowAbove(lines: Row[], index: number): Row[] | null {
+  const row = lines[index]
+  const above = lines[index - 1]
+  if (!row || !above || row.originalLineNo !== undefined || above.originalLineNo !== undefined
+    || row.unitPricePaise <= 0 || row.sku !== above.sku || row.unitPricePaise !== above.unitPricePaise) {
+    return null
+  }
+  const merged: Row = {
+    ...above,
+    quantityMilli: above.quantityMilli + row.quantityMilli,
+    discountPaise: above.discountPaise + row.discountPaise,
+  }
+  return [...lines.slice(0, index - 1), merged, ...lines.slice(index + 1)]
+}
+
 function cartBody(lines: Row[]) {
   return lines.map((line) => ({
     productId: line.productId,
@@ -141,6 +165,8 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
   const [lastBill, setLastBill] = useState<LastBill | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  /** The row that just took in a repeat of its item, lit up for a moment so the cashier sees where it went. */
+  const [foldedKey, setFoldedKey] = useState<number | null>(null)
   const [shortcuts, setShortcuts] = useState(loadShortcuts)
   const [showShortcuts, setShowShortcuts] = useState(loadShowShortcuts)
   const [askCashReceived, setAskCashReceived] = useState(loadAskCashReceived)
@@ -283,6 +309,28 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
   }
 
   /**
+   * Folds the newest row into the row above when it is the same code at the same rate. Called when
+   * the cursor leaves that row and before a bill is taken or held, never while it is being filled in.
+   */
+  const foldNewest = (current: Row[]): Row[] => {
+    const folded = foldIntoRowAbove(current, current.length - 1)
+    if (!folded) {
+      return current
+    }
+    replaceLines(folded)
+    setFoldedKey(folded[folded.length - 1].key)
+    return folded
+  }
+
+  useEffect(() => {
+    if (foldedKey === null) {
+      return
+    }
+    const timer = setTimeout(() => setFoldedKey(null), 900)
+    return () => clearTimeout(timer)
+  }, [foldedKey])
+
+  /**
    * Applies what was typed in the current cell. Returns the bill as it now stands, or null when the
    * value was refused and the cursor must stay. Unpicked lookup text is simply dropped.
    */
@@ -344,11 +392,15 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
   }
 
   /** Moves the cursor, applying the cell being left. Quantity waits until the item has a rate. */
-  const move = (row: number, col: Col) => {
-    const committed = commitEdit()
-    if (!committed) {
+  const move = (to: number, col: Col) => {
+    const applied = commitEdit()
+    if (!applied) {
       return
     }
+    // Leaving the newest row: a repeat of the item above folds into it, and rows below move up one.
+    const leaving = editRef.current.row
+    const committed = leaving === applied.length - 1 && to !== leaving ? foldNewest(applied) : applied
+    const row = committed !== applied && to > leaving ? to - 1 : to
     const lastRow = modeRef.current.kind === 'return' && modeRef.current.invoice !== null
       ? Math.max(0, committed.length - 1)
       : committed.length
@@ -543,7 +595,8 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     if (busy.current || modalOpen) {
       return
     }
-    const cart = commitEdit()
+    const applied = commitEdit()
+    const cart = applied && foldNewest(applied)
     if (!cart || !readyToBill(cart)) {
       return
     }
@@ -807,7 +860,8 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
       onToast({ tone: 'warn', text: 'Finish or clear the edit or return first' })
       return
     }
-    const cart = commitEdit()
+    const applied = commitEdit()
+    const cart = applied && foldNewest(applied)
     if (cart && cart.length > 0) {
       setAsk({ action: 'hold', title: 'Hold this bill', label: 'Name it so you can find it again', initial: customer.name })
     }
@@ -834,6 +888,10 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
   /** Puts a held bill back on screen. A bill already on screen is held first, never thrown away. */
   const resumeHold = async (held: HeldBill) => {
     try {
+      const applied = commitEdit()
+      if (applied) {
+        foldNewest(applied)
+      }
       const swapped = linesRef.current.length > 0 ? await holdCurrent('') : null
       const resumed = await api.delete<HeldBill>(`/api/holds/${held.id}`)
       replaceLines((resumed.cart.lines ?? []).map((line) => ({ ...line, key: nextKey.current++ })))
@@ -1028,8 +1086,8 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
         } else if (againstBill) {
           requestFocus(Math.min(row + 1, committed.length - 1), 'qty')
         } else {
-          // Quantity or discount done: straight on to the next item.
-          requestFocus(committed.length, 'code')
+          // Quantity or discount done: straight on to the next item (folding a repeat into the row above).
+          move(committed.length, 'code')
         }
         return
       }
@@ -1064,9 +1122,13 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     }
   }
 
-  const onCellFocus = (row: number, col: Col) => {
+  const onCellFocus = (clicked: number, col: Col) => {
     const current = editRef.current
-    if (current.row !== row || current.col !== col) {
+    if (current.row !== clicked || current.col !== col) {
+      // Clicked away from the newest row: it may fold into the row above, moving the rows below up one.
+      const lines = linesRef.current
+      const folded = current.row === lines.length - 1 && clicked !== current.row && foldNewest(lines) !== lines
+      const row = folded && clicked > current.row ? clicked - 1 : clicked
       const moved = { row, col, text: '', dirty: false }
       editRef.current = moved
       setEdit(moved)
@@ -1259,7 +1321,8 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
               const activeRow = edit.row === index
               return (
                 <tr key={line.key}
-                    className={`border-b border-slate-100 ${activeRow ? 'bg-sky-50' : index % 2 ? 'bg-slate-50/60' : ''}`}>
+                    className={`border-b border-slate-100 transition-colors duration-500 ${
+                      foldedKey === line.key ? 'bg-amber-100' : activeRow ? 'bg-sky-50' : index % 2 ? 'bg-slate-50/60' : ''}`}>
                   <td className="num px-2 text-slate-500">{index + 1}</td>
                   <td className="text-center">
                     <button
