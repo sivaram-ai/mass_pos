@@ -1,5 +1,8 @@
 const TOKEN_KEY = 'masspos.token'
 
+/** Window event fired when the server refuses something because of the licence. */
+export const LICENSE_CHANGED = 'masspos:license'
+
 /**
  * Thrown for any non-2xx reply; `message` is the server's own wording, fit to show on screen.
  * `fieldErrors` names each refused form field (`gstin`, `address[1]`) so a form can mark it.
@@ -69,6 +72,10 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const text = await response.text()
   const payload = text ? safeParse(text) : null
   if (!response.ok) {
+    if ((payload as { license?: boolean } | null)?.license) {
+      // A bill refused by the licence: the banner re-reads the licence rather than waiting for its timer.
+      window.dispatchEvent(new Event(LICENSE_CHANGED))
+    }
     const errors = (payload as { errors?: Record<string, string> } | null)?.errors
     throw new ApiError(response.status, messageOf(payload, response.status),
       errors && typeof errors === 'object' ? errors : {})
@@ -134,6 +141,12 @@ const INDIA = 'Asia/Kolkata'
 /** "13-09-2026", in shop time whatever the machine's clock zone. */
 export function billDate(at: Date): string {
   return at.toLocaleDateString('en-GB', { timeZone: INDIA }).replaceAll('/', '-')
+}
+
+/** "2027-09-30", a date the server sends without a time → "30-09-2027". */
+export function dayFromIso(isoDate: string): string {
+  const [year, month, day] = isoDate.split('-')
+  return `${day}-${month}-${year}`
 }
 
 /** "07:16:27 PM" */

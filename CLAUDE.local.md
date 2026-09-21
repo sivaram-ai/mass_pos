@@ -17,6 +17,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3E | Shop settings moved into the database (`shop_settings`), editable on screen, seeded once from `pos.company.*` | Done |
 | 3F | Readable field errors (`errors` map), non-GST shops, optional HSN/CIN, grid billing screen with Space bill, one-line header with slide-in menu, compact footer, held-bill keys | Done: 127 tests green, driven in the browser |
 | 3G | Edit today's bill (cancel + reissue), returns as credit notes with refunds, reports net of returns, held bills newest first, Esc Esc back to billing | Done: 139 tests green, driven in the browser |
+| L1 | Offline subscription licence per till: Ed25519-signed key bound to a hardware machine ID, warn/grace days, billing lock, Licence screen + banner, vendor `tools/license/LicenseTool.java` | Done: 172 tests green, real key verified on this PC |
 | 4 | Counter → master sync over LAN (see [docs/multi-terminal-and-rbac.md](docs/multi-terminal-and-rbac.md)) | Designed, not built |
 | Later | Flyway migrations, cloud sync, composition scheme / bill of supply, desktop shell | Not started |
 
@@ -220,6 +221,27 @@ overridable with `POS_DATA_DIR`. It holds:
 - **Dates.** Business dates and times use `IndiaTime.ZONE`, never the JVM default.
 - **Sync bookkeeping stays off audited entities.** Use an unaudited outbox table.
 
+### Licensing
+
+- **The vendor public key is compiled in** (`VendorKey.PUBLIC_KEY`), never a property or env var:
+  a configurable key lets a shop sign its own licences. The private key and `licences.csv` live in
+  the vendor's folder (`C:\Users\sivar\MassPOS-licensing` here), never in the repo (`.gitignore`
+  covers `vendor-private.key`, `licences.csv`, `*.lic`).
+- **Key format `MPL1.<payload>.<sig>`** is written by `tools/license/LicenseTool.java` and read by
+  `LicenseToken`. Change both together; `LicenseToolCompatibilityTest` runs the real tool to keep
+  them in step. New payload fields must be optional on the app side (unknown fields are ignored).
+- **Only `@RequiresLicense` endpoints lock**: `POST /api/sales`, `/api/returns`,
+  `/api/invoices/{id}/replace`. Anything that issues a new tax document needs it; nothing else may
+  (reports, reprints, cancel, setup must work on a lapsed till). `LicenseInterceptor` runs after
+  `RoleInterceptor`. A licence never blocks startup.
+- **Dates are judged in `IndiaTime.ZONE`** and at `max(today, newest audit_revision.timestamp)`
+  (1 h tolerance), so winding the clock back cannot extend a licence.
+- **Machine ID** (`OsMachineIdentity`): Windows = SMBIOS UUID (`HKLM\SYSTEM\HardwareConfig
+  LastConfig`) + `MachineGuid`, via `reg.exe` (~60 ms, cached). Changing the inputs or `SALT`
+  changes every till's ID and invalidates every issued licence.
+- **API tests that bill** must `@Import(TestLicensing.Config.class)` and call
+  `TestLicensing.install(DATA_DIR)` in the static block that wipes the data dir.
+
 ### Hardware
 
 - **No transaction spans printer or network I/O.** Render in a short read transaction, then submit
@@ -304,5 +326,9 @@ Re-measure under a billing load test.
 - **No status pre-check before printing.**
 - **Indic scripts** need raster printing.
 - **FK enforcement** exists only on tables Hibernate created. Fixed by the Flyway move.
+- **Licence server (L2) not built**: no online check-in, no remote block of a machine, no alert on a
+  reused key. A key already cannot bill on a second machine; stopping a machine = not renewing.
+- **Offline licensing stops copying, not cracking**: the jar can be decompiled and the check patched
+  out. Obfuscation and the L2 check-in raise the bar.
 - **Not yet exercised on real hardware**: serial and TCP printing (fakes and error paths only). Also
   untested: the `frontend` profile and the WiX/DMG installers.

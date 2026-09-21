@@ -4,6 +4,7 @@ import com.masspos.auth.RequiresRole;
 import com.masspos.config.PosProperties;
 import com.masspos.hardware.PrinterException;
 import com.masspos.hardware.ThermalPrinter;
+import com.masspos.license.RequiresLicense;
 import com.masspos.receipt.ReceiptCopy;
 import com.masspos.receipt.ReceiptService;
 import com.masspos.user.UserRole;
@@ -64,6 +65,7 @@ public class SaleController {
     /** Takes the bill, then prints. A printer problem is reported but never undoes the sale. */
     @PostMapping("/api/sales")
     @RequiresRole({UserRole.CASHIER, UserRole.MANAGER})
+    @RequiresLicense
     @ResponseStatus(HttpStatus.CREATED)
     public SaleResponse sell(@Valid @RequestBody SaleRequest request) {
         InvoiceView invoice = sales.sell(request);
@@ -151,6 +153,7 @@ public class SaleController {
      */
     @PostMapping("/api/invoices/{id}/replace")
     @RequiresRole({UserRole.MANAGER})
+    @RequiresLicense
     public EditResponse replace(@PathVariable UUID id, @Valid @RequestBody EditRequest request) {
         SaleService.Edited edited = sales.replace(id, request);
         InvoiceView invoice = edited.invoice();

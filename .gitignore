@@ -8,6 +8,11 @@ frontend/dist/
 #graphifyy
 graphify-out/
 
+# Licensing secrets and customer records belong in the vendor's own folder, never in the repo
+vendor-private.key
+licences.csv
+*.lic
+
 # Local SQLite databases
 *.db
 *.db-wal

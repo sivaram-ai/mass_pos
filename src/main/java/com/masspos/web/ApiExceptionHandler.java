@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import com.masspos.auth.AccessDeniedException;
 import com.masspos.auth.AuthException;
 import com.masspos.hardware.PrinterException;
+import com.masspos.license.LicenseLockedException;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
@@ -68,6 +69,15 @@ public class ApiExceptionHandler {
     public ProblemDetail forbidden(AccessDeniedException e) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, e.getMessage());
         problem.setTitle("Not allowed for this role");
+        return problem;
+    }
+
+    /** {@code license: true} tells the screens to refresh the licence banner. */
+    @ExceptionHandler(LicenseLockedException.class)
+    public ProblemDetail licenseLocked(LicenseLockedException e) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, e.getMessage());
+        problem.setTitle("Billing is locked");
+        problem.setProperty("license", true);
         return problem;
     }
 

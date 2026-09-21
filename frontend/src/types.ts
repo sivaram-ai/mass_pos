@@ -4,6 +4,25 @@ export type Role = 'CASHIER' | 'MANAGER' | 'AUDITOR' | 'ADMIN'
 
 export type PaymentMode = 'CASH' | 'UPI' | 'CARD' | 'VOUCHER' | 'ON_ACCOUNT'
 
+export type LicenseState = 'ACTIVE' | 'EXPIRING' | 'GRACE' | 'EXPIRED' | 'NOT_ACTIVATED' | 'WRONG_MACHINE' | 'INVALID'
+
+/** This till's licence. The licence fields are null until a trustworthy licence is installed. */
+export interface LicenseStatus {
+  state: LicenseState
+  billingAllowed: boolean
+  /** Written for the banner: what is wrong and what to do. */
+  message: string
+  machineId: string | null
+  clockBehind: boolean
+  licenseId: string | null
+  customerId: string | null
+  customer: string | null
+  plan: string | null
+  issuedOn: string | null
+  validUntil: string | null
+  graceEndsOn: string | null
+}
+
 export type Unit = 'NOS' | 'PCS' | 'BOX' | 'PAC' | 'DOZ' | 'KGS' | 'GMS' | 'LTR' | 'MLT' | 'MTR'
 
 /** Units sold in whole pieces; the rest can be weighed or measured. */

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -39,6 +40,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "pos.company.gstin=27AAPFU0939F1ZV",
         "pos.company.address[0]=12 MG Road, Camp"})
 @AutoConfigureMockMvc
+@Import(TestLicensing.Config.class)
 class SaleApiIntegrationTest {
 
     static final String DATA_DIR = "target/test-data/sales-it";
@@ -49,6 +51,7 @@ class SaleApiIntegrationTest {
 
     static {
         FileSystemUtils.deleteRecursively(new File(DATA_DIR));
+        TestLicensing.install(DATA_DIR);
     }
 
     @Autowired

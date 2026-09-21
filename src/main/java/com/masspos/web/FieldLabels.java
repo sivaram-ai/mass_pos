@@ -33,7 +33,8 @@ final class FieldLabels {
             Map.entry("payments", "Payment"),
             Map.entry("newPin", "New PIN"),
             Map.entry("currentPin", "Current PIN"),
-            Map.entry("pin", "PIN"));
+            Map.entry("pin", "PIN"),
+            Map.entry("key", "Licence key"));
 
     /** A path segment such as {@code lines[0]} or {@code quantityMilli}. */
     private static final Pattern SEGMENT = Pattern.compile("([A-Za-z0-9_]+)(?:\\[(\\d+)])?");

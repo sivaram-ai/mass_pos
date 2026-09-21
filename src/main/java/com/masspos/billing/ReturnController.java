@@ -4,6 +4,7 @@ import com.masspos.auth.RequiresRole;
 import com.masspos.common.IndiaTime;
 import com.masspos.hardware.PrinterException;
 import com.masspos.hardware.ThermalPrinter;
+import com.masspos.license.RequiresLicense;
 import com.masspos.receipt.ReceiptController.ReceiptRequest;
 import com.masspos.receipt.ReceiptCopy;
 import com.masspos.receipt.ReceiptService;
@@ -60,6 +61,7 @@ public class ReturnController {
     /** Pays money out of the takings, so a manager's job, like cancelling a bill. */
     @PostMapping("/api/returns")
     @RequiresRole({UserRole.MANAGER})
+    @RequiresLicense
     @ResponseStatus(HttpStatus.CREATED)
     public ReturnResponse issue(@Valid @RequestBody ReturnRequest request) {
         CreditNoteView note = returns.issue(request);

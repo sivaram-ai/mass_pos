@@ -23,6 +23,7 @@ on different floors.
 | Reports | Day takings by tender, cashier and till; best sellers; GST rate-wise and HSN summaries for GSTR-1; the audit trail |
 | Staff | Cashier, manager, auditor and admin accounts; PIN sign-in that lasts the shift |
 | Settings | Company and GST details, receipt footer, service contact, rounding, keyboard shortcuts, the shop's tills |
+| Licence | Subscription licence per till, bound to that computer's hardware, checked offline, with a warning window and a grace period |
 
 ## Quick start
 
@@ -41,7 +42,10 @@ Then open **http://127.0.0.1:8765**.
    both are set. Add the GSTIN if the shop is registered for GST: bills are then tax invoices.
    Without a GSTIN the shop bills without GST: no tax is charged whatever rate an item carries,
    and the receipt is a plain "BILL". HSN/SAC codes and the CIN are optional too.
-3. Add a product under **Products**, record what arrived under **Stock**, and bill it.
+3. Open **Menu > Licence**, send the machine ID shown there to your Mass POS supplier, and paste
+   the licence key they send back. Until then everything works except issuing bills, edits and
+   returns.
+4. Add a product under **Products**, record what arrived under **Stock**, and bill it.
 
 Data lives in `%LOCALAPPDATA%\MassPOS` (Windows) or `~/MassPOS`: the database, logs,
 `pos.properties` and, when no printer is configured, the receipts as text files under
@@ -226,12 +230,69 @@ is not a loopback name are refused. Together these stop a web page open on the t
 | Held bills | `GET/POST /api/holds`, `DELETE /api/holds/{id}` |
 | Reports | `GET /api/reports/day`, `/gst`, `/audit` |
 | Settings | `GET/PUT /api/settings` |
+| Licence | `GET /api/license` (any signed-in user), `POST /api/license` (admin: install or renew a key) |
 | Hardware | `GET /api/hardware/printer/status`, `/serial-ports`, `POST /api/hardware/printer/test-page`, `/drawer/open` |
 
 Errors come back as RFC 7807 problem details whose `detail` is fit to show on screen. A refused
 form also carries `errors`, one message per field (`{"gstin": "is not a valid GSTIN ..."}`), which
 the screens use to mark each input. A bill attempted before the shop's name and address are set
 returns `409`, not a crash.
+
+## Licensing
+
+Each till needs its own **subscription licence**, issued by the vendor for that computer only.
+Nothing about it needs the internet.
+
+### How it behaves at the shop
+
+| State | When | Billing |
+|---|---|---|
+| Active | Up to the licence's end date | Works |
+| Ending soon | The last *warn days* before the end date (a banner on every screen) | Works |
+| Grace period | The *grace days* after the end date (a banner counting down) | Works |
+| Billing locked | After the grace period, with no licence, or with another machine's licence | Refused |
+
+- **Locked means only new documents are refused**: bills, edited bills and returns. Signing in,
+  products, stock, reports, reprints and cancellations keep working, so the shop's records are
+  never out of reach.
+- **One key, one machine.** The key names the machine ID it was issued for (a fingerprint of the
+  motherboard's hardware ID and the Windows installation). Copied to another PC, or restored from
+  a cloned disk, it shows "Billing locked". Reinstalling Windows or replacing the motherboard gives
+  the till a new ID, and the vendor issues a new key for it.
+- **Turning the clock back does not help.** The licence is judged at the latest date already
+  recorded in the till's audit trail, and the banner asks for the date to be corrected.
+- **Renewing** is the same as activating: an admin pastes the new key under **Menu > Licence**. It
+  replaces the old one at once; no restart.
+- The key is kept in `<data-dir>\license.lic`.
+
+### Issuing licences (vendor)
+
+The tool needs only a JDK 21, and its folder holds the private key and the register of every
+licence issued. Keep that folder **out of the repository and backed up offline**: anyone with the
+private key can issue licences, and without it installed tills cannot be renewed.
+
+```powershell
+# Once: create the key pair, then put the printed public key into VendorKey.PUBLIC_KEY and rebuild.
+java tools\license\LicenseTool.java keygen --dir C:\MassPOS-licensing
+
+# Per till, from the machine ID the shop sends. --grace-days and --warn-days default to 15.
+java tools\license\LicenseTool.java issue --dir C:\MassPOS-licensing --machine CH8S-CBX9-J745-7AE9 `
+     --customer-id C001 --customer "Sharma General Store" --valid-until 2027-09-30 --grace-days 15 --warn-days 15
+
+# Every till's latest licence, soonest to lapse first; --expiring-within 30 for renewal calls.
+java tools\license\LicenseTool.java list --dir C:\MassPOS-licensing
+
+# What a key says, and whether this key pair signed it.
+java tools\license\LicenseTool.java inspect --dir C:\MassPOS-licensing <key or .lic file>
+```
+
+`issue` prints the key to send, saves it under `issued\`, and appends a row to `licences.csv`.
+Every value in a key (dates, grace and warning days, machine) is covered by an Ed25519 signature,
+so a shop cannot change any of them.
+
+Not built yet: an online check-in that renews automatically and lets the vendor block a machine
+at once. Until then, a till the vendor wants stopped is simply not renewed and locks after its
+grace period.
 
 ## Compliance design
 
@@ -284,8 +345,10 @@ src/main/java/com/masspos/
   catalog/ inventory/    products, stock ledger
   settings/              shop settings (database-backed)
   reports/               day, GST and audit reports
+  license/               licence key check, machine ID, billing lock
   receipt/ hardware/     ESC/POS layout and printing
   audit/ common/ config/ web/   audit trail, ids, properties, API guards
+tools/license/           vendor's licence tool (single-file Java program, not shipped)
 docs/                    multi-terminal and RBAC design
 ```
 
@@ -294,6 +357,7 @@ docs/                    multi-terminal and RBAC design
 | Symptom | Likely cause |
 |---|---|
 | Billing screen says it is blocked | Fill in legal name and address under Settings |
+| "Billing locked" banner | Menu > Licence says why: no licence, lapsed after its grace period, or issued for another machine |
 | Cannot sign in on a new install | The admin PIN is in `<data-dir>\logs\pos.log` |
 | `Cannot open serial port COM3` | Another program holds it, the name is wrong, or the printer is off |
 | Garbled printing | Baud rate or flow control does not match the printer |
@@ -311,3 +375,5 @@ docs/                    multi-terminal and RBAC design
 | 5 | Counter → master sync over the LAN | Designed |
 | 6 | Flyway migrations, cloud sync for multiple shops, composition scheme / bill of supply | Planned |
 | 7 | Desktop shell: open the browser on start, single instance, tray icon | Planned |
+| L1 | Offline subscription licence per till: hardware-bound signed key, warning and grace periods, vendor tool | Done |
+| L2 | Licence server: check-in when online, automatic renewal, block or re-key a machine, reused-key alerts | Planned |

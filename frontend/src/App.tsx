@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, billDate, clockTime, saveToken, savedToken } from './api'
-import type { Principal, Role, SettingsView } from './types'
+import { api, billDate, clockTime, LICENSE_CHANGED, saveToken, savedToken } from './api'
+import type { LicenseStatus, Principal, Role, SettingsView } from './types'
 import { Login, ChangePin } from './screens/Login'
 import Billing from './screens/Billing'
 import type { BillingRequest } from './screens/Billing'
@@ -10,9 +10,13 @@ import Invoices from './screens/Invoices'
 import Reports from './screens/Reports'
 import Settings from './screens/Settings'
 import Users from './screens/Users'
+import License, { LicenseBanner } from './screens/License'
 import { Banner } from './components/ui'
 
-type Screen = 'billing' | 'products' | 'stock' | 'invoices' | 'reports' | 'users' | 'settings'
+type Screen = 'billing' | 'products' | 'stock' | 'invoices' | 'reports' | 'users' | 'settings' | 'license'
+
+/** Often enough that a till left on overnight shows the lapse soon after midnight. */
+const LICENSE_REFRESH_MS = 10 * 60 * 1000
 
 /** ADMIN reaches everything; the rest see only what their job needs. */
 const SCREENS: { id: Screen; label: string; roles: Role[] }[] = [
@@ -23,11 +27,13 @@ const SCREENS: { id: Screen; label: string; roles: Role[] }[] = [
   { id: 'reports', label: 'Reports', roles: ['MANAGER', 'AUDITOR'] },
   { id: 'users', label: 'Staff', roles: ['MANAGER', 'AUDITOR'] },
   { id: 'settings', label: 'Settings', roles: [] },
+  { id: 'license', label: 'Licence', roles: [] },
 ]
 
 export default function App() {
   const [user, setUser] = useState<Principal | null>(null)
   const [settings, setSettings] = useState<SettingsView | null>(null)
+  const [license, setLicense] = useState<LicenseStatus | null>(null)
   const [screen, setScreen] = useState<Screen>('billing')
   const [booting, setBooting] = useState(true)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -57,6 +63,25 @@ export default function App() {
       refreshSettings()
     }
   }, [user, refreshSettings])
+
+  const signedIn = Boolean(user && !user.mustChangePin)
+  useEffect(() => {
+    if (!signedIn) {
+      return
+    }
+    const refresh = () => {
+      api.get<LicenseStatus>('/api/license').then(setLicense).catch(() => {
+        // Keep the last known state; the next refresh tries again.
+      })
+    }
+    refresh()
+    const timer = setInterval(refresh, LICENSE_REFRESH_MS)
+    window.addEventListener(LICENSE_CHANGED, refresh)
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener(LICENSE_CHANGED, refresh)
+    }
+  }, [signedIn])
 
   // Esc twice in quick succession on any other screen goes back to billing. A single Esc keeps
   // its usual job, and an Esc a dialog or the menu used to close itself never counts.
@@ -97,6 +122,7 @@ export default function App() {
       saveToken(null)
       setUser(null)
       setSettings(null)
+      setLicense(null)
       setScreen('billing')
     }
   }
@@ -156,6 +182,15 @@ export default function App() {
         )}
       </header>
 
+      {license && (license.state !== 'ACTIVE' || license.clockBehind) && (
+        <LicenseBanner
+          status={license}
+          onOpen={allowed.some((item) => item.id === 'license') && current !== 'license'
+            ? () => setScreen('license')
+            : undefined}
+        />
+      )}
+
       <MenuDrawer
         open={menuOpen}
         shopName={shopName}
@@ -206,6 +241,7 @@ export default function App() {
         {current === 'stock' && <Stock onToast={setToast} />}
         {current === 'reports' && <Reports onToast={setToast} />}
         {current === 'users' && <Users role={user.role} onToast={setToast} />}
+        {current === 'license' && <License status={license} onChanged={setLicense} onToast={setToast} />}
         {current === 'settings' && (
           <Settings
             role={user.role}
