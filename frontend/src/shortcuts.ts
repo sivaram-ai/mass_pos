@@ -52,9 +52,13 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutAction, string> = {
   clearBill: 'Escape',
 }
 
+/** F9 is left out on purpose: it opens the menu on every screen and must not be taken by a bill action. */
 export const ASSIGNABLE_KEYS = [
-  'Space', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12', 'Escape', 'Insert', 'Delete',
+  'Space', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F10', 'F11', 'F12', 'Escape', 'Insert', 'Delete',
 ]
+
+/** Opens the menu from anywhere, so no screen needs the mouse to move to another one. */
+export const MENU_KEY = 'F9'
 
 const STORAGE_KEY = 'masspos.shortcuts'
 
@@ -62,9 +66,12 @@ export function loadShortcuts(): Record<ShortcutAction, string> {
   try {
     const saved = localStorage.getItem(STORAGE_KEY)
     const merged: Record<string, string> = saved ? { ...DEFAULT_SHORTCUTS, ...JSON.parse(saved) } : { ...DEFAULT_SHORTCUTS }
-    // Keys saved for actions that no longer exist (such as the old F9 payment key) are dropped.
+    // Keys saved for actions that no longer exist (such as the old F9 payment key) are dropped, and a
+    // till that had mapped an action to F9 before it became the menu key goes back to that default.
     return Object.fromEntries((Object.keys(DEFAULT_SHORTCUTS) as ShortcutAction[])
-      .map((action) => [action, merged[action]])) as Record<ShortcutAction, string>
+      .map((action) => [action, merged[action] === MENU_KEY || !merged[action]
+        ? DEFAULT_SHORTCUTS[action]
+        : merged[action]])) as Record<ShortcutAction, string>
   } catch {
     return { ...DEFAULT_SHORTCUTS }
   }
@@ -194,6 +201,30 @@ export function blockBrowserKeys() {
       event.preventDefault()
     }
   }, true)
+}
+
+/**
+ * Keys a screen owns while it is open: F2 for its search box, F3 and F4 for what it does next.
+ * Bound to the window, so they work wherever the cursor is, and off while a dialog covers the screen.
+ */
+export function useScreenKeys(keys: Record<string, (() => void) | undefined>, enabled = true) {
+  useEffect(() => {
+    if (!enabled) {
+      return
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.altKey || event.metaKey || event.repeat) {
+        return
+      }
+      const handler = keys[keyName(event)]
+      if (handler) {
+        event.preventDefault()
+        handler()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  })
 }
 
 /**

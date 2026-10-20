@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { api, ApiError, messageOfFailure, percent, quantity, rupees } from '../api'
 import type { CreditNote, Invoice, Role } from '../types'
-import { Button, Empty, Field, inputClass, Modal, Panel } from '../components/ui'
+import { Button, Empty, Field, inputClass, KeyBox, Modal, Panel, smallInputClass } from '../components/ui'
+import { useScreenKeys } from '../shortcuts'
 import type { Toast } from '../App'
 
 /** The till's own calendar date, as bill dates are written: 2026-09-13. */
@@ -21,6 +22,8 @@ const ACTION_LABELS: Record<Action, string> = {
 }
 
 const SEARCH_KEY = 'F2'
+const DATE_KEY = 'F3'
+const NEW_RETURN_KEY = 'F4'
 
 /**
  * The day's bills and returns, newest first, worked from the keyboard. The cursor starts in the list:
@@ -48,6 +51,7 @@ export default function Invoices({ role, onToast, onOpenInBilling }: {
   const canPrint = role !== 'AUDITOR'
   const list = useRef<HTMLDivElement>(null)
   const searchBox = useRef<HTMLInputElement>(null)
+  const dateBox = useRef<HTMLInputElement>(null)
   const rows = useRef(new Map<string, HTMLTableRowElement>())
   /** A bill found on another day: selected once that day's list has loaded. */
   const pendingSelect = useRef<string | null>(null)
@@ -100,21 +104,18 @@ export default function Invoices({ role, onToast, onOpenInBilling }: {
     }
   }, [current])
 
-  // F2 from anywhere on the screen (but not over a dialog) goes to the search box.
-  useEffect(() => {
-    if (dialogOpen) {
-      return
-    }
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === SEARCH_KEY) {
-        event.preventDefault()
-        searchBox.current?.focus()
-        searchBox.current?.select()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [dialogOpen])
+  // The screen's own keys, off while a dialog covers it.
+  useScreenKeys({
+    [SEARCH_KEY]: () => {
+      searchBox.current?.focus()
+      searchBox.current?.select()
+    },
+    [DATE_KEY]: () => {
+      dateBox.current?.focus()
+      dateBox.current?.showPicker?.()
+    },
+    [NEW_RETURN_KEY]: canManage && onOpenInBilling ? () => onOpenInBilling('return', null) : undefined,
+  }, !dialogOpen)
 
   const bills = entries.flatMap((entry) => (entry.kind === 'bill' ? [entry.bill] : []))
   const notes = entries.flatMap((entry) => (entry.kind === 'return' ? [entry.note] : []))
@@ -228,6 +229,21 @@ export default function Invoices({ role, onToast, onOpenInBilling }: {
     }
   }
 
+  /** Enter, Esc or down from a header box puts the cursor back in the list. */
+  const backToList = (event: ReactKeyboardEvent<HTMLElement>) => {
+    // Esc here only leaves the box: it must not count toward Esc Esc back to billing.
+    event.preventDefault()
+    event.stopPropagation()
+    event.nativeEvent.stopImmediatePropagation()
+    list.current?.focus()
+  }
+
+  const onDateKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (['Enter', 'Escape', 'ArrowDown'].includes(event.key)) {
+      backToList(event)
+    }
+  }
+
   const onSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') {
       event.preventDefault()
@@ -256,18 +272,19 @@ export default function Invoices({ role, onToast, onOpenInBilling }: {
     <Panel
       title="Bills and returns"
       actions={
-        <div className="flex flex-wrap items-center justify-end gap-3">
-          <span className="text-xs text-slate-500">
+        <div className="flex items-center gap-2">
+          <span className="hidden whitespace-nowrap text-xs text-slate-500 lg:inline">
             {bills.length} bills
-            {notes.length > 0 && <> · {notes.length} return{notes.length === 1 ? '' : 's'} (<span className="num">-{rupees(refunded)}</span>)</>}
+            {notes.length > 0 && <> · {notes.length} return{notes.length === 1 ? '' : 's'}</>}
             {' · net '}<span className="num font-medium text-slate-700">{rupees(takings - refunded)}</span>
           </span>
-          <div className="relative">
+          <KeyBox hint={SEARCH_KEY}>
             <input
               ref={searchBox}
-              className={`${inputClass} num w-56 pr-10 uppercase ${searchError ? 'border-rose-400' : ''}`}
-              placeholder="Bill or return number"
-              aria-label="Search by bill number"
+              className={`${smallInputClass} num w-44 pr-8 uppercase placeholder:normal-case ${
+                searchError ? 'border-rose-400' : ''}`}
+              placeholder="Bill number"
+              aria-label="Search by bill or return number"
               value={search}
               onChange={(event) => {
                 setSearch(event.target.value)
@@ -276,13 +293,24 @@ export default function Invoices({ role, onToast, onOpenInBilling }: {
               }}
               onKeyDown={onSearchKeyDown}
             />
-            <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2">{SEARCH_KEY}</kbd>
-          </div>
+          </KeyBox>
+          <KeyBox hint={DATE_KEY}>
+            <input
+              ref={dateBox}
+              type="date"
+              aria-label="Day to show"
+              className={`${smallInputClass} num w-[8.5rem] pr-7`}
+              value={date}
+              onChange={(event) => setDate(event.target.value)}
+              onKeyDown={onDateKeyDown}
+            />
+          </KeyBox>
           {canManage && onOpenInBilling && (
-            <Button onClick={() => onOpenInBilling('return', null)}>Return without a bill</Button>
+            <Button className="whitespace-nowrap px-2 py-1" title="Take a return for goods without their bill"
+                    hint={NEW_RETURN_KEY} onClick={() => onOpenInBilling('return', null)}>
+              New return
+            </Button>
           )}
-          <input type="date" className={`${inputClass} w-auto`} value={date}
-                 onChange={(event) => setDate(event.target.value)} />
         </div>
       }
     >
@@ -290,8 +318,10 @@ export default function Invoices({ role, onToast, onOpenInBilling }: {
         <span><kbd>↑</kbd> <kbd>↓</kbd> choose a bill</span>
         <span><kbd>←</kbd> <kbd>→</kbd> choose Open, Reprint, Edit, Return or Cancel</span>
         <span><kbd>Enter</kbd> do it</span>
-        <span><kbd>{SEARCH_KEY}</kbd> search a number, <kbd>Enter</kbd> or <kbd>Esc</kbd> back to the list</span>
-        <span><kbd>Esc</kbd> <kbd>Esc</kbd> billing</span>
+        <span><kbd>{SEARCH_KEY}</kbd> bill number · <kbd>{DATE_KEY}</kbd> day
+          {canManage && onOpenInBilling && <> · <kbd>{NEW_RETURN_KEY}</kbd> new return</>}
+          , then <kbd>Enter</kbd> or <kbd>Esc</kbd> back to the list</span>
+        <span><kbd>F9</kbd> menu · <kbd>Esc</kbd> <kbd>Esc</kbd> billing</span>
       </p>
       {searchError && <p className="mb-2 text-sm font-medium text-rose-600">{searchError}</p>}
 

@@ -70,6 +70,14 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
   and the right-click menu outside text boxes, in the capture phase on window, before any handler.
   So **`defaultPrevented` is always true for a function key**: never use it to tell whether another
   handler took one (`useShortcuts` ignores it for function keys).
+- **Screen keys**: `useScreenKeys` (shortcuts.ts) binds a screen's own F-keys while it is open —
+  F2 its search box, F3/F4 what it does next (Bills: day, new return; Products: add). `KeyBox`
+  (ui.tsx) draws the key inside the box. Pass `!dialogOpen` so they do nothing behind a dialog.
+- **F9 opens the menu everywhere** (`MENU_KEY`, handled in `App`), so it is deliberately absent from
+  `ASSIGNABLE_KEYS`; `isModalOpen()` (a counter kept by `Modal`) stops it opening behind a dialog.
+- **Bills and Products share one list pattern**: a focused `div role=grid`, arrows for row and action,
+  Enter to run, dialogs returning focus to the list. Products' table is `table-fixed` with a colgroup
+  and `truncate` + `title` on the name, so a 150-character name cannot push the columns off screen.
 - **Bills screen is keyboard-first** (`Invoices.tsx`): the list `div` holds focus (`role=grid`) and
   handles arrows/Enter; row actions come from `actionsFor`, which gives each action its blocked
   reason, and ←/→ skip blocked ones. F2 (window listener, off while a dialog is open) focuses the

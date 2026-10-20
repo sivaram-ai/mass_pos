@@ -27,10 +27,12 @@ type ButtonProps = {
   tone?: 'primary' | 'default' | 'danger' | 'ghost'
   hint?: string
   disabled?: boolean
+  /** Hover text, for a short label whose full meaning needs a sentence. */
+  title?: string
   className?: string
 }
 
-export function Button({ children, onClick, type = 'button', tone = 'default', hint, disabled, className = '' }: ButtonProps) {
+export function Button({ children, onClick, type = 'button', tone = 'default', hint, disabled, title, className = '' }: ButtonProps) {
   const tones = {
     primary: 'bg-sky-600 text-white hover:bg-sky-500 disabled:bg-slate-300',
     default: 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 disabled:text-slate-400',
@@ -42,7 +44,9 @@ export function Button({ children, onClick, type = 'button', tone = 'default', h
       type={type}
       onClick={onClick}
       disabled={disabled}
-      className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed ${tones[tone]} ${className}`}
+      title={title}
+      className={`inline-flex items-center gap-2 rounded-md text-sm font-medium transition disabled:cursor-not-allowed ${
+        className.includes('py-') ? '' : 'px-3 py-2'} ${tones[tone]} ${className}`}
     >
       {children}
       {hint && <kbd>{hint}</kbd>}
@@ -83,8 +87,29 @@ export function errorFor(errors: Record<string, string>, prefix: string): string
   return found.length ? found.join('; ') : undefined
 }
 
+/** A box that fits in a screen header: the same look, half the height. */
+export const smallInputClass =
+  'rounded-md border border-slate-300 px-2 py-1 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100'
+
 export const inputClass =
   'w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100'
+
+/** A header box with the key that jumps to it shown inside, on the right. */
+export function KeyBox({ hint, children }: { hint: string; children: ReactNode }) {
+  return (
+    <div className="relative">
+      {children}
+      <kbd className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2">{hint}</kbd>
+    </div>
+  )
+}
+
+/** How many dialogs are open, so a screen key knows not to act behind one. */
+let openModals = 0
+
+export function isModalOpen(): boolean {
+  return openModals > 0
+}
 
 export function Modal({ title, children, onClose, wide, size }: {
   title: string
@@ -95,6 +120,13 @@ export function Modal({ title, children, onClose, wide, size }: {
   size?: 'md' | 'xl' | '3xl'
 }) {
   const width = { md: 'max-w-md', xl: 'max-w-xl', '3xl': 'max-w-3xl' }[size ?? (wide ? '3xl' : 'md')]
+
+  useEffect(() => {
+    openModals += 1
+    return () => {
+      openModals -= 1
+    }
+  }, [])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {

@@ -11,7 +11,8 @@ import Reports from './screens/Reports'
 import Settings from './screens/Settings'
 import Users from './screens/Users'
 import License, { LicenseBanner } from './screens/License'
-import { Banner } from './components/ui'
+import { Banner, isModalOpen } from './components/ui'
+import { MENU_KEY, useScreenKeys } from './shortcuts'
 
 type Screen = 'billing' | 'products' | 'stock' | 'invoices' | 'reports' | 'users' | 'settings' | 'license'
 
@@ -106,6 +107,15 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [onBilling, menuOpen, user])
 
+  // F9 opens the menu from any screen, and closes it again; never from behind a dialog.
+  useScreenKeys({
+    [MENU_KEY]: () => {
+      if (!isModalOpen()) {
+        setMenuOpen((wasOpen) => !wasOpen)
+      }
+    },
+  }, Boolean(user) && !user?.mustChangePin)
+
   useEffect(() => {
     if (!toast) {
       return
@@ -154,6 +164,7 @@ export default function App() {
         >
           <MenuIcon />
           Menu
+          <kbd>{MENU_KEY}</kbd>
         </button>
         <div className="flex min-w-0 items-baseline gap-2">
           <span className="truncate text-base font-semibold">{shopName}</span>

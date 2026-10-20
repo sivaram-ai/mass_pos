@@ -111,6 +111,7 @@ Every key can be remapped in Settings; these are the defaults.
 | `Insert` | Edit today's bill (manager). Asks for the bill number (the last bill is filled in; its serial, e.g. `42`, is enough) |
 | `F12` | Return (manager). Asks for the bill the goods were sold on; leave it empty for a return without the bill |
 | `Esc` | Cancel what is being typed in a cell; otherwise clear the bill, or stop an edit or return (asks first) |
+| `F9` | Open the menu, from any screen; `F9` again closes it. Reserved, so it cannot be remapped |
 | `Esc` `Esc` | On any other screen: back to billing |
 
 Parked bills take no invoice number and hold no stock: nothing is sold until the bill is taken.
@@ -122,13 +123,22 @@ The cursor starts in the list: `↑` `↓` choose a bill or return, `←` `→` 
 **Edit**, **Return** or **Cancel** (Open is picked by default; what a bill cannot do is greyed out and
 skipped), and `Enter` does it. A click on a row opens it.
 
-`F2` goes to the bill number search. Typing filters the day's list; `Enter` goes back to the list on
-the first match, and a number not in that day (the full number, or just its serial such as `59` or
-`R3` for a return) is found on whatever day it belongs to. `Esc` or `↓` leaves the search box for
-the list; `Esc` `Esc` from the list goes back to billing.
+`F2` goes to the bill number search, `F3` to the day, and `F4` takes a return without a bill.
+Typing in the search filters the day's list; `Enter` goes back to the list on the first match, and a
+number not in that day (the full number, or just its serial such as `59` or `R3` for a return) is
+found on whatever day it belongs to. `Enter`, `Esc` or `↓` leaves a header box for the list;
+`Esc` `Esc` from the list goes back to billing.
 
 Opening a bill that was edited shows every version, oldest first, with the one opened marked
 **(Opened)**, so the cancelled original and its replacement read side by side.
+
+### The Products screen
+
+The same keyboard: the cursor starts in the list, `↑` `↓` choose an item, `←` `→` choose **Edit** or
+**Stop**, and `Enter` does it (Stop asks first). `F2` searches by name, code, barcode or HSN and `F3`
+adds a product; `Enter` or `Esc` goes back to the list. In the product dialog `Enter` saves from any
+box and `Esc` closes it. Long names are cut to keep the columns lined up, with the whole name on
+hover.
 
 ### Changing a bill after it was taken
 
