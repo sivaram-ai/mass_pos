@@ -3,6 +3,7 @@ import { api, fieldErrorsOf, messageOfFailure } from '../api'
 import type { Role, SettingsView, ShopSettingsForm } from '../types'
 import { Banner, Button, Empty, errorFor, Field, inputClass, Panel } from '../components/ui'
 import PrinterPanel from '../components/PrinterPanel'
+import DatabasePanel from '../components/DatabasePanel'
 
 const FIELD_LABELS: Record<string, string> = {
   legalName: 'Legal name',
@@ -202,6 +203,8 @@ export default function Settings({ role, settings, onSaved, onToast }: {
       </Panel>
 
       <PrinterPanel canEdit={canEdit} onToast={onToast} />
+
+      <DatabasePanel canEdit={canEdit} onToast={onToast} />
 
       <Panel title="Keyboard shortcuts" actions={
         <Button onClick={() => {

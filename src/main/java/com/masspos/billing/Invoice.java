@@ -86,6 +86,13 @@ public class Invoice extends BaseEntity implements TaxDocument {
     private String buyerName;
 
     /**
+     * Taken away rather than eaten in. Printed as a large P so the kitchen and the counter can tell
+     * the two apart at a glance; it changes nothing about the tax or the total.
+     */
+    @Column(nullable = false, columnDefinition = "boolean default 0")
+    private boolean parcel;
+
+    /**
      * State code of the place of supply. Differs from the seller's state ⇒ IGST instead of CGST + SGST.
      * Empty on the bill of a shop without a GSTIN, where no tax applies.
      */
@@ -289,6 +296,15 @@ public class Invoice extends BaseEntity implements TaxDocument {
 
     public String getBuyerName() {
         return buyerName;
+    }
+
+    /** Only while the bill is being built: after it is issued the trigger freezes this column. */
+    public void takeAway(boolean parcel) {
+        this.parcel = parcel;
+    }
+
+    public boolean isParcel() {
+        return parcel;
     }
 
     public String getPlaceOfSupply() {

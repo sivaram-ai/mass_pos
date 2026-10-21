@@ -9,7 +9,7 @@ import type {
   ReturnResponse, Role, SaleResponse, SettingsView, Tender,
 } from '../types'
 import { WHOLE_UNITS } from '../types'
-import { AskModal, Banner, Button, Empty, Field, inputClass, Modal } from '../components/ui'
+import { AskModal, Banner, Button, Empty, Field, inputClass, isModalOpen, Modal } from '../components/ui'
 import {
   actionFor, loadAskCashReceived, loadShortcuts, loadShowShortcuts, SHORTCUT_LABELS, useShortcuts,
 } from '../shortcuts'
@@ -22,6 +22,12 @@ const NO_CUSTOMER: Customer = { name: '', gstin: '', placeOfSupply: '' }
 /** The editable columns of a bill row, left to right. Amount is worked out by the server. */
 type Col = 'code' | 'name' | 'rate' | 'qty' | 'disc'
 const COLS: Col[] = ['code', 'name', 'rate', 'qty', 'disc']
+
+/**
+ * Marks the bill a parcel, on the payment screen only. It is the grid's customer key as well, but
+ * the grid's shortcuts are off while a dialog is open, so the two never meet.
+ */
+const PARCEL_KEY = 'F1'
 /** Typing in these looks an item up; the rest take numbers. */
 const SEARCH_COLS: Col[] = ['code', 'name']
 
@@ -294,6 +300,32 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     }
   }, [requestFocus])
 
+  /**
+   * Esc Esc already comes back here from another screen. On this screen it brings the cursor back
+   * to the green row, which is what a cashier needs after a click has taken focus off the grid
+   * altogether - App installs no handler while billing is in front, so nothing was listening.
+   */
+  useEffect(() => {
+    if (!inFront) {
+      return
+    }
+    let lastEscape = 0
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.repeat || isModalOpen()) {
+        return
+      }
+      const now = performance.now()
+      if (now - lastEscape < 600) {
+        lastEscape = 0
+        focusEntry()
+      } else {
+        lastEscape = now
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [inFront, focusEntry])
+
   const refuse = (row: number, col: Col, message: string) => {
     setInvalid({ row, col })
     setError(message)
@@ -550,7 +582,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
 
   const priceOf = (cart: Row[]) => quoteFor(cart, modeRef.current, customer.placeOfSupply)
 
-  const sell = async (cart: Row[], tenders: Tender[]) => {
+  const sell = async (cart: Row[], tenders: Tender[], parcel: boolean) => {
     const sale = await api.post<SaleResponse>('/api/sales', {
       lines: cartBody(cart),
       payments: tenders,
@@ -559,6 +591,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
       placeOfSupply: gst ? customer.placeOfSupply || null : null,
       print: true,
       openDrawer: tenders.some((tender) => tender.mode === 'CASH'),
+      parcel,
     })
     setLastBill(lastBillOf(sale.invoice))
     clearBill()
@@ -616,7 +649,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
   }
 
   /** Cancels the bill being edited and issues the corrected one; only the difference changes hands. */
-  const saveEdit = async (cart: Row[], tenders: Tender[]) => {
+  const saveEdit = async (cart: Row[], tenders: Tender[], parcel: boolean) => {
     const current = modeRef.current
     if (current.kind !== 'edit') {
       return
@@ -630,6 +663,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
       placeOfSupply: gst ? customer.placeOfSupply || null : null,
       print: true,
       openDrawer: tenders.some((tender) => tender.mode === 'CASH') || refundsCash,
+      parcel,
     })
     setLastBill(lastBillOf(edited.invoice))
     clearBill()
@@ -675,7 +709,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     setSaving(true)
     try {
       if (settling.kind === 'edit') {
-        await saveEdit(settling.cart, [])
+        await saveEdit(settling.cart, [], mode.kind === 'edit' && mode.invoice.parcel)
       } else {
         await issueReturn(settling.cart, refund, reason)
       }
@@ -820,7 +854,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request])
 
-  const completePayment = async (tenders: Tender[]) => {
+  const completePayment = async (tenders: Tender[], parcel: boolean) => {
     if (busy.current || !payment) {
       return
     }
@@ -828,9 +862,9 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     setSaving(true)
     try {
       if (payment.purpose === 'edit') {
-        await saveEdit(payment.cart, tenders)
+        await saveEdit(payment.cart, tenders, parcel)
       } else {
-        await sell(payment.cart, tenders)
+        await sell(payment.cart, tenders, parcel)
       }
     } catch (failure) {
       setError(messageOfFailure(failure, payment.purpose === 'edit' ? 'Could not save the edit' : 'Could not take the bill'))
@@ -1221,15 +1255,15 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
       {active && headerSlot && createPortal(
         <>
           {mode.kind === 'edit' ? (
-            <span className="rounded-full bg-amber-400 px-2.5 py-0.5 text-xs font-semibold text-amber-950">
+            <span className="shrink-0 rounded-full bg-amber-400 px-2.5 py-0.5 text-xs font-semibold text-amber-950">
               Editing bill {mode.invoice.invoiceNumber}
             </span>
           ) : mode.kind === 'return' ? (
-            <span className="rounded-full bg-rose-500 px-2.5 py-0.5 text-xs font-semibold text-white">
+            <span className="shrink-0 rounded-full bg-rose-500 px-2.5 py-0.5 text-xs font-semibold text-white">
               {mode.invoice ? `Return on bill ${mode.invoice.invoiceNumber}` : 'Return without a bill'}
             </span>
           ) : (
-            <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+            <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${
               gst ? 'bg-sky-500/20 text-sky-200' : 'bg-slate-700 text-slate-200'}`}>
               {gst ? 'GST tax invoice' : 'Bill without GST'}
             </span>
@@ -1239,14 +1273,14 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
             tabIndex={-1}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => setEditingCustomer(true)}
-            className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-slate-800"
+            className="flex min-w-0 shrink items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-slate-800"
           >
             <span className="text-slate-400">Customer</span>
             <span className="truncate font-medium text-white">{customer.name || 'Walk-in'}</span>
             {customer.gstin && <span className="num hidden text-xs text-slate-400 xl:inline">{customer.gstin}</span>}
             <kbd>{shortcuts.customer}</kbd>
           </button>
-          <div className="ml-auto flex items-center gap-4 text-sm text-slate-400">
+          <div className="ml-auto flex shrink-0 items-center gap-4 whitespace-nowrap text-sm text-slate-400">
             <span>Last bill <span className="num font-medium text-white">{lastBill?.invoiceNumber ?? '—'}</span></span>
             <span className="hidden lg:inline">
               Last amount <span className="num font-medium text-white">{lastBill ? rupees(lastBill.grandTotalPaise) : '—'}</span>
@@ -1413,6 +1447,12 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
                   </button>
                 </li>
               ))}
+              <li>
+                <span className="flex w-full items-center justify-between gap-1 rounded px-1 py-px text-left">
+                  <span className="truncate">Parcel (on the payment screen)</span>
+                  <kbd>{PARCEL_KEY}</kbd>
+                </span>
+              </li>
             </ul>
           </section>
         )}
@@ -1470,8 +1510,9 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
           title={payment.purpose === 'edit' ? 'Collect the difference' : 'Payment'}
           confirmLabel={payment.purpose === 'edit' ? 'Save edit' : 'Take bill'}
           askCashReceived={askCashReceived}
+          initialParcel={mode.kind === 'edit' && mode.invoice.parcel}
           onClose={() => { setPayment(null); focusEntry() }}
-          onConfirm={(tenders) => void completePayment(tenders)}
+          onConfirm={(tenders, parcel) => void completePayment(tenders, parcel)}
         />
       )}
 
@@ -1985,15 +2026,20 @@ function ModeList({ modes, value, tone, onChange }: {
  * @param askCashReceived a cash bill needs the amount handed over typed in; otherwise an empty
  *                        amount means the exact total
  */
-function PaymentDialog({ due, title = 'Payment', confirmLabel = 'Take bill', askCashReceived, onClose, onConfirm }: {
+function PaymentDialog({ due, title = 'Payment', confirmLabel = 'Take bill', askCashReceived, initialParcel = false,
+                        onClose, onConfirm }: {
   due: number
   title?: string
   confirmLabel?: string
   askCashReceived: boolean
+  /** Editing a bill that was a parcel keeps it one unless the cashier says otherwise. */
+  initialParcel?: boolean
   onClose: () => void
-  onConfirm: (tenders: Tender[]) => void
+  onConfirm: (tenders: Tender[], parcel: boolean) => void
 }) {
   const [mode, setMode] = useState<PaymentMode>('CASH')
+  /** Taken away rather than eaten in: the bill is printed with a large P beside its UPI code. */
+  const [parcel, setParcel] = useState(initialParcel)
   const [tenderedText, setTenderedText] = useState('')
   const [reference, setReference] = useState('')
   const [parts, setParts] = useState<Tender[]>([])
@@ -2045,7 +2091,7 @@ function PaymentDialog({ due, title = 'Payment', confirmLabel = 'Take bill', ask
     const all = [...parts, tender]
     if (amount >= remaining) {
       submitted.current = true
-      onConfirm(all)
+      onConfirm(all, parcel)
     } else {
       setParts(all)
       setTenderedText('')
@@ -2075,7 +2121,12 @@ function PaymentDialog({ due, title = 'Payment', confirmLabel = 'Take bill', ask
           settle()
         }}
         onKeyDown={(event) => {
-          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          if (event.key === PARCEL_KEY) {
+            event.preventDefault()
+            if (!event.repeat) {
+              setParcel((on) => !on)
+            }
+          } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
             event.preventDefault()
             choose(stepMode(MODES, mode, event.key))
           } else if (event.key === 'Enter') {
@@ -2097,9 +2148,29 @@ function PaymentDialog({ due, title = 'Payment', confirmLabel = 'Take bill', ask
 
         <div className="min-w-0 flex-1 space-y-3">
           <div className="flex items-baseline justify-between rounded-md bg-slate-900 px-4 py-3 text-white">
-            <span className="text-sm text-slate-300">{parts.length ? 'Still to pay' : 'Bill total'}</span>
+            <span className="flex items-baseline gap-2 text-sm text-slate-300">
+              {parts.length ? 'Still to pay' : 'Bill total'}
+              {parcel && (
+                <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-bold text-amber-950">
+                  PARCEL
+                </span>
+              )}
+            </span>
             <span className="num text-3xl font-semibold">{rupees(remaining)}</span>
           </div>
+          <button
+            type="button"
+            tabIndex={-1}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => setParcel((on) => !on)}
+            className={`flex w-full items-center justify-between rounded-md border px-3 py-1.5 text-sm transition ${
+              parcel
+                ? 'border-amber-400 bg-amber-50 font-medium text-amber-900'
+                : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}
+          >
+            <span>{parcel ? 'Parcel: printed with a big P' : 'Eat in. Press for a parcel'}</span>
+            <kbd>{PARCEL_KEY}</kbd>
+          </button>
 
           {parts.length > 0 && (
             <ul className="space-y-1 text-sm">

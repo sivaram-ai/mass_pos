@@ -30,14 +30,14 @@ class ReceiptFormatterTest {
         String receipt = format(48, intraStateSale(), shop(), ReceiptCopy.ORIGINAL);
 
         assertThat(receipt)
-                .contains("ORIGINAL FOR RECIPIENT", "MASS MART", "Mass Retail Private Limited", "12 MG Road, Camp",
+                .contains("MASS MART", "Mass Retail Private Limited", "12 MG Road, Camp",
                         "Ph: 020-5550100", "accounts@massmart.example", "GSTIN: 27AAPFU0939F1ZV",
                         "CIN: U52100MH2020PTC123456", "FSSAI Lic. No: 11521999000123", "TAX INVOICE",
                         "Invoice: T1-2627-00001", "Date: 11-09-2026", "Time: 10:54", "Paracetamol 500mg",
                         "100.00   2 200.00", "CGST", "15.25", "SGST", "15.26", "TOTAL Rs.", "200.00",
                         "Place of supply: 27-Maharashtra", "Reverse charge: No",
                         "Goods once sold are exchanged within 7 days", "Thank you! Visit again")
-                .doesNotContain("IGST", "Buyer GSTIN", "CANCELLED");
+                .doesNotContain("IGST", "Buyer GSTIN", "CANCELLED", "ORIGINAL FOR RECIPIENT");
     }
 
     @Test
@@ -88,9 +88,23 @@ class ReceiptFormatterTest {
         int header = lines.indexOf("Item" + " ".repeat(29) + "Rate Qty Amount");
 
         assertThat(header).as("the item table header").isNotNegative();
-        assertThat(lines.get(header + 1)).isEqualTo("1. Paracetamol 500mg strip of  100.00   2 200.00");
-        assertThat(lines.get(header + 2)).as("the rest of a long name, under itself").isEqualTo("   15 tablets");
+        assertThat(lines.get(header + 1)).as("a rule under the headings").isEqualTo("-".repeat(48));
+        assertThat(lines.get(header + 2)).isEqualTo("1. Paracetamol 500mg strip of  100.00   2 200.00");
+        assertThat(lines.get(header + 3)).as("the rest of a long name, under itself").isEqualTo("   15 tablets");
         assertThat(lines).noneMatch(line -> line.contains("HSN"));
+    }
+
+    @Test
+    void aParcelIsMarkedWithOneBigPBesideTheUpiCode() {
+        Invoice parcel = intraStateSale();
+        parcel.takeAway(true);
+        List<String> lines = format(48, parcel, shop(), ReceiptCopy.ORIGINAL).lines().toList();
+        int code = lines.indexOf(lines.stream().filter(line -> line.contains("[QR upi://")).findFirst().orElseThrow());
+
+        assertThat(lines.get(code + 1).strip()).isEqualTo("P");
+        assertThat(format(48, intraStateSale(), shop(), ReceiptCopy.ORIGINAL).lines())
+                .as("an eat-in bill carries no mark")
+                .noneMatch(line -> line.strip().equals("P"));
     }
 
     @Test

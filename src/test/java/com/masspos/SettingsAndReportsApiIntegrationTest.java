@@ -21,7 +21,12 @@ import org.springframework.util.FileSystemUtils;
 
 import java.io.File;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.greaterThan;
+import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -248,6 +253,39 @@ class SettingsAndReportsApiIntegrationTest {
                  "serviceProviderName":"Ravi Systems","servicePhone":"98200-00000",
                  "serviceEmail":"support@example.com","roundInvoiceTotal":true,"blockNegativeStock":false}
                 """.formatted(gstin);
+    }
+
+    @Test
+    void anAdminCanTakeABackupOfTheShopsDatabase() throws Exception {
+        mvc.perform(as(get("/api/settings/database"), cashierToken)).andExpect(status().isForbidden());
+
+        mvc.perform(as(post("/api/settings/database/backup"), adminToken)
+                        .header(LocalApiGuard.CLIENT_HEADER, "test"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.backups[0].name").value(startsWith("pos-")))
+                .andExpect(jsonPath("$.backups[0].sizeBytes").value(greaterThan(0)))
+                .andExpect(jsonPath("$.restoreFrom").doesNotExist());
+
+        assertThat(Path.of(DATA_DIR, "backups")).isDirectoryContaining(file -> file.toString().endsWith(".db"));
+    }
+
+    /** A holiday snap renamed to .db must not be allowed to replace a shop's takings. */
+    @Test
+    void refusesToPutBackAFileThatIsNotThisTillsDatabase() throws Exception {
+        Files.createDirectories(Path.of(DATA_DIR, "backups"));
+        Files.writeString(Path.of(DATA_DIR, "backups", "not-a-database.db"), "this is not SQLite");
+
+        mvc.perform(as(post("/api/settings/database/restore"), adminToken)
+                        .header(LocalApiGuard.CLIENT_HEADER, "test")
+                        .contentType(APPLICATION_JSON).content("{\"file\":\"not-a-database.db\"}"))
+                .andExpect(status().isBadRequest());
+
+        mvc.perform(as(post("/api/settings/database/restore"), adminToken)
+                        .header(LocalApiGuard.CLIENT_HEADER, "test")
+                        .contentType(APPLICATION_JSON).content("{\"file\":\"../pos.db\"}"))
+                .andExpect(status().isBadRequest());
+
+        assertThat(Path.of(DATA_DIR, "restore-pending.db")).doesNotExist();
     }
 
     private static MockHttpServletRequestBuilder as(MockHttpServletRequestBuilder request, String token) {

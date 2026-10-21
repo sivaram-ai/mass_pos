@@ -152,6 +152,8 @@ export interface Invoice {
   status: 'ISSUED' | 'CANCELLED'
   /** False for the bill of a shop without a GSTIN: no tax on it. */
   taxInvoice: boolean
+  /** Taken away rather than eaten in: printed with a large P beside the UPI code. */
+  parcel: boolean
   terminalCode: string
   cashier: string
   buyerName: string | null
@@ -337,6 +339,21 @@ export interface PrinterSetupView {
   target: string
   serialPorts: SerialPortInfo[]
   installedPrinters: string[]
+}
+
+/** One copy of the shop's database, sitting in the backups folder. */
+export interface BackupFile {
+  name: string
+  sizeBytes: number
+  takenAt: string
+  /** True for the one this till will put back when it next starts. */
+  restorePending: boolean
+}
+
+export interface DatabaseView {
+  backups: BackupFile[]
+  folder: string
+  restoreFrom: string | null
 }
 
 export interface PrinterStatus {

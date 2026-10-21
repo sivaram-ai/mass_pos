@@ -6,11 +6,13 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import com.masspos.backup.DatabaseBackups;
+
 import java.io.IOException;
 import java.nio.file.Files;
 
 @Configuration(proxyBeanMethods = false)
-public class qliteDataSourceConfig {
+public class SqliteDataSourceConfig {
 
     /**
      * Boot's standard Hikari pool, declared here only so that {@code pos.data-dir} exists before the
@@ -21,6 +23,9 @@ public class qliteDataSourceConfig {
     @ConfigurationProperties("spring.datasource.hikari")
     public HikariDataSource dataSource(DataSourceProperties properties, PosProperties pos) throws IOException {
         Files.createDirectories(pos.dataDir());
+        // The one moment a backup can be put in place: the database is about to be opened, and
+        // nothing - not Hibernate, not the audit triggers - has touched it yet.
+        DatabaseBackups.applyPendingRestore(pos.dataDir());
         return properties.initializeDataSourceBuilder().type(HikariDataSource.class).build();
     }
 }

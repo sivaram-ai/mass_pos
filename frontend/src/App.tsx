@@ -160,23 +160,24 @@ export default function App() {
           onClick={() => setMenuOpen(true)}
           aria-label="Open menu"
           aria-expanded={menuOpen}
-          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-slate-800"
+          className="flex shrink-0 items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-slate-800"
         >
           <MenuIcon />
           Menu
           <kbd>{MENU_KEY}</kbd>
         </button>
-        <div className="flex min-w-0 items-baseline gap-2">
-          <span className="truncate text-base font-semibold">{shopName}</span>
+        {/* A long shop name gives way first: it is cut, rather than pushing the rest off the row. */}
+        <div className="flex min-w-0 shrink items-baseline gap-2">
+          <span className="max-w-[20rem] truncate text-base font-semibold">{shopName}</span>
           {settings && (
-            <span className="hidden text-xs text-slate-400 lg:inline">
+            <span className="hidden shrink-0 text-xs text-slate-400 lg:inline">
               {settings.thisTerminal.name} ({settings.thisTerminal.code})
               {settings.thisTerminal.section ? ` · ${settings.thisTerminal.section}` : ''}
             </span>
           )}
         </div>
         <Clock />
-        <div ref={setHeaderSlot} className="flex min-w-0 flex-1 items-center gap-4" />
+        <div ref={setHeaderSlot} className="flex min-w-0 flex-1 items-center gap-4 overflow-hidden" />
         {current !== 'billing' && (
           <span className="ml-auto flex items-center gap-4 text-sm font-medium text-slate-300">
             {allowed.find((item) => item.id === current)?.label}
@@ -277,8 +278,8 @@ function Clock() {
     return () => clearInterval(timer)
   }, [])
   return (
-    <div className="flex items-center gap-2">
-      <span className="num text-sm font-medium text-slate-200">{billDate(now)}</span>
+    <div className="flex shrink-0 items-center gap-2">
+      <span className="num hidden text-sm font-medium text-slate-200 md:inline">{billDate(now)}</span>
       <span className="num rounded bg-slate-800 px-2 py-0.5 font-mono text-sm font-semibold text-emerald-300">
         {clockTime(now)}
       </span>

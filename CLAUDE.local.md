@@ -75,6 +75,11 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 - **Screen keys**: `useScreenKeys` (shortcuts.ts) binds a screen's own F-keys while it is open —
   F2 its search box, F3/F4 what it does next (Bills: day, new return; Products: add). `KeyBox`
   (ui.tsx) draws the key inside the box. Pass `!dialogOpen` so they do nothing behind a dialog.
+- **Esc Esc has two jobs.** From another screen, App brings you back to billing. On the billing
+  screen App installs no handler at all, so Billing has its own: it puts the cursor back on the
+  green row after a click has taken focus off the grid. Both ignore an Esc a dialog is using.
+- **F1 on the payment screen marks a parcel.** It is also the grid's customer key, which is safe
+  only because `useShortcuts` is passed `inFront && !modalOpen` - keep that guard.
 - **F9 opens the menu everywhere** (`MENU_KEY`, handled in `App`), so it is deliberately absent from
   `ASSIGNABLE_KEYS`; `isModalOpen()` (a counter kept by `Modal`) stops it opening behind a dialog.
 - **Products and Stock share one list pattern** (and Bills a close cousin): a focused `div role=grid`, arrows for row and action,
@@ -130,7 +135,9 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 src/main/java/com/masspos/
 ├── PosApplication.java
 ├── config/              PosProperties (pos.data-dir, pos.terminal), SqliteDataSourceConfig,
-│                        FirstRunSetup (writes pos.properties template, warns on missing seller data)
+│                        FirstRunSetup (writes pos.properties template, warns on missing seller data),
+│                        SqliteDataSourceConfig (also swaps in a staged backup before the DB opens)
+├── backup/              DatabaseBackups (VACUUM INTO, staged restore), BackupController
 ├── common/              IndiaTime (Asia/Kolkata)
 ├── common/persistence/  BaseEntity, UuidV7 + @GeneratedUuidV7 + UuidV7IdGenerator, PosSqliteDialect, LocalDateIsoConverter
 ├── audit/               AuditRevision, AuditRevisionListener, AuditActor / AuditContext, AuditTrailGuard (triggers)
@@ -211,6 +218,13 @@ overridable with `POS_DATA_DIR`. It holds:
   note against it can no longer be edited or cancelled (`SaleService.requireNoReturns`).
 - **Reports net returns**: day totals, payments per mode, cashiers and tills subtract credit notes;
   the GST summary nets them off rates and HSN. `DayReport.totals` is the net figure.
+- **Nothing is stamped on the customer's own bill**: `ReceiptCopy.ORIGINAL` has an empty label and
+  only a reprint says DUPLICATE COPY (asked for 2026-10-21).
+- **A parcel bill carries one big P beside the UPI code.** `Invoice.parcel` is set before the
+  invoice is persisted and is in `AuditTrailGuard.FROZEN_INVOICE_COLUMNS`, so it cannot be changed
+  after issue; an edited parcel bill stays a parcel unless the cashier says otherwise. A receipt
+  printer lays its page out line by line, so "beside" is the next line hard against the right
+  margin - type cannot be set alongside a QR the printer draws itself.
 - **Receipt items are four columns**: name, rate, quantity, amount, sized to the widest figure on
   that bill so they line up, with a name too long for its column carried on underneath. **No HSN on
   the line and no per-line tax rate** (asked for by the shop, 2026-10-21): Rule 46 wants the rate
@@ -337,6 +351,13 @@ overridable with `POS_DATA_DIR`. It holds:
   as the new `seller_*` columns: SQLite cannot add NOT NULL columns to a table that has rows. Move
   to Flyway + `validate` before the first real install.
 - The startup warning `HHH90006001 ... preferred_uuid_jdbc_type` is expected.
+- **Backups are taken with `VACUUM INTO`**, which writes a complete, checkpointed copy while the
+  till keeps billing - never copy `pos.db` by hand, as its WAL may hold writes the file does not.
+- **A restore is staged, never done live.** `DatabaseBackups.stageRestore` checks the file really
+  is one of this till's databases (it looks for `invoice`, `product` and `shop_settings`), copies
+  today's data first, and leaves `restore-pending.db`. `SqliteDataSourceConfig` swaps it in on the
+  next start, before anything opens the database. **The old `-wal` and `-shm` go with the old
+  database**: a leftover write-ahead log would be replayed onto the restored file and wreck it.
 
 ## Hardware notes
 

@@ -1,7 +1,8 @@
 package com.masspos.receipt;
 
 public enum ReceiptCopy {
-    ORIGINAL("ORIGINAL FOR RECIPIENT"),
+    /** The customer's own bill. Nothing is stamped on it: only a reprint needs marking. */
+    ORIGINAL(""),
     /** Any reprint. Never opens the cash drawer. */
     DUPLICATE("DUPLICATE COPY");
 

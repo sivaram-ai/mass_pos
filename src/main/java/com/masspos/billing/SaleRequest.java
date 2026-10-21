@@ -24,7 +24,8 @@ public record SaleRequest(@NotEmpty List<@Valid Line> lines,
                           @Pattern(regexp = "|\\d{2}", message = "must be a two-digit state code") String placeOfSupply,
                           @NotEmpty List<@Valid Payment> payments,
                           boolean print,
-                          boolean openDrawer) {
+                          boolean openDrawer,
+                          boolean parcel) {
 
     /**
      * @param unitPricePaise overrides the catalogue price for this line only, e.g. a haggled price

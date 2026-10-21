@@ -76,7 +76,10 @@ public class ReceiptFormatter {
 
     private void header(EscPos doc, TaxDocument invoice, ShopSettings shop, ReceiptCopy copy) {
         SellerDetails seller = invoice.getSeller();
-        doc.align(CENTER).line(copy.label());
+        doc.align(CENTER);
+        if (!copy.label().isEmpty()) {
+            doc.line(copy.label());
+        }
         doc.size(true, true).bold(true).wrapped(seller.getTradeName()).size(false, false).bold(false);
         if (!seller.getTradeName().equals(seller.getLegalName())) {
             doc.wrapped(seller.getLegalName());
@@ -138,6 +141,7 @@ public class ReceiptFormatter {
     private void items(EscPos doc, TaxDocument invoice) {
         int[] widths = itemColumnWidths(doc.lineWidth(), invoice);
         doc.bold(true).line(row(widths, List.of("Item", "Rate", "Qty", "Amount"))).bold(false);
+        doc.separator('-');
         for (TaxLine item : invoice.getLines()) {
             List<String> name = EscPos.wrap(item.getLineNo() + ". " + item.getProductName(),
                     Math.max(MIN_ITEM_COLUMN, widths[0] - 1));
@@ -275,11 +279,25 @@ public class ReceiptFormatter {
             doc.align(CENTER).line("Scan to pay with any UPI app")
                     .qrCode(upiUri(invoice, shop), QR_MODULE_DOTS).align(LEFT);
         }
+        if (invoice instanceof Invoice bill && bill.isParcel()) {
+            parcelMark(doc);
+        }
         if (!shop.receiptFooter().isEmpty()) {
             doc.align(CENTER);
             shop.receiptFooter().forEach(doc::wrapped);
             doc.align(LEFT);
         }
+    }
+
+    /**
+     * One big P for a parcel, beside the UPI code. A receipt printer lays its page out line by
+     * line, so "beside" is the next line hard against the right margin, level with the edge of the
+     * code block - there is no way to set type alongside a QR the printer draws itself.
+     */
+    private void parcelMark(EscPos doc) {
+        doc.align(RIGHT).size(true, true).bold(true)
+                .line("P")
+                .size(false, false).bold(false).align(LEFT);
     }
 
     private static String upiUri(TaxDocument invoice, ShopSettings shop) {

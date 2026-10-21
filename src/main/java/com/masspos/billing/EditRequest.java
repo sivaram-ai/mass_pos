@@ -21,7 +21,8 @@ public record EditRequest(@NotEmpty List<SaleRequest.@Valid Line> lines,
                           List<SaleRequest.@Valid Payment> payments,
                           @Size(max = 120) String reason,
                           boolean print,
-                          boolean openDrawer) {
+                          boolean openDrawer,
+                          boolean parcel) {
 
     public List<SaleRequest.Payment> paymentsOrNone() {
         return payments == null ? List.of() : payments;

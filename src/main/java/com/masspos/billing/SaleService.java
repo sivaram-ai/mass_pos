@@ -79,7 +79,7 @@ public class SaleService {
         ShopSettings shop = settings.currentOrEmpty();
         LocalDate today = LocalDate.now(IndiaTime.ZONE);
         Invoice invoice = build(cashier, shop, today, reserveNumber(today), request.lines(), request.buyerGstin(),
-                request.buyerName(), request.placeOfSupply());
+                request.buyerName(), request.placeOfSupply(), request.parcel());
 
         long paid = request.payments().stream().mapToLong(SaleRequest.Payment::amountPaise).sum();
         if (paid != invoice.getGrandTotalPaise()) {
@@ -124,7 +124,7 @@ public class SaleService {
         // Its stock goes back before the new lines are checked against the shelf.
         restock(original);
         Invoice replacement = build(cashier, shop, today, sequenceNo, request.lines(), request.buyerGstin(),
-                request.buyerName(), request.placeOfSupply());
+                request.buyerName(), request.placeOfSupply(), request.parcel());
         replacement.replaces(original.getInvoiceNumber());
 
         long previous = original.getGrandTotalPaise();
@@ -249,7 +249,7 @@ public class SaleService {
     /** Builds a complete, unpaid invoice under a reserved number: lines, tax and round-off. */
     private Invoice build(User cashier, ShopSettings shop, LocalDate today, long sequenceNo,
                           List<SaleRequest.Line> lines, String buyerGstin, String buyerName,
-                          String requestedPlaceOfSupply) {
+                          String requestedPlaceOfSupply, boolean parcel) {
         SellerDetails seller = SellerDetails.from(shop);
         String terminalCode = pos.terminal().code();
         boolean gst = seller.isGstRegistered();
@@ -262,6 +262,7 @@ public class SaleService {
 
         Invoice invoice = new Invoice(terminalCode, sequenceNo, today, Instant.now(), seller, placeOfSupply,
                 blankToNull(buyerGstin), blankToNull(buyerName), cashier);
+        invoice.takeAway(parcel);
 
         for (SaleRequest.Line line : lines) {
             Product product = activeProduct(line.productId());
