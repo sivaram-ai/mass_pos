@@ -164,7 +164,8 @@ class ReceiptFormatterTest {
     private static PrinterProperties printer(int columns) {
         return new PrinterProperties(PrinterProperties.Type.FILE,
                 new PrinterProperties.Serial("", 9600, PrinterProperties.FlowControl.NONE),
-                new PrinterProperties.Tcp("", 9100), columns, CodePage.PC437, EscPos.DrawerPin.PIN_2,
+                new PrinterProperties.Tcp("", 9100), new PrinterProperties.Windows("", 80),
+                columns, CodePage.PC437, EscPos.DrawerPin.PIN_2,
                 Duration.ofMillis(100), Duration.ofSeconds(5));
     }
 

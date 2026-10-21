@@ -64,6 +64,8 @@ export interface Product {
   taxInclusive: boolean
   gstRateBp: number
   cessRateBp: number
+  /** Sell it whether or not the stock count says any is left. */
+  billWithoutStock: boolean
   active: boolean
   stockMilli: number
 }

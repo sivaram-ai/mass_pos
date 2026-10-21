@@ -21,6 +21,7 @@ public record PrinterProperties(
         @NotNull Type type,
         @Valid @NotNull Serial serial,
         @Valid @NotNull Tcp tcp,
+        @Valid @NotNull Windows windows,
         @Min(24) @Max(64) int columns,
         @NotNull CodePage codePage,
         @NotNull EscPos.DrawerPin drawerPin,
@@ -32,6 +33,12 @@ public record PrinterProperties(
         SERIAL,
         /** LAN printer, raw TCP (port 9100). */
         TCP,
+        /**
+         * A printer installed in the operating system, reached through its driver. For tills
+         * without a thermal printer: an ordinary inkjet or laser understands no ESC/POS, so the
+         * receipt is re-rendered as text and sent to the spooler. No drawer kick, no paper status.
+         */
+        WINDOWS,
         /** No hardware: jobs are written to {@code <data-dir>/printer-out}. */
         FILE
     }
@@ -50,5 +57,14 @@ public record PrinterProperties(
     }
 
     public record Tcp(String host, @Min(1) @Max(65535) int port) {
+    }
+
+    /**
+     * @param name    exactly as the printer is listed in Windows' Printers &amp; scanners, e.g.
+     *                "Canon G3080 series"; empty means whichever printer Windows calls the default
+     * @param widthMm how wide the receipt is printed on the sheet: 80 keeps a bill a bill on A4
+     *                instead of stretching it across the page; 0 fills the printable width
+     */
+    public record Windows(String name, @Min(0) @Max(500) int widthMm) {
     }
 }

@@ -25,6 +25,26 @@ public final class EscPos {
     /** Pin of the printer's RJ11/RJ12 drawer-kick ("DK") port that the drawer is wired to. */
     public enum DrawerPin { PIN_2, PIN_5 }
 
+    /**
+     * One line as it will appear on paper, kept for printers that render a job instead of executing
+     * it ({@link WindowsPrinterConnection}). The text is unaligned and unpadded: a renderer places
+     * it itself, because it knows the real page width.
+     *
+     * @param qr payload of a QR code that ends this line, or null
+     */
+    public record Line(String text, Align align, boolean bold, boolean doubleWidth, boolean doubleHeight,
+                       String qr) {
+
+        /** Columns taken up, counting each double-width character twice. */
+        public int columns() {
+            return doubleWidth ? text.length() * 2 : text.length();
+        }
+
+        public boolean isEmpty() {
+            return text.isBlank() && qr == null;
+        }
+    }
+
     private static final int ESC = 0x1B;
     private static final int GS = 0x1D;
     private static final int DLE = 0x10;
@@ -34,10 +54,14 @@ public final class EscPos {
     private final ByteArrayOutputStream out = new ByteArrayOutputStream(2048);
     private final StringBuilder preview = new StringBuilder();
     private final StringBuilder previewLine = new StringBuilder();
+    private final List<Line> printedLines = new ArrayList<>();
     private final CharsetEncoder encoder;
     private final int columns;
     private Align align = Align.LEFT;
+    private boolean bold;
     private boolean doubleWidth;
+    private boolean doubleHeight;
+    private String previewQr;
 
     /** Starts a job: resets the printer ({@code ESC @}) and selects the code page ({@code ESC t n}). */
     public EscPos(CodePage codePage, int columns) {
@@ -108,12 +132,14 @@ public final class EscPos {
     }
 
     public EscPos bold(boolean on) {
+        this.bold = on;
         raw(ESC, 'E', on ? 1 : 0);
         return this;
     }
 
     public EscPos size(boolean doubleWidth, boolean doubleHeight) {
         this.doubleWidth = doubleWidth;
+        this.doubleHeight = doubleHeight;
         raw(GS, '!', (doubleWidth ? 0x10 : 0) | (doubleHeight ? 0x01 : 0));
         return this;
     }
@@ -165,10 +191,13 @@ public final class EscPos {
 
     public EscPos feed(int lines) {
         raw(ESC, 'd', lines);
-        if (!previewLine.isEmpty()) {
+        if (hasPendingLine()) {
             flushPreviewLine();
         }
         preview.append("\n".repeat(lines));
+        for (int i = 0; i < lines; i++) {
+            printedLines.add(new Line("", align, bold, doubleWidth, doubleHeight, null));
+        }
         return this;
     }
 
@@ -188,13 +217,13 @@ public final class EscPos {
         raw(GS, '(', 'k', storeLength & 0xFF, storeLength >> 8, '1', 'P', '0'); // store data
         out.writeBytes(payload);
         raw(GS, '(', 'k', 3, 0, '1', 'Q', '0');                               // print symbol
-        previewLine.append("[QR ").append(data).append(']');
+        previewQr = data;
         return newLine();
     }
 
     /** Feeds to the cutter and makes a partial cut ({@code GS V 66 n}). */
     public EscPos cut() {
-        if (!previewLine.isEmpty()) {
+        if (hasPendingLine()) {
             newLine();
         }
         raw(GS, 'V', 66, 3);
@@ -213,18 +242,48 @@ public final class EscPos {
     }
 
     public String plainText() {
-        return previewLine.isEmpty() ? preview.toString() : preview + previewLine.toString();
+        return hasPendingLine() ? preview + renderedPendingLine() : preview.toString();
+    }
+
+    /**
+     * Every line this job prints, in order, with the styling in force when each was ended - what a
+     * printer that renders text needs, where {@link #toBytes()} suits one that executes commands.
+     * A line still being built counts, as {@link #plainText()} shows it too.
+     */
+    public List<Line> printedLines() {
+        if (!hasPendingLine()) {
+            return List.copyOf(printedLines);
+        }
+        List<Line> all = new ArrayList<>(printedLines);
+        all.add(pendingLine());
+        return List.copyOf(all);
     }
 
     private void flushPreviewLine() {
-        int pad = Math.max(0, lineWidth() - previewLine.length());
+        String rendered = renderedPendingLine();
+        int pad = Math.max(0, lineWidth() - rendered.length());
         String line = switch (align) {
-            case LEFT -> previewLine.toString();
-            case CENTER -> " ".repeat(pad / 2) + previewLine;
-            case RIGHT -> " ".repeat(pad) + previewLine;
+            case LEFT -> rendered;
+            case CENTER -> " ".repeat(pad / 2) + rendered;
+            case RIGHT -> " ".repeat(pad) + rendered;
         };
         preview.append(line.stripTrailing()).append('\n');
+        printedLines.add(pendingLine());
         previewLine.setLength(0);
+        previewQr = null;
+    }
+
+    private Line pendingLine() {
+        return new Line(previewLine.toString(), align, bold, doubleWidth, doubleHeight, previewQr);
+    }
+
+    /** The pending line as text, with a QR code standing in as {@code [QR payload]}. */
+    private String renderedPendingLine() {
+        return previewQr == null ? previewLine.toString() : previewLine + "[QR " + previewQr + "]";
+    }
+
+    private boolean hasPendingLine() {
+        return !previewLine.isEmpty() || previewQr != null;
     }
 
     private void raw(int... codes) {

@@ -47,19 +47,20 @@ public class ProductController {
 
     public record ProductView(UUID id, String sku, String barcode, String name, String hsnCode, UnitOfMeasure unit,
                               long sellingPricePaise, long mrpPaise, boolean taxInclusive, int gstRateBp,
-                              int cessRateBp, boolean active, long stockMilli) {
+                              int cessRateBp, boolean billWithoutStock, boolean active, long stockMilli) {
 
         static ProductView of(Product product, long stockMilli) {
             return new ProductView(product.getId(), product.getSku(), product.getBarcode(), product.getName(),
                     product.getHsnCode(), product.getUnit(), product.getSellingPricePaise(), product.getMrpPaise(),
-                    product.isTaxInclusive(), product.getGstRateBp(), product.getCessRateBp(), product.isActive(),
-                    stockMilli);
+                    product.isTaxInclusive(), product.getGstRateBp(), product.getCessRateBp(),
+                    product.isBillWithoutStock(), product.isActive(), stockMilli);
         }
     }
 
     /**
      * @param hsnCode           optional; empty, or 4, 6 or 8 digits
      * @param sellingPricePaise 0 means the cashier types the rate on every bill
+     * @param billWithoutStock  sell it even where the shop refuses to sell what it has run out of
      */
     public record SaveProductRequest(@NotBlank @Size(max = 40) String sku, @Size(max = 64) String barcode,
                                      @NotBlank @Size(max = 200) String name,
@@ -68,7 +69,8 @@ public class ProductController {
                                      @NotNull UnitOfMeasure unit,
                                      @PositiveOrZero long sellingPricePaise, @PositiveOrZero long mrpPaise,
                                      boolean taxInclusive,
-                                     @Min(0) @Max(10_000) int gstRateBp, @Min(0) @Max(10_000) int cessRateBp) {
+                                     @Min(0) @Max(10_000) int gstRateBp, @Min(0) @Max(10_000) int cessRateBp,
+                                     boolean billWithoutStock) {
 
         String barcodeOrNull() {
             return barcode == null || barcode.isBlank() ? null : barcode.trim();
@@ -96,32 +98,44 @@ public class ProductController {
     @ResponseStatus(HttpStatus.CREATED)
     @Transactional
     public ProductView create(@Valid @RequestBody SaveProductRequest request) {
-        products.findBySkuIgnoreCase(request.sku().trim()).ifPresent(existing -> {
-            throw new FieldRejectedException("sku", "is already used by " + existing.getName());
-        });
+        checkCode(null, request);
         checkPriceAndBarcode(null, request);
         Product product = new Product(request.sku().trim(), request.name().trim(), request.hsnCode(), request.unit(),
                 request.sellingPricePaise(), request.mrpPaise(), request.taxInclusive(), request.gstRateBp());
         product.changeTax(request.gstRateBp(), request.cessRateBp(), request.taxInclusive());
         product.assignBarcode(request.barcodeOrNull());
+        product.allowBillingWithoutStock(request.billWithoutStock());
         return ProductView.of(products.save(product), 0);
     }
 
     /**
-     * Everything but the item code, which bills and stock movements refer to. Changes never touch
-     * invoices already issued: those carry their own copies.
+     * Everything about the item, the code included: a code typed wrongly when it was added would
+     * otherwise be stuck forever. Changes never touch invoices already issued, which carry their own
+     * copies of the code, name and price.
      */
     @PutMapping("/{id}")
     @RequiresRole({UserRole.MANAGER})
     @Transactional
     public ProductView update(@PathVariable UUID id, @Valid @RequestBody SaveProductRequest request) {
         Product product = products.findById(id).orElseThrow(() -> new EntityNotFoundException("No such product"));
+        checkCode(id, request);
         checkPriceAndBarcode(id, request);
+        product.changeCode(request.sku().trim());
         product.describe(request.name().trim(), request.hsnCode(), request.unit());
         product.reprice(request.sellingPricePaise(), request.mrpPaise());
         product.changeTax(request.gstRateBp(), request.cessRateBp(), request.taxInclusive());
         product.assignBarcode(request.barcodeOrNull());
+        product.allowBillingWithoutStock(request.billWithoutStock());
         return ProductView.of(product, inventory.onHand(id));
+    }
+
+    /** One code bills one item. {@code id} is the item being saved, which never clashes with itself. */
+    private void checkCode(UUID id, SaveProductRequest request) {
+        products.findBySkuIgnoreCase(request.sku().trim())
+                .filter(existing -> !existing.getId().equals(id))
+                .ifPresent(existing -> {
+                    throw new FieldRejectedException("sku", "is already used by " + existing.getName());
+                });
     }
 
     /** Checked here so the screen can mark the field, rather than failing at commit. */

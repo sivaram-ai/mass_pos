@@ -88,7 +88,7 @@ class LicensePolicyTest {
         assertThat(status.state()).isEqualTo(LicenseState.NOT_ACTIVATED);
         assertThat(status.billingAllowed()).isFalse();
         assertThat(status.message()).isEqualTo("This till has no licence yet. Send machine ID AAAA-BBBB-CCCC-DDDD "
-                + "to your Mass POS supplier and paste the licence key they send under Menu > Licence.");
+                + "to your GO supplier and paste the licence key they send under Menu > Licence.");
         assertThat(status.validUntil()).isNull();
     }
 
@@ -100,7 +100,7 @@ class LicensePolicyTest {
         assertThat(status.state()).isEqualTo(LicenseState.WRONG_MACHINE);
         assertThat(status.billingAllowed()).isFalse();
         assertThat(status.message()).isEqualTo("The installed licence is for machine AAAA-BBBB-CCCC-DDDD, not this one "
-                + "(ZZZZ-YYYY-XXXX-WWWW). Ask your Mass POS supplier for a licence for this machine.");
+                + "(ZZZZ-YYYY-XXXX-WWWW). Ask your GO supplier for a licence for this machine.");
         assertThat(status.machineId()).isEqualTo("ZZZZ-YYYY-XXXX-WWWW");
     }
 
@@ -112,7 +112,7 @@ class LicensePolicyTest {
         assertThat(status.state()).isEqualTo(LicenseState.INVALID);
         assertThat(status.billingAllowed()).isFalse();
         assertThat(status.message()).isEqualTo("The installed licence key is damaged: copy the whole key again. "
-                + "Paste the key again, or ask your Mass POS supplier for a new one.");
+                + "Paste the key again, or ask your GO supplier for a new one.");
     }
 
     @Test

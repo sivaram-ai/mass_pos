@@ -1,4 +1,4 @@
-# Mass POS: local engineering notes
+# GO: local engineering notes
 
 This file holds engineering context: invariants, gotchas and tuning. The user-facing overview,
 **configuration reference**, printer setup, the API and the **installer build commands** are in
@@ -17,6 +17,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3E | Shop settings moved into the database (`shop_settings`), editable on screen, seeded once from `pos.company.*` | Done |
 | 3F | Readable field errors (`errors` map), non-GST shops, optional HSN/CIN, grid billing screen with Space bill, one-line header with slide-in menu, compact footer, held-bill keys | Done: 127 tests green, driven in the browser |
 | 3G | Edit today's bill (cancel + reissue), returns as credit notes with refunds, reports net of returns, held bills newest first, Esc Esc back to billing | Done: 139 tests green, driven in the browser |
+| 3H | `WINDOWS` printer type: tills with no thermal printer bill through any installed driver printer, receipt-width on the sheet, QR drawn by the till | Done: 199 tests green, printed on a real Canon G3080 |
 | L1 | Offline subscription licence per till: Ed25519-signed key bound to a hardware machine ID, warn/grace days, billing lock, Licence screen + banner, vendor `tools/license/LicenseTool.java` | Done: 172 tests green, real key verified on this PC |
 | 4 | Counter → master sync over LAN (see [docs/multi-terminal-and-rbac.md](docs/multi-terminal-and-rbac.md)) | Designed, not built |
 | Later | Flyway migrations, cloud sync, composition scheme / bill of supply, desktop shell | Not started |
@@ -112,6 +113,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | Hibernate ORM + Envers + community dialects | 6.6.53.Final | Managed by Boot |
 | sqlite-jdbc | 3.53.4.0 | Overrides Boot's 3.49.1.0 |
 | jSerialComm | 2.11.4 | |
+| zxing core | 3.5.3 | QR codes for the `WINDOWS` printer type only; `core` alone, no `javase` |
 | Maven | 3.9.16 | Through `mvnw` / `mvnw.cmd` |
 
 ## Project structure
@@ -128,7 +130,8 @@ src/main/java/com/masspos/
 ├── billing/             Invoice, InvoiceItem, InvoiceSequence, InvoiceNumbers, InvoiceStatus, GstStates,
 │                        CompanyProperties (pos.company), SellerDetails (@Embeddable snapshot), Gstin + @ValidGstin
 ├── inventory/           InventoryLedgerEvent, LedgerEventType
-├── hardware/            EscPos, CodePage, PrinterConnection (+ Serial / Tcp / File), PrinterConfig,
+├── hardware/            EscPos, CodePage, PrinterConnection (+ Serial / Tcp / Windows / File),
+│                        ReceiptLayout (page rendering for driver printers), PrinterConfig,
 │                        PrinterProperties (pos.printer), PrinterStatus, ThermalPrinter, HardwareController
 ├── receipt/             ReceiptFormatter, ReceiptProperties (pos.receipt), ReceiptService, ReceiptController, ReceiptCopy, Amounts
 └── web/                 LocalApiGuard (Host + X-POS-Client), ApiExceptionHandler (ProblemDetail)
@@ -203,6 +206,17 @@ overridable with `POS_DATA_DIR`. It holds:
   - A new immutable table, or a new fiscal or seller column on `Invoice`, must also be added to
     `AuditTrailGuard.FROZEN_INVOICE_COLUMNS`.
 - **Stock** is `SUM(quantity_delta_milli)` from the ledger. Never add a stock column.
+- **`Product.billWithoutStock`** exempts one item from the shop-wide `blockNegativeStock` rule
+  (`SaleService` checks both). The sale still records its SALE ledger event, so the count goes
+  negative: the exemption is about refusing the sale, never about skipping the movement.
+- **The item code (`sku`) is editable** (`Product.changeCode`, checked for clashes by
+  `ProductController.checkCode`, which excludes the item being saved). Invoice and credit note lines
+  copy the code at issue, so an old bill keeps the code it was sold under.
+- **A new column on an existing table needs a default**: SQLite refuses
+  `ALTER TABLE ... ADD COLUMN ... NOT NULL` on a populated table, which is every shipped till. Give
+  the field `@Column(nullable = false, columnDefinition = "<type> default <value>")`;
+  `RestartOnExistingDatabaseTest.aNewColumnReachesATableThatAlreadyHasRows` drops the column from a
+  populated table and restarts to prove it.
 - **Invoices.** Build the invoice fully, then persist it once, in the same transaction as
   `InvoiceSequence.next()` and the SALE ledger events. There are no drafts.
 - **The seller is a snapshot.** Invoices get `SellerDetails.from(companyProperties)` at issue time.
@@ -252,6 +266,17 @@ overridable with `POS_DATA_DIR`. It holds:
 
 ### Hardware
 
+- **`WINDOWS` prints through a driver, so it renders instead of sending bytes.** ESC/POS bytes on an
+  inkjet come out as rubbish, so `WindowsPrinterConnection` lays `EscPos.printedLines()` out with
+  `ReceiptLayout` and hands the page to the spooler. Two consequences:
+  - **A job with no printed lines must never reach the driver.** A drawer kick is exactly that, and
+    it would otherwise feed a blank sheet out of the printer on every cash sale.
+  - **`EscPos` keeps the preview and `printedLines()` in step.** Anything new that prints has to
+    appear in both, or it reaches a thermal printer and not a driver one. `plainText()` is derived
+    from the same flush, which is what keeps the FILE preview honest.
+- **The QR code is drawn by the till for `WINDOWS`** (zxing, model 2, EC level M — the same symbol
+  the ESC/POS command asks the printer for). A QR that cannot be encoded is logged and skipped: the
+  bill still prints.
 - **No transaction spans printer or network I/O.** Render in a short read transaction, then submit
   to `ThermalPrinter` (`ReceiptService` is the pattern).
 - **All printer traffic goes through `ThermalPrinter`'s single worker thread.**
@@ -287,8 +312,9 @@ overridable with `POS_DATA_DIR`. It holds:
   `~/.jSerialComm/...` as a fallback. `-DjSerialComm.library.path` only loads a library already in
   that directory; it does not extract there. If antivirus interferes, unpack the library at
   package time into the app image and pass `-DjSerialComm.library.path=$APPDIR/native`.
-- **USB printer-class devices** (Windows `USB001`) need the vendor's virtual COM driver or a LAN
-  printer.
+- **USB printer-class devices** (Windows `USB001`) are invisible to jSerialComm: they need the
+  vendor's virtual COM driver, a LAN printer, or the `WINDOWS` type, which goes through the driver
+  and gives up the drawer and the paper status in exchange.
 - **Printer status contract:** a port or host that cannot be opened throws `PrinterException`
   (HTTP 503 with the reason). Open but silent returns `responding: false`.
 - **`TcpPrinterConnection`** connects per job. On Windows a refused localhost connect takes about
@@ -322,6 +348,19 @@ Measured on the dev box (JDK 18, jlinked runtime):
 
 Re-measure under a billing load test.
 
+## Product name
+
+The product is **GO**. The name appears on screens, receipts, the licence messages, the
+`pos.properties` template and the docs. Deliberately *not* renamed, because each would break a
+till or a licence already in the field:
+
+| Kept as it is | Why |
+|---|---|
+| `com.masspos` packages, `mass-pos.jar`, `spring.application.name` | Internal names; renaming churns every file and changes the installed artifact |
+| `<data-dir>` `MassPOS` | A renamed folder orphans the shop's database, licence and settings |
+| Licence key prefix `MPL1`, the machine-ID salt | Changing either invalidates every licence already issued |
+| `X-POS-Client: mass-pos-ui` | The guard checks the header is present, not what it says |
+
 ## Open decisions and known gaps
 
 - **JSON old/new state**: Envers snapshots plus `_mod` flags. A JSON projection is planned in the
@@ -338,5 +377,10 @@ Re-measure under a billing load test.
   reused key. A key already cannot bill on a second machine; stopping a machine = not renewing.
 - **Offline licensing stops copying, not cracking**: the jar can be decompiled and the check patched
   out. Obfuscation and the L2 check-in raise the bar.
+- **`WINDOWS` printing is exercised on real hardware** (Canon G3080 on this PC, 2026-10-20: the job
+  reached the spooler as "GO receipt" and came out on paper). Serial and TCP are still fakes and
+  error paths only. One thing to watch: `PrinterJob.print()` blocks until the spooler takes the job,
+  inside `pos.printer.timeout` + 3 s. A sleeping printer could spend that and have the till report a
+  print failure for a bill that prints a moment later; raise `pos.printer.timeout` if it happens.
 - **Not yet exercised on real hardware**: serial and TCP printing (fakes and error paths only). Also
   untested: the `frontend` profile and the WiX/DMG installers.

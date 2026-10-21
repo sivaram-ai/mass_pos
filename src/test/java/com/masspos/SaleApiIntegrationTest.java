@@ -308,6 +308,43 @@ class SaleApiIntegrationTest {
     }
 
     @Test
+    void theItemCodeCanBeChangedAndStaysOneItemsOwn() throws Exception {
+        String productId = newProductWithStock(2_000);
+        String oldCode = json.readTree(mvc.perform(authed(get("/api/products/" + productId), cashierToken))
+                .andReturn().getResponse().getContentAsString()).get("sku").asText();
+        String billNumber = sellOne(productId);
+        String newCode = "RENAMED-" + TestFixtures.unique();
+
+        editProduct(productId, newCode, "Renamed item", status().isOk());
+
+        // The new code bills from now on; the bill already taken keeps the code it was sold under.
+        assertThat(searchNames(newCode)).contains("Renamed item");
+        assertThat(json.readTree(mvc.perform(authed(get("/api/invoices/lookup?number=" + billNumber), cashierToken))
+                        .andExpect(status().isOk()).andReturn().getResponse().getContentAsString())
+                .get("lines").get(0).get("sku").asText()).isEqualTo(oldCode);
+
+        // A code another item already uses is refused, naming the field and the other item.
+        String otherId = newProductWithStock(1_000);
+        JsonNode clash = editProduct(otherId, newCode, "Other item", status().isBadRequest());
+        assertThat(clash.get("errors").get("sku").asText()).contains("already used by Renamed item");
+
+        // Keeping its own code while changing something else is not a clash with itself.
+        editProduct(productId, newCode, "Renamed again", status().isOk());
+    }
+
+    private JsonNode editProduct(String productId, String sku, String name,
+                                 org.springframework.test.web.servlet.ResultMatcher expected) throws Exception {
+        String body = """
+                {"sku":"%s","name":"%s","hsnCode":"","unit":"NOS","sellingPricePaise":10000,"mrpPaise":0,
+                 "taxInclusive":true,"gstRateBp":1800,"cessRateBp":0}
+                """.formatted(sku, name);
+        return json.readTree(mvc.perform(authed(put("/api/products/" + productId), managerToken)
+                        .header(LocalApiGuard.CLIENT_HEADER, "test").contentType(APPLICATION_JSON).content(body))
+                .andExpect(expected)
+                .andReturn().getResponse().getContentAsString());
+    }
+
+    @Test
     void aBarcodeBelongsToOneItemOnly() throws Exception {
         String barcode = "890" + System.nanoTime() % 10_000_000_000L;
         postJson("/api/products", managerToken, """

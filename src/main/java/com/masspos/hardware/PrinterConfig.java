@@ -16,6 +16,7 @@ public class PrinterConfig {
         return switch (printer.type()) {
             case SERIAL -> new SerialPrinterConnection(printer.serial(), printer.timeout());
             case TCP -> new TcpPrinterConnection(printer.tcp(), printer.timeout());
+            case WINDOWS -> new WindowsPrinterConnection(printer.windows());
             case FILE -> new FilePrinterConnection(pos.dataDir().resolve("printer-out"));
         };
     }

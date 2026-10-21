@@ -81,6 +81,50 @@ class EscPosTest {
         assertThat(EscPos.statusRequest(4)).containsExactly(bytes(0x10, 0x04, 4));
     }
 
+    @Test
+    void keepsEveryPrintedLineWithItsStyleForPrintersThatRenderInsteadOfExecuting() {
+        EscPos doc = new EscPos(CodePage.PC437, 48)
+                .align(EscPos.Align.CENTER).size(true, true).bold(true).line("THALAPATHI")
+                .size(false, false).bold(false)
+                .align(EscPos.Align.LEFT).leftRight("TOTAL", "70.00")
+                .feed(1)
+                .align(EscPos.Align.CENTER).qrCode("upi://pay?pa=x", 6);
+
+        assertThat(doc.printedLines()).containsExactly(
+                new EscPos.Line("THALAPATHI", EscPos.Align.CENTER, true, true, true, null),
+                new EscPos.Line("TOTAL" + " ".repeat(38) + "70.00", EscPos.Align.LEFT, false, false, false, null),
+                new EscPos.Line("", EscPos.Align.LEFT, false, false, false, null),
+                new EscPos.Line("", EscPos.Align.CENTER, false, false, false, "upi://pay?pa=x"));
+    }
+
+    @Test
+    void theTextPreviewStillShowsTheQrPayloadInLine() {
+        EscPos doc = new EscPos(CodePage.PC437, 48).align(EscPos.Align.CENTER).qrCode("upi://pay", 6);
+
+        assertThat(doc.plainText()).isEqualTo(" ".repeat(17) + "[QR upi://pay]\n");
+    }
+
+    @Test
+    void anUnfinishedLineIsStillOneOfThePrintedLines() {
+        assertThat(new EscPos(CodePage.PC437, 48).text("no newline yet").printedLines())
+                .containsExactly(new EscPos.Line("no newline yet", EscPos.Align.LEFT, false, false, false, null));
+    }
+
+    @Test
+    void aDrawerKickPrintsNothing() {
+        EscPos doc = new EscPos(CodePage.PC437, 48).openDrawer(EscPos.DrawerPin.PIN_2, Duration.ofMillis(100));
+
+        assertThat(doc.printedLines()).isEmpty();
+    }
+
+    @Test
+    void doubleWidthLinesCountEachCharacterTwice() {
+        EscPos.Line wide = new EscPos.Line("ABC", EscPos.Align.LEFT, false, true, false, null);
+
+        assertThat(wide.columns()).isEqualTo(6);
+        assertThat(new EscPos.Line("ABC", EscPos.Align.LEFT, false, false, false, null).columns()).isEqualTo(3);
+    }
+
     static byte[] bytes(int... values) {
         byte[] result = new byte[values.length];
         for (int i = 0; i < values.length; i++) {

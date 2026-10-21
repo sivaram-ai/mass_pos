@@ -22,6 +22,7 @@
         <!-- Overrides the Boot-managed version: newer SQLite engine (RETURNING, better WAL checkpointing). -->
         <sqlite-jdbc.version>3.53.4.0</sqlite-jdbc.version>
         <jserialcomm.version>2.11.4</jserialcomm.version>
+        <zxing.version>3.5.3</zxing.version>
         <frontend-maven-plugin.version>1.15.1</frontend-maven-plugin.version>
         <node.version>v22.12.0</node.version>
     </properties>
@@ -67,6 +68,17 @@
             <groupId>com.fazecast</groupId>
             <artifactId>jSerialComm</artifactId>
             <version>${jserialcomm.version}</version>
+        </dependency>
+
+        <!--
+            QR codes for the WINDOWS printer type. A thermal printer draws its own from the ESC/POS
+            command; a driver printer is sent a picture, so the till has to encode it. Core only:
+            the javase artifact would drag in no more than a BufferedImage writer we do not need.
+        -->
+        <dependency>
+            <groupId>com.google.zxing</groupId>
+            <artifactId>core</artifactId>
+            <version>${zxing.version}</version>
         </dependency>
 
         <dependency>

@@ -1,4 +1,4 @@
-# Mass POS
+# GO
 
 Offline-first billing and inventory for Indian retail, shipped as a single desktop installer. GST
 tax invoices, stock that survives being offline, an append-only audit trail for MCA Rule 11(g), and
@@ -18,7 +18,7 @@ on different floors.
 |---|---|
 | Billing | Keyboard-first grid: code or name lookup in each row, rate, quantity and discount cells, Space to take the bill, hold and resume, split payments (cash / UPI / card / voucher), change due, print |
 | GST | Tax-inclusive or exclusive pricing, CGST + SGST or IGST by place of supply, cess, round-off to the rupee, gapless numbering per till. Shops without a GSTIN bill without tax |
-| Stock | Goods receipts, corrections, damages; stock is the sum of movements, never a number that gets overwritten |
+| Stock | Goods receipts, corrections, damages; stock is the sum of movements, never a number that gets overwritten. Items that are never counted (cooked food, loose produce) bill without it |
 | Bills | Day list of bills and returns worked from the keyboard, search by bill number, full bill view with every version of an edited bill, reprint as DUPLICATE, edit, return, cancel with a reason (stock goes back) |
 | Reports | Day takings by tender, cashier and till; best sellers; GST rate-wise and HSN summaries for GSTR-1; the audit trail |
 | Staff | Cashier, manager, auditor and admin accounts; PIN sign-in that lasts the shift |
@@ -42,7 +42,7 @@ Then open **http://127.0.0.1:8765**.
    both are set. Add the GSTIN if the shop is registered for GST: bills are then tax invoices.
    Without a GSTIN the shop bills without GST: no tax is charged whatever rate an item carries,
    and the receipt is a plain "BILL". HSN/SAC codes and the CIN are optional too.
-3. Open **Menu > Licence**, send the machine ID shown there to your Mass POS supplier, and paste
+3. Open **Menu > Licence**, send the machine ID shown there to your GO supplier, and paste
    the licence key they send back. Until then everything works except issuing bills, edits and
    returns.
 4. Add a product under **Products**, record what arrived under **Stock**, and bill it.
@@ -140,6 +140,16 @@ adds a product; `Enter` or `Esc` goes back to the list. In the product dialog `E
 box and `Esc` closes it. Long names are cut to keep the columns lined up, with the whole name on
 hover.
 
+The **item code** can be changed at any time, including after the item has been billed: it is the
+code the cashier types, and bills already taken keep the code they were sold under. One code belongs
+to one item, so a code another item already uses is refused and names that item.
+
+**Bill without stock** sells the item whatever the stock count says, for cooked food, loose produce,
+services and anything else whose stock is never counted. It only matters when *Refuse to sell items
+the stock says you do not have* is ticked in Settings: items with this box ticked are the exception
+to that rule, and the list shows them as "not counted". The sale is still recorded as a stock
+movement, so the count simply goes below zero.
+
 ### Changing a bill after it was taken
 
 - **Edit** (`Insert`, or Edit on the Bills screen): today's bills only. The bill opens on the grid;
@@ -190,8 +200,10 @@ Key machine settings:
 | `pos.terminal.code` | `T1` | Invoice prefix, unique per till (`T1-2627-00001`) |
 | `pos.terminal.name` / `.section` | `Counter 1` / empty | Shown in reports and on the settings screen, e.g. "1st floor" |
 | `pos.terminal.type` | `COUNTER` | `MASTER` holds the shop's consolidated database |
-| `pos.printer.type` | `FILE` | `SERIAL`, `TCP` or `FILE` |
+| `pos.printer.type` | `FILE` | `SERIAL`, `TCP`, `WINDOWS` or `FILE` |
 | `pos.printer.serial.port` | empty | `COM3`, `/dev/ttyUSB0`, … |
+| `pos.printer.windows.name` | empty | Printer as Windows lists it; empty = the default printer |
+| `pos.printer.windows.width-mm` | `80` | Receipt width on the sheet; `0` fills the page |
 | `pos.printer.columns` | `48` | `48` for 80 mm paper, `32` for 58 mm |
 | `server.port` | `8765` | Also `POS_PORT` |
 
@@ -211,6 +223,11 @@ screen or open its cash drawer.
   need the vendor's virtual COM port driver; one installed only as a Windows printer (`USB001`) is
   invisible to jSerialComm.
 - **TCP** is for network printers on raw port 9100.
+- **WINDOWS** prints through a printer installed in the operating system — an inkjet or laser that
+  knows no ESC/POS. The bill is rendered as a page and handed to the driver, 80 mm wide by default
+  so it still looks like a receipt on A4. Set `pos.printer.windows.name` to the printer's name
+  exactly as **Settings → Bluetooth & devices → Printers & scanners** shows it. The cash drawer and
+  the paper status do not work here: both live on a thermal printer's own ports.
 - **FILE** writes each receipt to `printer-out` as bytes plus a readable preview — the default, so
   the app is usable before any hardware arrives.
 
@@ -329,7 +346,7 @@ jlink --add-modules java.base,java.compiler,java.desktop,java.instrument,java.ma
       --output target\runtime
 New-Item -ItemType Directory -Force target\jpackage-input | Out-Null
 Copy-Item target\mass-pos.jar target\jpackage-input\
-jpackage --type exe --name MassPOS --app-version 0.1.0 --vendor "Mass POS" `
+jpackage --type exe --name MassPOS --app-version 0.1.0 --vendor "GO" `
   --input target\jpackage-input --main-jar mass-pos.jar --runtime-image target\runtime `
   --java-options "-XX:+UseG1GC" --java-options "-Xms512m" --java-options "-Xmx512m" `
   --java-options "-XX:MaxGCPauseMillis=20" --java-options "-XX:+AlwaysPreTouch" `
@@ -369,6 +386,8 @@ docs/                    multi-terminal and RBAC design
 | Billing screen says it is blocked | Fill in legal name and address under Settings |
 | "Billing locked" banner | Menu > Licence says why: no licence, lapsed after its grace period, or issued for another machine |
 | Cannot sign in on a new install | The admin PIN is in `<data-dir>\logs\pos.log` |
+| Bills print to files, not paper | `pos.printer.type` is still `FILE`; the receipts are in `<data-dir>\printer-out` |
+| Nothing prints, but Notepad can print | The printer has only a Windows driver, so `SERIAL` and `TCP` cannot see it: use `WINDOWS` |
 | `Cannot open serial port COM3` | Another program holds it, the name is wrong, or the printer is off |
 | Garbled printing | Baud rate or flow control does not match the printer |
 | Drawer does not open | Check the cable into the printer's DK port; try `PIN_5` and a longer pulse |

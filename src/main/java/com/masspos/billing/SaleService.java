@@ -269,7 +269,8 @@ public class SaleService {
             if (unitPrice <= 0) {
                 throw new IllegalArgumentException("Enter the rate for " + product.getName() + " before taking the bill");
             }
-            if (shop.isBlockNegativeStock() && inventory.onHand(product.getId()) < line.quantityMilli()) {
+            if (shop.isBlockNegativeStock() && !product.isBillWithoutStock()
+                    && inventory.onHand(product.getId()) < line.quantityMilli()) {
                 throw new IllegalArgumentException("Not enough stock for " + product.getName());
             }
             int gstRate = gst ? product.getGstRateBp() : 0;

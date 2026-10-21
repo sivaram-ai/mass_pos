@@ -30,11 +30,12 @@ type Draft = {
   taxInclusive: boolean
   gstRateBp: number
   cessRateBp: number
+  billWithoutStock: boolean
 }
 
 const EMPTY: Draft = {
   sku: '', barcode: '', name: '', hsnCode: '', unit: 'NOS',
-  sellingPrice: '', mrp: '', taxInclusive: true, gstRateBp: 1800, cessRateBp: 0,
+  sellingPrice: '', mrp: '', taxInclusive: true, gstRateBp: 1800, cessRateBp: 0, billWithoutStock: false,
 }
 
 function draftOf(product: Product): Draft {
@@ -49,6 +50,7 @@ function draftOf(product: Product): Draft {
     taxInclusive: product.taxInclusive,
     gstRateBp: product.gstRateBp,
     cessRateBp: product.cessRateBp,
+    billWithoutStock: product.billWithoutStock,
   }
 }
 
@@ -120,6 +122,7 @@ export default function Products({ onToast }: { onToast: Toast }) {
       taxInclusive: draft.taxInclusive,
       gstRateBp: draft.gstRateBp,
       cessRateBp: draft.cessRateBp,
+      billWithoutStock: draft.billWithoutStock,
     }
     try {
       if (id) {
@@ -314,8 +317,14 @@ export default function Products({ onToast }: { onToast: Toast }) {
                     <td className="num py-2 text-right text-slate-500">
                       {product.mrpPaise ? rupees(product.mrpPaise) : '—'}
                     </td>
-                    <td className={`num py-2 text-right ${product.stockMilli <= 0 ? 'text-rose-600' : ''}`}>
+                    <td className={`num py-2 text-right ${
+                      product.billWithoutStock ? 'text-slate-500' : product.stockMilli <= 0 ? 'text-rose-600' : ''}`}>
                       {quantity(product.stockMilli)} <span className="text-xs text-slate-400">{product.unit}</span>
+                      {product.billWithoutStock && (
+                        <div className="text-xs text-slate-400" title="Sold whatever the stock count says">
+                          not counted
+                        </div>
+                      )}
                     </td>
                     <td className="whitespace-nowrap py-1.5 pr-2 text-right">
                       <div className="inline-flex gap-1">
@@ -440,8 +449,10 @@ function ProductDialog({ id, draft, errors, onClose, onSave }: {
                  onChange={(event) => set({ name: event.target.value })} />
         </Field>
         <Field label="Item code" error={err('sku')}
-               hint={id ? 'Cannot be changed once used on a bill' : 'Typed in the code column when billing, e.g. 19'}>
-          <input className={inputClass} value={form.sku} disabled={Boolean(id)}
+               hint={id
+                 ? 'Typed in the code column when billing. Bills already taken keep the code they were sold under'
+                 : 'Typed in the code column when billing, e.g. 19'}>
+          <input className={inputClass} value={form.sku}
                  onChange={(event) => set({ sku: event.target.value })} />
         </Field>
         <Field label="Barcode" optional error={err('barcode')}>
@@ -474,10 +485,21 @@ function ProductDialog({ id, draft, errors, onClose, onSave }: {
           <input className={`${inputClass} num`} inputMode="decimal" value={form.mrp}
                  onChange={(event) => set({ mrp: event.target.value })} />
         </Field>
-        <label className="col-span-2 flex items-center gap-2 text-sm text-slate-600">
+        <label className="flex items-center gap-2 text-sm text-slate-600">
           <input type="checkbox" checked={form.taxInclusive}
                  onChange={(event) => set({ taxInclusive: event.target.checked })} />
           Selling price already includes GST
+        </label>
+        <label className="flex items-start gap-2 text-sm text-slate-600">
+          <input type="checkbox" className="mt-1" checked={form.billWithoutStock}
+                 onChange={(event) => set({ billWithoutStock: event.target.checked })} />
+          <span>
+            Bill without stock
+            <span className="block text-xs text-slate-400">
+              Sell it whatever the stock count says. For cooked food, loose produce and services, whose
+              stock is never counted.
+            </span>
+          </span>
         </label>
         <div className="col-span-2 flex justify-end gap-2">
           <Button onClick={onClose} hint="Esc">Cancel</Button>

@@ -81,6 +81,13 @@ public class Product extends BaseEntity {
     @Max(10_000)
     private int cessRateBp;
 
+    /**
+     * Sell it whether or not the ledger says any is left, even where the shop otherwise refuses to:
+     * cooked food, loose produce, services and anything else whose stock is never counted.
+     */
+    @Column(nullable = false, columnDefinition = "boolean default 0")
+    private boolean billWithoutStock;
+
     private boolean active = true;
 
     protected Product() {
@@ -103,6 +110,14 @@ public class Product extends BaseEntity {
         return mrpPaise == 0 || sellingPricePaise <= mrpPaise;
     }
 
+    /**
+     * Corrects the code the cashier types to bill this item. Bills, stock movements and credit notes
+     * already recorded keep the code they were taken under: they hold their own copy.
+     */
+    public void changeCode(String sku) {
+        this.sku = sku;
+    }
+
     /** Name, HSN and unit as the catalogue shows them. Bills already issued keep their own copies. */
     public void describe(String name, String hsnCode, UnitOfMeasure unit) {
         this.name = name;
@@ -123,6 +138,10 @@ public class Product extends BaseEntity {
 
     public void assignBarcode(String barcode) {
         this.barcode = barcode;
+    }
+
+    public void allowBillingWithoutStock(boolean allowed) {
+        this.billWithoutStock = allowed;
     }
 
     public void deactivate() {
@@ -167,6 +186,10 @@ public class Product extends BaseEntity {
 
     public int getCessRateBp() {
         return cessRateBp;
+    }
+
+    public boolean isBillWithoutStock() {
+        return billWithoutStock;
     }
 
     public boolean isActive() {

@@ -20,9 +20,9 @@ import java.util.Base64;
 public final class LicenseToken {
 
     static final String PREFIX = "MPL1";
-    private static final String NOT_A_KEY = "is not a Mass POS licence key";
+    private static final String NOT_A_KEY = "is not a GO licence key";
     private static final String DAMAGED = "is damaged: copy the whole key again";
-    private static final String FORGED = "was not issued by your Mass POS supplier, or has been altered";
+    private static final String FORGED = "was not issued by your GO supplier, or has been altered";
 
     /** Unknown fields are ignored, so a till keeps reading licences from a newer tool. */
     private static final ObjectMapper JSON = JsonMapper.builder()

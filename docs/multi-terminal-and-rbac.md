@@ -38,7 +38,7 @@ the same physical shape:
 |---|---|---|
 | Shared database file on a network share | Counters open one SQLite/Access file over SMB | **Never.** File-locking over SMB corrupts SQLite. A classic cause of destroyed shop data. |
 | Thin client / central server | Counters keep nothing; every keystroke hits the master | Common in older setups. One switch or master reboot stops all billing. |
-| **Local-first with sync** | Each till owns its own database and bills alone; changes replicate to the master | **What Mass POS does.** Billing survives a dead master, a dead switch, or a cut cable. |
+| **Local-first with sync** | Each till owns its own database and bills alone; changes replicate to the master | **What GO does.** Billing survives a dead master, a dead switch, or a cut cable. |
 
 ### Our arrangement
 

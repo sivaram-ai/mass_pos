@@ -32,7 +32,7 @@ export function Login({ onSignedIn }: { onSignedIn: (user: Principal) => void })
   return (
     <div className="grid h-screen place-items-center bg-slate-900 p-4">
       <form onSubmit={submit} className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
-        <h1 className="text-xl font-semibold text-slate-800">Mass POS</h1>
+        <h1 className="text-xl font-semibold text-slate-800">GO</h1>
         <p className="mb-5 text-sm text-slate-500">Sign in to start billing</p>
         {error && <div className="mb-4"><Banner tone="bad">{error}</Banner></div>}
         <div className="space-y-3">
