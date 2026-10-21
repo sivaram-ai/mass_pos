@@ -135,7 +135,7 @@ public class HardwareController {
             ruler.append(i % 10);
         }
         String name = settings.currentOrEmpty().displayName();
-        String shop = name.isEmpty() ? "GO" : name;
+        String shop = name.isEmpty() ? "GO RockIt" : name;
         return page.align(EscPos.Align.CENTER)
                 .size(true, true).bold(true).line("TEST PAGE").size(false, false).bold(false)
                 .wrapped(shop)

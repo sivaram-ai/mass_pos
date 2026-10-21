@@ -46,18 +46,18 @@ final class LicensePolicy {
         }
         if (installed.problem() != null) {
             return locked(LicenseState.INVALID, "The installed licence key " + installed.problem()
-                    + ". Paste the key again, or ask your GO supplier for a new one." + clockNote, machine, clockBehind);
+                    + ". Paste the key again, or ask your GO RockIt supplier for a new one." + clockNote, machine, clockBehind);
         }
         LicensePayload licence = installed.payload();
         if (licence == null) {
             return locked(LicenseState.NOT_ACTIVATED, "This till has no licence yet. Send machine ID "
-                    + machine.machineId() + " to your GO supplier and paste the licence key they send under "
+                    + machine.machineId() + " to your GO RockIt supplier and paste the licence key they send under "
                     + "Menu > Licence.", machine, clockBehind);
         }
         if (!licence.machineId().equals(machine.machineId())) {
             return locked(LicenseState.WRONG_MACHINE, "The installed licence is for machine %s, not this one (%s). "
                     .formatted(licence.machineId(), machine.machineId())
-                    + "Ask your GO supplier for a licence for this machine.", machine, clockBehind);
+                    + "Ask your GO RockIt supplier for a licence for this machine.", machine, clockBehind);
         }
 
         LicenseState state;

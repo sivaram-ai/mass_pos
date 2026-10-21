@@ -1,4 +1,4 @@
-# GO
+# GO RockIt
 
 Offline-first billing and inventory for Indian retail, shipped as a single desktop installer. GST
 tax invoices, stock that survives being offline, an append-only audit trail for MCA Rule 11(g), and
@@ -42,7 +42,7 @@ Then open **http://127.0.0.1:8765**.
    both are set. Add the GSTIN if the shop is registered for GST: bills are then tax invoices.
    Without a GSTIN the shop bills without GST: no tax is charged whatever rate an item carries,
    and the receipt is a plain "BILL". HSN/SAC codes and the CIN are optional too.
-3. Open **Menu > Licence**, send the machine ID shown there to your GO supplier, and paste
+3. Open **Menu > Licence**, send the machine ID shown there to your GO RockIt supplier, and paste
    the licence key they send back. Until then everything works except issuing bills, edits and
    returns.
 4. Add a product under **Products**, record what arrived under **Stock**, and bill it.
@@ -349,7 +349,7 @@ jlink --add-modules java.base,java.compiler,java.desktop,java.instrument,java.ma
       --output target\runtime
 New-Item -ItemType Directory -Force target\jpackage-input | Out-Null
 Copy-Item target\mass-pos.jar target\jpackage-input\
-jpackage --type exe --name MassPOS --app-version 0.1.0 --vendor "GO" `
+jpackage --type exe --name MassPOS --app-version 0.1.0 --vendor "GoGo Digital Services" `
   --input target\jpackage-input --main-jar mass-pos.jar --runtime-image target\runtime `
   --java-options "-XX:+UseG1GC" --java-options "-Xms512m" --java-options "-Xmx512m" `
   --java-options "-XX:MaxGCPauseMillis=20" --java-options "-XX:+AlwaysPreTouch" `

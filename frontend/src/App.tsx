@@ -150,7 +150,7 @@ export default function App() {
   const allowed = SCREENS.filter((item) => user.role === 'ADMIN' || item.roles.includes(user.role))
   const current = allowed.some((item) => item.id === screen) ? screen : allowed[0]?.id ?? 'settings'
   const canBill = allowed.some((item) => item.id === 'billing')
-  const shopName = settings?.shop.tradeName || settings?.shop.legalName || 'GO'
+  const shopName = settings?.shop.tradeName || settings?.shop.legalName || 'GO RockIt'
 
   return (
     <div className="flex h-screen flex-col">

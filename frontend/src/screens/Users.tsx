@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api } from '../api'
+import { api, fieldErrorsOf, messageOfFailure } from '../api'
 import type { Role, UserRow } from '../types'
-import { Button, Empty, Field, inputClass, Modal, Panel } from '../components/ui'
+import { Banner, Button, Empty, errorFor, Field, inputClass, Modal, Panel } from '../components/ui'
 import type { Toast } from '../App'
 
 const ROLES: Role[] = ['CASHIER', 'MANAGER', 'AUDITOR', 'ADMIN']
@@ -129,6 +129,9 @@ function AddUserDialog({ onClose, onDone, onToast }: { onClose: () => void; onDo
   const [displayName, setDisplayName] = useState('')
   const [role, setRole] = useState<Role>('CASHIER')
   const [pin, setPin] = useState('')
+  const [errors, setErrors] = useState<{ message: string; fields: Record<string, string> } | null>(null)
+
+  const err = (field: string) => errorFor(errors?.fields ?? {}, field)
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -137,28 +140,34 @@ function AddUserDialog({ onClose, onDone, onToast }: { onClose: () => void; onDo
       onToast({ tone: 'good', text: `${displayName} can sign in with the PIN you set, then must change it` })
       onDone()
     } catch (failure) {
-      onToast({ tone: 'bad', text: failure instanceof Error ? failure.message : 'Could not create the account' })
+      // In the dialog, next to the boxes it is talking about - behind it nobody would see it.
+      setErrors({
+        message: messageOfFailure(failure, 'Could not create the account'),
+        fields: fieldErrorsOf(failure),
+      })
     }
   }
 
   return (
     <Modal title="Add a person" onClose={onClose}>
       <form onSubmit={submit} className="space-y-3">
-        <Field label="Full name">
+        {errors && <Banner tone="bad" onDismiss={() => setErrors(null)}>{errors.message}</Banner>}
+        <Field label="Full name" error={err('displayName')}>
           <input className={inputClass} autoFocus value={displayName}
                  onChange={(event) => setDisplayName(event.target.value)} />
         </Field>
-        <Field label="Username" hint="What they type to sign in">
+        <Field label="Username" hint="What they type to sign in" error={err('username')}>
           <input className={inputClass} value={username} onChange={(event) => setUsername(event.target.value)} />
         </Field>
-        <Field label="Role">
+        <Field label="Role" error={err('role')}>
           <select className={inputClass} value={role} onChange={(event) => setRole(event.target.value as Role)}>
             {ROLES.map((option) => (
               <option key={option} value={option}>{option} — {ROLE_NOTES[option]}</option>
             ))}
           </select>
         </Field>
-        <Field label="Starting PIN" hint="Tell them this once; they must pick their own at first sign-in">
+        <Field label="Starting PIN" hint="Tell them this once; they must pick their own at first sign-in"
+               error={err('pin')}>
           <input className={`${inputClass} num`} inputMode="numeric" value={pin}
                  onChange={(event) => setPin(event.target.value)} />
         </Field>
@@ -178,6 +187,7 @@ function ResetPinDialog({ user, onClose, onDone, onToast }: {
   onToast: Toast
 }) {
   const [pin, setPin] = useState('')
+  const [errors, setErrors] = useState<{ message: string; fields: Record<string, string> } | null>(null)
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -186,17 +196,18 @@ function ResetPinDialog({ user, onClose, onDone, onToast }: {
       onToast({ tone: 'good', text: `${user.displayName} is signed out everywhere and must pick a new PIN` })
       onDone()
     } catch (failure) {
-      onToast({ tone: 'bad', text: failure instanceof Error ? failure.message : 'Could not reset the PIN' })
+      setErrors({ message: messageOfFailure(failure, 'Could not reset the PIN'), fields: fieldErrorsOf(failure) })
     }
   }
 
   return (
     <Modal title={`Reset PIN for ${user.displayName}`} onClose={onClose}>
       <form onSubmit={submit} className="space-y-3">
+        {errors && <Banner tone="bad" onDismiss={() => setErrors(null)}>{errors.message}</Banner>}
         <p className="text-sm text-slate-600">
           This signs them out of every till at once. They will have to choose their own PIN at the next sign-in.
         </p>
-        <Field label="Temporary PIN">
+        <Field label="Temporary PIN" error={errorFor(errors?.fields ?? {}, 'newPin')}>
           <input className={`${inputClass} num`} inputMode="numeric" autoFocus value={pin}
                  onChange={(event) => setPin(event.target.value)} />
         </Field>

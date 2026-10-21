@@ -115,7 +115,7 @@ class LicenseApiIntegrationTest {
         assertThat(lapsed.get("errors").get("key").asText()).startsWith("ended on ");
 
         JsonNode garbage = postJson("/api/license", adminToken, body("not a key"), status().isBadRequest());
-        assertThat(garbage.get("errors").get("key").asText()).isEqualTo("is not a GO licence key");
+        assertThat(garbage.get("errors").get("key").asText()).isEqualTo("is not a GO RockIt licence key");
 
         postJson("/api/license", adminToken, "{\"key\":\"\"}", status().isBadRequest());
         assertThat(getJson("/api/license", adminToken).get("state").asText()).isEqualTo("NOT_ACTIVATED");

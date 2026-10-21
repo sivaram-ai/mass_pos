@@ -87,7 +87,8 @@ public final class EscPos {
         return text.replace("₹", "Rs.").replaceAll("\\p{Cntrl}", " ");
     }
 
-    static List<String> wrap(String text, int width) {
+    /** Breaks text to fit a width, for a caller laying out its own columns. */
+    public static List<String> wrap(String text, int width) {
         List<String> lines = new ArrayList<>();
         StringBuilder current = new StringBuilder();
         for (String word : text.trim().split("\\s+")) {

@@ -50,6 +50,8 @@ public class ReceiptFormatter {
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm");
     private static final int QR_MODULE_DOTS = 6;
     private static final int RATE_COLUMN_WIDTH = 6;
+    /** Even with huge figures, a name needs room to be readable. */
+    private static final int MIN_ITEM_COLUMN = 10;
 
     /**
      * @param invoice    an {@link Invoice} or a {@link CreditNote}
@@ -128,26 +130,52 @@ public class ReceiptFormatter {
         doc.separator('-');
     }
 
+    /**
+     * Four columns: item, rate, quantity, amount. A name too long for its column carries on
+     * underneath itself, so the figures stay in line however long the names are. The tax rate is
+     * not repeated per line; Rule 46 wants it rate-wise, which is what the summary below gives.
+     */
     private void items(EscPos doc, TaxDocument invoice) {
-        doc.bold(true).leftRight("Item", "Amount").bold(false);
+        int[] widths = itemColumnWidths(doc.lineWidth(), invoice);
+        doc.bold(true).line(row(widths, List.of("Item", "Rate", "Qty", "Amount"))).bold(false);
         for (TaxLine item : invoice.getLines()) {
-            doc.wrapped(item.getLineNo() + ". " + item.getProductName());
-            String quantity = Amounts.quantity(item.getQuantityMilli())
-                    + (item.getUnit().isWholeUnitsOnly() ? "" : " " + item.getUnit());
-            StringBuilder detail = new StringBuilder("  ");
-            if (hasText(item.getHsnCode())) {
-                detail.append(" HSN ").append(item.getHsnCode());
-            }
-            if (invoice.isTaxInvoice()) {
-                detail.append(' ').append(Amounts.percent(item.getGstRateBp())).append(' ');
-            }
-            detail.append(' ').append(quantity).append(" x ").append(Amounts.rupees(item.getUnitPricePaise()));
-            doc.leftRight(detail.toString(), Amounts.rupees(item.getLineTotalPaise()));
+            List<String> name = EscPos.wrap(item.getLineNo() + ". " + item.getProductName(),
+                    Math.max(MIN_ITEM_COLUMN, widths[0] - 1));
+            doc.line(row(widths, List.of(name.getFirst(), rateCell(item), quantityCell(item), amountCell(item))));
+            name.subList(1, name.size()).forEach(rest -> doc.line("   " + rest));
             if (item.getDiscountPaise() > 0) {
                 doc.leftRight("   Discount", "-" + Amounts.rupees(item.getDiscountPaise()));
             }
         }
         doc.separator('-');
+    }
+
+    /** The figures get exactly the room they need, and the name column takes what is left. */
+    private static int[] itemColumnWidths(int lineWidth, TaxDocument invoice) {
+        int rate = "Rate".length();
+        int qty = "Qty".length();
+        int amount = "Amount".length();
+        for (TaxLine item : invoice.getLines()) {
+            rate = Math.max(rate, rateCell(item).length());
+            qty = Math.max(qty, quantityCell(item).length());
+            amount = Math.max(amount, amountCell(item).length());
+        }
+        // One space in front of each figure column, which row() adds back as padding.
+        int figures = rate + 1 + qty + 1 + amount + 1;
+        return new int[] {Math.max(MIN_ITEM_COLUMN, lineWidth - figures), rate + 1, qty + 1, amount + 1};
+    }
+
+    private static String rateCell(TaxLine item) {
+        return Amounts.rupees(item.getUnitPricePaise());
+    }
+
+    private static String quantityCell(TaxLine item) {
+        return Amounts.quantity(item.getQuantityMilli())
+                + (item.getUnit().isWholeUnitsOnly() ? "" : " " + item.getUnit());
+    }
+
+    private static String amountCell(TaxLine item) {
+        return Amounts.rupees(item.getLineTotalPaise());
     }
 
     private void totals(EscPos doc, TaxDocument invoice) {

@@ -3,6 +3,47 @@ import { api, saveToken } from '../api'
 import type { Principal } from '../types'
 import { Banner, Button, Field, inputClass } from '../components/ui'
 
+/** Sampled from the company logo, so the product name is written in the brand's own colours. */
+const BRAND = { blue: '#1a59d3', orange: '#fe6313', green: '#0a8c4b' }
+
+/** Where each piece sits inside the 2000x2000 company logo. */
+const WORDMARK = { x: 170, y: 1300, w: 1681, h: 360 }
+const ROCKET = { x: 574, y: 293, w: 853, h: 979 }
+
+/**
+ * One piece of the company logo, cut out with CSS: the till ships a single image file and the
+ * sign-in screen takes the rocket and the wordmark from it.
+ */
+function LogoPart({ crop, width, label, className = '' }: {
+  crop: { x: number; y: number; w: number; h: number }
+  width: number
+  label: string
+  className?: string
+}) {
+  const scale = width / crop.w
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      className={`block shrink-0 bg-no-repeat ${className}`}
+      style={{
+        width: `${width}px`,
+        height: `${crop.h * scale}px`,
+        backgroundImage: 'url(/gds-logo.webp)',
+        backgroundSize: `${2000 * scale}px ${2000 * scale}px`,
+        backgroundPosition: `${-crop.x * scale}px ${-crop.y * scale}px`,
+      }}
+    />
+  )
+}
+
+/** The dark circuit board both signed-out screens stand on. */
+const BACKDROP = "grid min-h-screen place-items-center bg-[#081830] bg-[url('/login-bg.svg')] "
+  + 'bg-cover bg-center p-4'
+
+const signInField = 'w-full rounded-lg border border-transparent bg-slate-100 px-4 py-3 text-base '
+  + 'outline-none transition focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-100'
+
 /**
  * Signing in is per shift, not per hour: the token that comes back never expires, so a cashier
  * stays signed in until they press Log out.
@@ -30,36 +71,49 @@ export function Login({ onSignedIn }: { onSignedIn: (user: Principal) => void })
   }
 
   return (
-    <div className="grid h-screen place-items-center bg-slate-900 p-4">
-      <form onSubmit={submit} className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
-        <h1 className="text-xl font-semibold text-slate-800">GO</h1>
-        <p className="mb-5 text-sm text-slate-500">Sign in to start billing</p>
+    <div className={BACKDROP}>
+      <form onSubmit={submit} className="w-full max-w-md rounded-2xl bg-white p-8 shadow-2xl">
+        <LogoPart crop={WORDMARK} width={200} label="GoGo Digital Services" className="ml-auto" />
+
+        <div className="mt-8 flex items-start justify-center">
+          <h1 className="text-5xl font-bold tracking-tight">
+            <span style={{ color: BRAND.blue }}>GO</span>{' '}
+            <span style={{ color: BRAND.orange }}>Rock</span>
+            <span style={{ color: BRAND.green }}>It</span>
+          </h1>
+          <LogoPart crop={ROCKET} width={62} label="" className="-mt-7" />
+        </div>
+        <p className="mb-7 text-center text-base text-slate-500">Sign in to start billing</p>
+
         {error && <div className="mb-4"><Banner tone="bad">{error}</Banner></div>}
-        <div className="space-y-3">
-          <Field label="Username">
+        <div className="space-y-4">
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-medium text-slate-600">Username</span>
             <input
-              className={inputClass}
+              className={signInField}
               value={username}
               onChange={(event) => setUsername(event.target.value)}
               autoFocus
               autoComplete="username"
             />
-          </Field>
-          <Field label="PIN">
+          </label>
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-medium text-slate-600">PIN</span>
             <input
-              className={`${inputClass} num tracking-[0.4em]`}
+              className={`${signInField} num tracking-[0.4em]`}
               value={pin}
               onChange={(event) => setPin(event.target.value)}
               type="password"
               inputMode="numeric"
               autoComplete="current-password"
             />
-          </Field>
+          </label>
         </div>
-        <Button type="submit" tone="primary" disabled={busy || !username || !pin} className="mt-5 w-full justify-center">
+        <Button type="submit" tone="primary" disabled={busy || !username || !pin}
+                className="mt-6 w-full justify-center rounded-lg py-3 text-base">
           {busy ? 'Signing in…' : 'Sign in'}
         </Button>
-        <p className="mt-4 text-center text-xs text-slate-400">
+        <p className="mt-5 text-center text-xs text-slate-400">
           First start? The admin PIN is in logs\pos.log
         </p>
       </form>
@@ -98,8 +152,9 @@ export function ChangePin({ user, onDone, onCancel }: {
   }
 
   return (
-    <div className="grid h-screen place-items-center bg-slate-900 p-4">
-      <form onSubmit={submit} className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
+    <div className={BACKDROP}>
+      <form onSubmit={submit} className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
+        <LogoPart crop={WORDMARK} width={170} label="GoGo Digital Services" className="mb-4 ml-auto" />
         <h1 className="text-lg font-semibold text-slate-800">Choose your PIN</h1>
         <p className="mb-5 text-sm text-slate-500">
           Signed in as {user.displayName}. Pick a PIN only you know: every bill you take is recorded under this account.

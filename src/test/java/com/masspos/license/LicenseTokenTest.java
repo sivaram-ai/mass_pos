@@ -52,7 +52,7 @@ class LicenseTokenTest {
 
         assertThatThrownBy(() -> LicenseToken.read(forged, VENDOR))
                 .isInstanceOf(InvalidLicenseException.class)
-                .hasMessage("was not issued by your GO supplier, or has been altered");
+                .hasMessage("was not issued by your GO RockIt supplier, or has been altered");
     }
 
     @Test
@@ -62,17 +62,17 @@ class LicenseTokenTest {
 
         assertThatThrownBy(() -> LicenseToken.read(key, VENDOR))
                 .isInstanceOf(InvalidLicenseException.class)
-                .hasMessage("was not issued by your GO supplier, or has been altered");
+                .hasMessage("was not issued by your GO RockIt supplier, or has been altered");
     }
 
     @Test
     void refusesTextThatIsNotALicenceKey() {
         assertThatThrownBy(() -> LicenseToken.read("hello there", VENDOR))
                 .isInstanceOf(InvalidLicenseException.class)
-                .hasMessage("is not a GO licence key");
+                .hasMessage("is not a GO RockIt licence key");
         assertThatThrownBy(() -> LicenseToken.read("", VENDOR))
                 .isInstanceOf(InvalidLicenseException.class)
-                .hasMessage("is not a GO licence key");
+                .hasMessage("is not a GO RockIt licence key");
     }
 
     @Test

@@ -95,7 +95,7 @@ export default function License({ status, onChanged, onToast }: {
             {status?.machineId && <Button onClick={copyMachineId}>Copy</Button>}
           </div>
           <p className="mt-3 text-xs text-slate-500">
-            A licence works only on the machine it was issued for. Send this ID to your GO supplier to get or
+            A licence works only on the machine it was issued for. Send this ID to your GO RockIt supplier to get or
             renew the licence for this till. Each till needs its own licence. Reinstalling Windows or replacing the
             motherboard gives a new ID.
           </p>

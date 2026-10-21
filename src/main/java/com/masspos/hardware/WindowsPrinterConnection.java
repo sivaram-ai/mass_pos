@@ -54,7 +54,7 @@ public class WindowsPrinterConnection implements PrinterConnection {
         PrinterJob job = PrinterJob.getPrinterJob();
         try {
             job.setPrintService(service());
-            job.setJobName("GO receipt");
+            job.setJobName("GO RockIt receipt");
             // validatePage trims the generic default page down to what this printer can really reach.
             job.setPrintable(new ReceiptPage(lines, document.columns(), widthMm),
                     job.validatePage(job.defaultPage()));

@@ -34,7 +34,7 @@ class ReceiptFormatterTest {
                         "Ph: 020-5550100", "accounts@massmart.example", "GSTIN: 27AAPFU0939F1ZV",
                         "CIN: U52100MH2020PTC123456", "FSSAI Lic. No: 11521999000123", "TAX INVOICE",
                         "Invoice: T1-2627-00001", "Date: 11-09-2026", "Time: 10:54", "Paracetamol 500mg",
-                        "HSN 30049099 18%  2 x 100.00", "CGST", "15.25", "SGST", "15.26", "TOTAL Rs.", "200.00",
+                        "100.00   2 200.00", "CGST", "15.25", "SGST", "15.26", "TOTAL Rs.", "200.00",
                         "Place of supply: 27-Maharashtra", "Reverse charge: No",
                         "Goods once sold are exchanged within 7 days", "Thank you! Visit again")
                 .doesNotContain("IGST", "Buyer GSTIN", "CANCELLED");
@@ -74,11 +74,23 @@ class ReceiptFormatterTest {
 
         assertThat(receipt)
                 .contains("NEW MASS", "4 Bazaar Street", "BILL", "Bill No: T1-2627-00007", "Parotta",
-                        "3 x 20.00", "60.00", "TOTAL Rs.")
+                        "20.00   3  60.00", "TOTAL Rs.")
                 .doesNotContain("TAX INVOICE", "GSTIN", "HSN", "CGST", "SGST", "Taxable", "GST%",
                         "Place of supply", "Reverse charge", "CIN", "FSSAI");
         assertThat(invoice.isTaxInvoice()).isFalse();
         assertThat(invoice.isInterState()).isFalse();
+    }
+
+    /** Four columns that line up, and no HSN: the tax rate is shown rate-wise in the summary. */
+    @Test
+    void itemsPrintAsATableOfNameRateQuantityAndAmount() {
+        List<String> lines = format(48, intraStateSale(), shop(), ReceiptCopy.ORIGINAL).lines().toList();
+        int header = lines.indexOf("Item" + " ".repeat(29) + "Rate Qty Amount");
+
+        assertThat(header).as("the item table header").isNotNegative();
+        assertThat(lines.get(header + 1)).isEqualTo("1. Paracetamol 500mg strip of  100.00   2 200.00");
+        assertThat(lines.get(header + 2)).as("the rest of a long name, under itself").isEqualTo("   15 tablets");
+        assertThat(lines).noneMatch(line -> line.contains("HSN"));
     }
 
     @Test

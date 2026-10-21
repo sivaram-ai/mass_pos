@@ -27,7 +27,7 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
- * GO licence tool, for the vendor only. It holds the private signing key's workflow: never ship
+ * GO RockIt licence tool, for the vendor only. It holds the private signing key's workflow: never ship
  * this folder's output, the private key or the licence register with the app.
  *
  * <p>Needs only a JDK (21+), no build:
@@ -88,7 +88,7 @@ public class LicenseTool {
 
     private static void usage() {
         System.err.println("""
-                GO licence tool
+                GO RockIt licence tool
                   keygen  --dir <folder>
                   issue   --dir <folder> --machine <ID> --customer-id <id> --customer <name> --valid-until <yyyy-mm-dd>
                           [--grace-days 15] [--warn-days 15]
@@ -252,7 +252,7 @@ public class LicenseTool {
         token = token.replaceAll("\\s+", "");
         String[] parts = token.split("\\.");
         if (parts.length != 3 || !PREFIX.equals(parts[0])) {
-            throw new ToolException("that is not a GO licence key");
+            throw new ToolException("that is not a GO RockIt licence key");
         }
         String payload;
         try {

@@ -1,4 +1,4 @@
-# GO: local engineering notes
+# GO RockIt: local engineering notes
 
 This file holds engineering context: invariants, gotchas and tuning. The user-facing overview,
 **configuration reference**, printer setup, the API and the **installer build commands** are in
@@ -77,7 +77,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
   (ui.tsx) draws the key inside the box. Pass `!dialogOpen` so they do nothing behind a dialog.
 - **F9 opens the menu everywhere** (`MENU_KEY`, handled in `App`), so it is deliberately absent from
   `ASSIGNABLE_KEYS`; `isModalOpen()` (a counter kept by `Modal`) stops it opening behind a dialog.
-- **Bills and Products share one list pattern**: a focused `div role=grid`, arrows for row and action,
+- **Products and Stock share one list pattern** (and Bills a close cousin): a focused `div role=grid`, arrows for row and action,
   Enter to run, dialogs returning focus to the list. Products' table is `table-fixed` with a colgroup
   and `truncate` + `title` on the name, so a 150-character name cannot push the columns off screen.
 - **Bills screen is keyboard-first** (`Invoices.tsx`): the list `div` holds focus (`role=grid`) and
@@ -87,7 +87,9 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
   the list on close. Edit chains come from `GET /api/invoices/{id}/history` (walks
   `replacesInvoiceNumber` back and `findFirstByReplacesInvoiceNumber` forward).
 - **Forms show server field errors**: `ApiError.fieldErrors` + `errorFor()` + `<Field error>`.
-  Keep new forms on that pattern rather than toasting the message.
+  Keep new forms on that pattern rather than toasting the message. **A refusal from inside a dialog
+  must be shown inside that dialog**: a toast renders behind the modal's backdrop, where the person
+  who caused it cannot read it (staff "Add a person" and "Reset PIN" were both broken this way).
 - The in-app browser pane cannot send a real Space keydown or edit text with Backspace; test those
   by dispatching a `KeyboardEvent` and with `form_input`.
 
@@ -204,6 +206,11 @@ overridable with `POS_DATA_DIR`. It holds:
   note against it can no longer be edited or cancelled (`SaleService.requireNoReturns`).
 - **Reports net returns**: day totals, payments per mode, cashiers and tills subtract credit notes;
   the GST summary nets them off rates and HSN. `DayReport.totals` is the net figure.
+- **Receipt items are four columns**: name, rate, quantity, amount, sized to the widest figure on
+  that bill so they line up, with a name too long for its column carried on underneath. **No HSN on
+  the line and no per-line tax rate** (asked for by the shop, 2026-10-21): Rule 46 wants the rate
+  rate-wise, which the GST summary gives, but a GST-registered shop over the HSN turnover threshold
+  needs HSN on its tax invoices - put it back for those shops before shipping to one.
 - `Invoice` and `CreditNote` implement `TaxDocument` (`InvoiceItem`/`CreditNoteItem`: `TaxLine`), which
   is what `ReceiptFormatter` lays out.
   - A new immutable table, or a new fiscal or seller column on `Invoice`, must also be added to
@@ -370,7 +377,8 @@ Re-measure under a billing load test.
 
 ## Product name
 
-The product is **GO**. The name appears on screens, receipts, the licence messages, the
+The product is **GO RockIt**, from GoGo Digital Services, whose logo is the login screen's
+(`frontend/public/gds-logo.webp`). The name appears on screens, receipts, the licence messages, the
 `pos.properties` template and the docs. Deliberately *not* renamed, because each would break a
 till or a licence already in the field:
 
@@ -398,7 +406,7 @@ till or a licence already in the field:
 - **Offline licensing stops copying, not cracking**: the jar can be decompiled and the check patched
   out. Obfuscation and the L2 check-in raise the bar.
 - **`WINDOWS` printing is exercised on real hardware** (Canon G3080 on this PC, 2026-10-20: the job
-  reached the spooler as "GO receipt" and came out on paper). Serial and TCP are still fakes and
+  reached the spooler as "GO RockIt receipt" and came out on paper). Serial and TCP are still fakes and
   error paths only. One thing to watch: `PrinterJob.print()` blocks until the spooler takes the job,
   inside `pos.printer.timeout` + 3 s. A sleeping printer could spend that and have the till report a
   print failure for a bill that prints a moment later; raise `pos.printer.timeout` if it happens.
