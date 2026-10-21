@@ -21,3 +21,6 @@ licences.csv
 .idea/
 *.iml
 .vscode/
+
+# Built installers
+dist/
