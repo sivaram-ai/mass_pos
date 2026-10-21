@@ -200,11 +200,7 @@ Key machine settings:
 | `pos.terminal.code` | `T1` | Invoice prefix, unique per till (`T1-2627-00001`) |
 | `pos.terminal.name` / `.section` | `Counter 1` / empty | Shown in reports and on the settings screen, e.g. "1st floor" |
 | `pos.terminal.type` | `COUNTER` | `MASTER` holds the shop's consolidated database |
-| `pos.printer.type` | `FILE` | `SERIAL`, `TCP`, `WINDOWS` or `FILE` |
-| `pos.printer.serial.port` | empty | `COM3`, `/dev/ttyUSB0`, … |
-| `pos.printer.windows.name` | empty | Printer as Windows lists it; empty = the default printer |
-| `pos.printer.windows.width-mm` | `80` | Receipt width on the sheet; `0` fills the page |
-| `pos.printer.columns` | `48` | `48` for 80 mm paper, `32` for 58 mm |
+| `pos.printer.*` | `FILE`, 48 columns | **First start only**: seeds the printer the Settings screen then owns |
 | `server.port` | `8765` | Also `POS_PORT` |
 
 ## Several tills in one shop
@@ -218,6 +214,13 @@ The UI port stays on loopback even on the master, so nobody on the network can d
 screen or open its cash drawer.
 
 ## Receipt printer and cash drawer
+
+**Set the printer on screen: Settings → Printer.** It lists the COM ports and the printers this
+machine has, saves to the database, and takes effect on the next bill — nothing to restart. The
+`pos.printer.*` entries in `pos.properties` only seed that row on the very first start, so an
+installer can set a shop up before anyone signs in.
+
+Each till keeps its own printer. Nothing about it is shared with the other counters.
 
 - **SERIAL** covers RS-232 printers and USB printers that appear as a COM port. Most USB printers
   need the vendor's virtual COM port driver; one installed only as a Windows printer (`USB001`) is
@@ -258,7 +261,7 @@ is not a loopback name are refused. Together these stop a web page open on the t
 | Reports | `GET /api/reports/day`, `/gst`, `/audit` |
 | Settings | `GET/PUT /api/settings` |
 | Licence | `GET /api/license` (any signed-in user), `POST /api/license` (admin: install or renew a key) |
-| Hardware | `GET /api/hardware/printer/status`, `/serial-ports`, `POST /api/hardware/printer/test-page`, `/drawer/open` |
+| Hardware | `GET /api/hardware/printer/status`, `/printer/settings`, `/serial-ports`, `PUT /api/hardware/printer/settings`, `POST /api/hardware/printer/test-page`, `/drawer/open` |
 
 Errors come back as RFC 7807 problem details whose `detail` is fit to show on screen. A refused
 form also carries `errors`, one message per field (`{"gstin": "is not a valid GSTIN ..."}`), which
@@ -386,7 +389,7 @@ docs/                    multi-terminal and RBAC design
 | Billing screen says it is blocked | Fill in legal name and address under Settings |
 | "Billing locked" banner | Menu > Licence says why: no licence, lapsed after its grace period, or issued for another machine |
 | Cannot sign in on a new install | The admin PIN is in `<data-dir>\logs\pos.log` |
-| Bills print to files, not paper | `pos.printer.type` is still `FILE`; the receipts are in `<data-dir>\printer-out` |
+| Bills print to files, not paper | No printer is chosen: pick one under Settings > Printer. Meanwhile the bills are in `<data-dir>\printer-out` |
 | Nothing prints, but Notepad can print | The printer has only a Windows driver, so `SERIAL` and `TCP` cannot see it: use `WINDOWS` |
 | `Cannot open serial port COM3` | Another program holds it, the name is wrong, or the printer is off |
 | Garbled printing | Baud rate or flow control does not match the printer |

@@ -18,6 +18,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3F | Readable field errors (`errors` map), non-GST shops, optional HSN/CIN, grid billing screen with Space bill, one-line header with slide-in menu, compact footer, held-bill keys | Done: 127 tests green, driven in the browser |
 | 3G | Edit today's bill (cancel + reissue), returns as credit notes with refunds, reports net of returns, held bills newest first, Esc Esc back to billing | Done: 139 tests green, driven in the browser |
 | 3H | `WINDOWS` printer type: tills with no thermal printer bill through any installed driver printer, receipt-width on the sheet, QR drawn by the till | Done: 199 tests green, printed on a real Canon G3080 |
+| 3I | Printer chosen on screen (Settings > Printer): per-till `printer_settings` row seeded from `pos.properties`, device lists from the machine, connection swapped on the next job | Done |
 | L1 | Offline subscription licence per till: Ed25519-signed key bound to a hardware machine ID, warn/grace days, billing lock, Licence screen + banner, vendor `tools/license/LicenseTool.java` | Done: 172 tests green, real key verified on this PC |
 | 4 | Counter → master sync over LAN (see [docs/multi-terminal-and-rbac.md](docs/multi-terminal-and-rbac.md)) | Designed, not built |
 | Later | Flyway migrations, cloud sync, composition scheme / bill of supply, desktop shell | Not started |
@@ -131,8 +132,10 @@ src/main/java/com/masspos/
 │                        CompanyProperties (pos.company), SellerDetails (@Embeddable snapshot), Gstin + @ValidGstin
 ├── inventory/           InventoryLedgerEvent, LedgerEventType
 ├── hardware/            EscPos, CodePage, PrinterConnection (+ Serial / Tcp / Windows / File),
-│                        ReceiptLayout (page rendering for driver printers), PrinterConfig,
-│                        PrinterProperties (pos.printer), PrinterStatus, ThermalPrinter, HardwareController
+│                        ReceiptLayout (page rendering for driver printers), PrinterConnections,
+│                        PrinterSettings/-Form/-Repository/-Service + PrinterBootstrap (the row the
+│                        screen edits), PrinterProperties (pos.printer, the seed), PrinterStatus,
+│                        ThermalPrinter, HardwareController
 ├── receipt/             ReceiptFormatter, ReceiptProperties (pos.receipt), ReceiptService, ReceiptController, ReceiptCopy, Amounts
 └── web/                 LocalApiGuard (Host + X-POS-Client), ApiExceptionHandler (ProblemDetail)
 src/main/resources/      application.properties (defaults), pos-template.properties (copied to <data-dir>/pos.properties)
@@ -158,7 +161,7 @@ overridable with `POS_DATA_DIR`. It holds:
   |---|---|---|
   | `pos.terminal` | terminal code | `PosProperties` |
   | `pos.company` | seller | `CompanyProperties` |
-  | `pos.printer` | printer settings | `PrinterProperties` |
+  | `pos.printer` | printer settings, **first start only** | `PrinterProperties` -> `printer_settings` |
   | `pos.receipt` | footer | `ReceiptProperties` |
 
 - **A new setting** needs three things:
@@ -266,6 +269,23 @@ overridable with `POS_DATA_DIR`. It holds:
 
 ### Hardware
 
+- **The printer is a per-till database row, not a property.** `printer_settings` (one row, seeded
+  once from `pos.printer.*`) is what the Settings screen edits; `pos.properties` is only the seed
+  after that. Three things follow:
+  - **It must never sync.** Every counter has its own printer: pushing the master's row out would
+    stop the whole shop printing. Keep it out of the phase-4 sync set.
+  - **Nothing caches the settings across a job.** `ThermalPrinter` asks
+    `PrinterSettingsService.active()` each time, and that answers from a volatile field refreshed on
+    save, so the print path never waits on a query.
+  - **`PrinterConnections` rebuilds the connection when the settings record stops being `equals`**
+    to the one it built from, and only on the printer's worker thread. Anything that asks for a
+    connection from another thread could close a port mid-job, which is why `target()` describes the
+    printer from the settings instead of opening one.
+- **Building a connection touches no hardware.** Serial, TCP, Windows and File all connect when a
+  job is written, so a printer that is off, unplugged or misconfigured cannot stop the till starting,
+  billing, or changing its own settings back.
+- **`ReceiptFormatter` takes the printer settings per call**, not through the constructor: paper
+  width can change between two bills.
 - **`WINDOWS` prints through a driver, so it renders instead of sending bytes.** ESC/POS bytes on an
   inkjet come out as rubbish, so `WindowsPrinterConnection` lays `EscPos.printedLines()` out with
   `ReceiptLayout` and hands the page to the spooler. Two consequences:

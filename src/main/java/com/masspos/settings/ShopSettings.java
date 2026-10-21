@@ -21,7 +21,9 @@ import java.util.Locale;
  * rather than in a file, so an owner can edit it on screen and the master can push it to every
  * counter.
  *
- * <p>Per-machine things stay in {@code pos.properties}: the terminal code, floor and printer.
+ * <p>Per-machine things are not here: the terminal code and floor stay in {@code pos.properties},
+ * and the printer has its own per-till row ({@code printer_settings}), because every counter has
+ * its own.
  *
  * <p>Audited, because changing a GSTIN or a legal name is exactly the sort of edit Rule 11(g)
  * expects to see recorded. Invoices already issued keep their own copy and never change.

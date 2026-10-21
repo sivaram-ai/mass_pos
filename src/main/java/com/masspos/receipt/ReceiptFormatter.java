@@ -51,17 +51,13 @@ public class ReceiptFormatter {
     private static final int QR_MODULE_DOTS = 6;
     private static final int RATE_COLUMN_WIDTH = 6;
 
-    private final PrinterProperties printer;
-
-    public ReceiptFormatter(PrinterProperties printer) {
-        this.printer = printer;
-    }
-
     /**
      * @param invoice    an {@link Invoice} or a {@link CreditNote}
+     * @param printer    the printer as it is set now: paper width and code page shape the layout
      * @param openDrawer kick the drawer first, so it opens while the receipt prints
      */
-    public EscPos format(TaxDocument invoice, ShopSettings shop, ReceiptCopy copy, boolean openDrawer) {
+    public EscPos format(TaxDocument invoice, ShopSettings shop, PrinterProperties printer, ReceiptCopy copy,
+                         boolean openDrawer) {
         EscPos doc = new EscPos(printer.codePage(), printer.columns());
         if (openDrawer) {
             doc.openDrawer(printer.drawerPin(), printer.drawerPulse());

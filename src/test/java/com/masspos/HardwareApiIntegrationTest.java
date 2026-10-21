@@ -8,6 +8,7 @@ import com.masspos.user.User;
 import com.masspos.user.UserRole;
 import com.masspos.web.LocalApiGuard;
 import jakarta.persistence.EntityManager;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +16,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.FileSystemUtils;
@@ -32,9 +34,12 @@ import static com.masspos.TestFixtures.newCashier;
 import static com.masspos.TestFixtures.newInvoice;
 import static com.masspos.TestFixtures.newProduct;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -187,9 +192,90 @@ class HardwareApiIntegrationTest {
     }
 
     @Test
+    void thePrinterPageShowsTheSetupAndWhatThisMachineHasToOfferIt() throws Exception {
+        mvc.perform(as(get("/api/hardware/printer/settings"), cashierToken)).andExpect(status().isForbidden());
+
+        mvc.perform(as(get("/api/hardware/printer/settings"), managerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.printer.type").value("FILE"))
+                .andExpect(jsonPath("$.printer.columns").value(48))
+                .andExpect(jsonPath("$.target").value(startsWith("FILE ")))
+                .andExpect(jsonPath("$.serialPorts").isArray())
+                .andExpect(jsonPath("$.installedPrinters").isArray());
+    }
+
+    /** The point of the screen: no pos.properties, no restart. */
+    @Test
+    void aPaperWidthSavedOnScreenAppliesToTheVeryNextJob() throws Exception {
+        savePrinter(printerJson("FILE", 32, ""));
+
+        printTestPage().andExpect(status().isNoContent());
+
+        assertThat(Files.readString(latestJob(".txt")))
+                .contains("12345678901234567890123456789012")
+                .doesNotContain("123456789012345678901234567890123");
+    }
+
+    @Test
+    void aPrinterThatIsNotThereFailsTheJobAndTheTillCarriesOn() throws Exception {
+        savePrinter(printerJson("WINDOWS", 48, "No Such Printer 9000"));
+
+        printTestPage()
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.detail").value(containsString("No Such Printer 9000")));
+
+        savePrinter(printerJson("FILE", 48, ""));
+        printTestPage().andExpect(status().isNoContent());
+    }
+
+    @Test
+    void refusesPaperTooNarrowToLayABillOutOn() throws Exception {
+        mvc.perform(as(put("/api/hardware/printer/settings"), managerToken)
+                        .header(LocalApiGuard.CLIENT_HEADER, "test")
+                        .contentType(APPLICATION_JSON).content(printerJson("FILE", 10, "")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.columns").value("must be at least 24"))
+                .andExpect(jsonPath("$.detail").value(containsString("Characters per line must be at least 24")));
+    }
+
+    @Test
+    void onlyAManagerChangesThePrinter() throws Exception {
+        mvc.perform(as(put("/api/hardware/printer/settings"), cashierToken)
+                        .header(LocalApiGuard.CLIENT_HEADER, "test")
+                        .contentType(APPLICATION_JSON).content(printerJson("FILE", 48, "")))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void existingSettingsFileIsNeverOverwritten() throws IOException {
         assertThat(Files.readString(Path.of(DATA_DIR, "pos.properties")))
                 .startsWith("pos.company.trade-name=Imported Mart");
+    }
+
+    /** Back to the file printer, so one test's choice of printer is not the next one's. */
+    @AfterEach
+    void backToTheFilePrinter() throws Exception {
+        savePrinter(printerJson("FILE", 48, ""));
+    }
+
+    private void savePrinter(String json) throws Exception {
+        mvc.perform(as(put("/api/hardware/printer/settings"), managerToken)
+                        .header(LocalApiGuard.CLIENT_HEADER, "test")
+                        .contentType(APPLICATION_JSON).content(json))
+                .andExpect(status().isOk());
+    }
+
+    private ResultActions printTestPage() throws Exception {
+        return mvc.perform(as(post("/api/hardware/printer/test-page"), cashierToken)
+                .header(LocalApiGuard.CLIENT_HEADER, "test"));
+    }
+
+    private static String printerJson(String type, int columns, String windowsPrinter) {
+        return """
+                {"type":"%s","serialPort":"","serialBaudRate":9600,"serialFlowControl":"NONE",
+                 "tcpHost":"","tcpPort":9100,"windowsPrinter":"%s","windowsWidthMm":80,
+                 "columns":%d,"codePage":"PC437","drawerPin":"PIN_2","drawerPulseMillis":100,
+                 "timeoutSeconds":5}""".formatted(type, windowsPrinter, columns);
     }
 
     private static MockHttpServletRequestBuilder as(MockHttpServletRequestBuilder request, String token) {

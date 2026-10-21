@@ -45,7 +45,7 @@ public class ReceiptService {
             if (invoice == null) {
                 throw new EntityNotFoundException("No invoice " + invoiceId);
             }
-            return formatter.format(invoice, settings.currentOrEmpty(), copy,
+            return formatter.format(invoice, settings.currentOrEmpty(), printer.settings(), copy,
                     openDrawer && copy == ReceiptCopy.ORIGINAL);
         });
         return printer.print(receipt);
@@ -58,7 +58,8 @@ public class ReceiptService {
             if (note == null) {
                 throw new EntityNotFoundException("No return " + creditNoteId);
             }
-            return formatter.format(note, settings.currentOrEmpty(), copy, openDrawer && copy == ReceiptCopy.ORIGINAL);
+            return formatter.format(note, settings.currentOrEmpty(), printer.settings(), copy,
+                    openDrawer && copy == ReceiptCopy.ORIGINAL);
         });
         return printer.print(receipt);
     }

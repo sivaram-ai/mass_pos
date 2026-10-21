@@ -110,8 +110,8 @@ class ReceiptFormatterTest {
 
     @Test
     void drawerKickComesBeforeAnythingIsPrinted() {
-        byte[] bytes = new ReceiptFormatter(printer(48))
-                .format(intraStateSale(), shop(), ReceiptCopy.ORIGINAL, true).toBytes();
+        byte[] bytes = new ReceiptFormatter()
+                .format(intraStateSale(), shop(), printer(48), ReceiptCopy.ORIGINAL, true).toBytes();
 
         // after ESC @ and ESC t n
         assertThat(Arrays.copyOfRange(bytes, 5, 10)).containsExactly((byte) 0x1B, (byte) 'p', (byte) 0, (byte) 50, (byte) 250);
@@ -170,6 +170,6 @@ class ReceiptFormatterTest {
     }
 
     private static String format(int columns, Invoice invoice, ShopSettings shop, ReceiptCopy copy) {
-        return new ReceiptFormatter(printer(columns)).format(invoice, shop, copy, false).plainText();
+        return new ReceiptFormatter().format(invoice, shop, printer(columns), copy, false).plainText();
     }
 }

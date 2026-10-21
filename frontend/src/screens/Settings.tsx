@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { api, fieldErrorsOf, messageOfFailure } from '../api'
-import type { PrinterStatus, Role, SettingsView, ShopSettingsForm } from '../types'
+import type { Role, SettingsView, ShopSettingsForm } from '../types'
 import { Banner, Button, Empty, errorFor, Field, inputClass, Panel } from '../components/ui'
+import PrinterPanel from '../components/PrinterPanel'
 
 const FIELD_LABELS: Record<string, string> = {
   legalName: 'Legal name',
@@ -44,22 +45,11 @@ export default function Settings({ role, settings, onSaved, onToast }: {
   const [shortcuts, setShortcuts] = useState(loadShortcuts)
   const [showShortcuts, setShowShortcuts] = useState(loadShowShortcuts)
   const [askCashReceived, setAskCashReceived] = useState(loadAskCashReceived)
-  const [printer, setPrinter] = useState<PrinterStatus | null>(null)
-  const [printerError, setPrinterError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [saveError, setSaveError] = useState<string | null>(null)
 
   useEffect(() => setForm(settings?.shop ?? null), [settings])
-
-  useEffect(() => {
-    api.get<PrinterStatus>('/api/hardware/printer/status')
-      .then((status) => {
-        setPrinter(status)
-        setPrinterError(null)
-      })
-      .catch((failure) => setPrinterError(failure instanceof Error ? failure.message : 'Printer unreachable'))
-  }, [])
 
   if (!settings || !form) {
     return <Empty>Loading settings…</Empty>
@@ -85,15 +75,6 @@ export default function Settings({ role, settings, onSaved, onToast }: {
   }
 
   const err = (field: string) => errorFor(errors, field)
-
-  const testPage = async () => {
-    try {
-      await api.post('/api/hardware/printer/test-page')
-      onToast({ tone: 'good', text: 'Test page sent to the printer' })
-    } catch (failure) {
-      onToast({ tone: 'bad', text: failure instanceof Error ? failure.message : 'Could not print' })
-    }
-  }
 
   return (
     <div className="grid gap-4 xl:grid-cols-2">
@@ -220,31 +201,7 @@ export default function Settings({ role, settings, onSaved, onToast }: {
         </fieldset>
       </Panel>
 
-      <Panel
-        title="Printer"
-        actions={<Button onClick={testPage}>Print test page</Button>}
-      >
-        {printerError ? (
-          <Banner tone="bad">{printerError}</Banner>
-        ) : printer ? (
-          <ul className="space-y-1 text-sm text-slate-600">
-            <li>Answering: {printer.responding ? 'yes' : 'no (file mode, or no status support)'}</li>
-            {printer.responding && (
-              <>
-                <li>Online: {printer.online ? 'yes' : 'no'}</li>
-                <li>Cover: {printer.coverOpen ? 'open' : 'closed'}</li>
-                <li>Paper: {printer.paperOut ? 'out' : printer.paperNearEnd ? 'running low' : 'fine'}</li>
-              </>
-            )}
-          </ul>
-        ) : (
-          <Empty>Checking the printer…</Empty>
-        )}
-        <p className="mt-3 text-xs text-slate-400">
-          The printer port, paper width and drawer pin belong to this machine, so they are set in
-          pos.properties next to the database.
-        </p>
-      </Panel>
+      <PrinterPanel canEdit={canEdit} onToast={onToast} />
 
       <Panel title="Keyboard shortcuts" actions={
         <Button onClick={() => {

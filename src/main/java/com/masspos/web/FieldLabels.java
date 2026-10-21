@@ -34,7 +34,19 @@ final class FieldLabels {
             Map.entry("newPin", "New PIN"),
             Map.entry("currentPin", "Current PIN"),
             Map.entry("pin", "PIN"),
-            Map.entry("key", "Licence key"));
+            Map.entry("key", "Licence key"),
+            Map.entry("serialPort", "COM port"),
+            Map.entry("serialBaudRate", "Baud rate"),
+            Map.entry("serialFlowControl", "Flow control"),
+            Map.entry("tcpHost", "Printer address"),
+            Map.entry("tcpPort", "Printer port"),
+            Map.entry("windowsPrinter", "Printer"),
+            Map.entry("windowsWidthMm", "Receipt width"),
+            Map.entry("columns", "Characters per line"),
+            Map.entry("codePage", "Code page"),
+            Map.entry("drawerPin", "Drawer pin"),
+            Map.entry("drawerPulseMillis", "Drawer pulse"),
+            Map.entry("timeoutSeconds", "Printer timeout"));
 
     /** A path segment such as {@code lines[0]} or {@code quantityMilli}. */
     private static final Pattern SEGMENT = Pattern.compile("([A-Za-z0-9_]+)(?:\\[(\\d+)])?");

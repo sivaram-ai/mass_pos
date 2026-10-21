@@ -303,6 +303,42 @@ export interface UserRow {
   mustChangePin: boolean
 }
 
+export type PrinterType = 'SERIAL' | 'TCP' | 'WINDOWS' | 'FILE'
+export type FlowControl = 'NONE' | 'RTS_CTS' | 'DTR_DSR' | 'XON_XOFF'
+export type CodePage = 'PC437' | 'PC850' | 'PC858' | 'WPC1252'
+export type DrawerPin = 'PIN_2' | 'PIN_5'
+
+/** This till's printer, as the printer panel edits it. One shape covering every type. */
+export interface PrinterSettingsForm {
+  type: PrinterType
+  serialPort: string
+  serialBaudRate: number
+  serialFlowControl: FlowControl
+  tcpHost: string
+  tcpPort: number
+  windowsPrinter: string
+  windowsWidthMm: number
+  columns: number
+  codePage: CodePage
+  drawerPin: DrawerPin
+  drawerPulseMillis: number
+  timeoutSeconds: number
+}
+
+export interface SerialPortInfo {
+  systemName: string
+  description: string
+  details: string
+}
+
+export interface PrinterSetupView {
+  printer: PrinterSettingsForm
+  /** Where bills are going now, e.g. "WINDOWS Canon G3080 series". */
+  target: string
+  serialPorts: SerialPortInfo[]
+  installedPrinters: string[]
+}
+
 export interface PrinterStatus {
   responding: boolean
   online: boolean

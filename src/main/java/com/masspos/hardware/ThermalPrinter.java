@@ -17,6 +17,9 @@ import java.util.concurrent.TimeoutException;
  * The till's receipt printer. Jobs, drawer kicks and status queries all run on one worker thread,
  * so bytes from different jobs never interleave on the port, and callers submit work after their
  * database transaction has ended instead of holding SQLite's write lock through printer I/O.
+ *
+ * <p>Which printer that is comes from the settings screen on every job, so changing it takes effect
+ * on the next bill without restarting the till.
  */
 @Service
 public class ThermalPrinter implements DisposableBean {
@@ -26,25 +29,26 @@ public class ThermalPrinter implements DisposableBean {
     /** Room for status round trips and a job queued ahead of this one. */
     private static final Duration AWAIT_MARGIN = Duration.ofSeconds(3);
 
-    private final PrinterConnection connection;
-    private final PrinterProperties settings;
+    private final PrinterConnections connections;
+    private final PrinterSettingsService printerSettings;
     private final ExecutorService worker = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "escpos-printer");
         thread.setDaemon(true);
         return thread;
     });
 
-    public ThermalPrinter(PrinterConnection connection, PrinterProperties settings) {
-        this.connection = connection;
-        this.settings = settings;
+    public ThermalPrinter(PrinterConnections connections, PrinterSettingsService printerSettings) {
+        this.connections = connections;
+        this.printerSettings = printerSettings;
     }
 
     public EscPos newDocument() {
-        return new EscPos(settings.codePage(), settings.columns());
+        PrinterProperties printer = settings();
+        return new EscPos(printer.codePage(), printer.columns());
     }
 
     public CompletableFuture<Void> print(EscPos document) {
-        return CompletableFuture.runAsync(() -> connection.write(document), worker)
+        return CompletableFuture.runAsync(() -> connections.current().write(document), worker)
                 .whenComplete((ignored, failure) -> {
                     if (failure != null) {
                         log.warn("Print job failed on {}: {}", target(), failure.getMessage());
@@ -53,16 +57,17 @@ public class ThermalPrinter implements DisposableBean {
     }
 
     public CompletableFuture<Void> openDrawer() {
-        return print(newDocument().openDrawer(settings.drawerPin(), settings.drawerPulse()));
+        PrinterProperties printer = settings();
+        return print(newDocument().openDrawer(printer.drawerPin(), printer.drawerPulse()));
     }
 
     public CompletableFuture<PrinterStatus> status() {
-        return CompletableFuture.supplyAsync(() -> PrinterStatus.query(connection, STATUS_TIMEOUT), worker);
+        return CompletableFuture.supplyAsync(() -> PrinterStatus.query(connections.current(), STATUS_TIMEOUT), worker);
     }
 
     /** Waits for a job on behalf of an API caller. The job itself keeps running if the caller gives up. */
     public <T> T await(CompletableFuture<T> job) {
-        Duration limit = settings.timeout().plus(AWAIT_MARGIN);
+        Duration limit = settings().timeout().plus(AWAIT_MARGIN);
         try {
             return job.get(limit.toMillis(), TimeUnit.MILLISECONDS);
         } catch (ExecutionException e) {
@@ -78,12 +83,13 @@ public class ThermalPrinter implements DisposableBean {
         }
     }
 
+    /** The printer as it is set right now, not as it was when the till started. */
     public PrinterProperties settings() {
-        return settings;
+        return printerSettings.active();
     }
 
     public String target() {
-        return settings.type() + " " + connection.describe();
+        return settings().type() + " " + connections.describe();
     }
 
     @Override
