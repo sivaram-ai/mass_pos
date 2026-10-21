@@ -44,6 +44,18 @@ public class WindowsPrinterConnection implements PrinterConnection {
         return widthMm <= 0 ? printable : Math.min(printable, widthMm * POINTS_PER_MM);
     }
 
+    /**
+     * Which printer "the default" actually is, so the settings screen can name it. Leaving the
+     * choice to Windows is how a till ends up printing into the queue of whatever was default -
+     * an unplugged printer, say - with nothing on screen to say so.
+     */
+    static String defaultPrinterName() {
+        PrintService fallback = PrintServiceLookup.lookupDefaultPrintService();
+        return fallback == null
+                ? "no default printer is set in Windows"
+                : fallback.getName() + " (the Windows default)";
+    }
+
     @Override
     public void write(EscPos document) {
         List<EscPos.Line> lines = document.printedLines();

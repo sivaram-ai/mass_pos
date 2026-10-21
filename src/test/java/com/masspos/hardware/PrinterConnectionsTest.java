@@ -45,8 +45,24 @@ class PrinterConnectionsTest {
         assertThat(PrinterConnections.describe(blank, OUT)).isEqualTo("no COM port chosen");
         assertThat(PrinterConnections.describe(withType(blank, PrinterProperties.Type.TCP), OUT))
                 .isEqualTo("no address set");
-        assertThat(PrinterConnections.describe(withType(blank, PrinterProperties.Type.WINDOWS), OUT))
-                .isEqualTo("the Windows default printer");
+    }
+
+    /**
+     * Leaving it to Windows is how a till quietly prints into the queue of whatever was default,
+     * so the screen has to say which printer that is rather than "the default".
+     */
+    @Test
+    void namesThePrinterWindowsWouldPickRatherThanCallingItTheDefault() {
+        PrinterProperties noName = withType(printer(PrinterProperties.Type.WINDOWS),
+                PrinterProperties.Type.WINDOWS);
+        PrinterProperties blankName = new PrinterProperties(PrinterProperties.Type.WINDOWS,
+                noName.serial(), noName.tcp(), new PrinterProperties.Windows("", 80),
+                48, CodePage.PC437, EscPos.DrawerPin.PIN_2, Duration.ofMillis(100), Duration.ofSeconds(5));
+
+        assertThat(PrinterConnections.describe(blankName, OUT, () -> "Canon G3080 series (the Windows default)"))
+                .isEqualTo("Canon G3080 series (the Windows default)");
+        assertThat(PrinterConnections.describe(noName, OUT, () -> "should not be asked"))
+                .isEqualTo("Canon G3080 series");
     }
 
     /** Settings are a record, so "has the printer changed?" is one equals call. */
