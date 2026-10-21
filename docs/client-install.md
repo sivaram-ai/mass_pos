@@ -53,10 +53,20 @@ Copying `pos.db` alone while the app runs gives a stale copy.
 machine, so ask for a new key for the new machine ID. Keep the same `pos.terminal.code` only if the
 old PC is retired.
 
+## Where things live
+
+The program is installed in `%LOCALAPPDATA%\GoRockIt`; everything the shop owns stays in
+`%LOCALAPPDATA%\MassPOS`. They are deliberately apart, so removing the program can never take
+the database with it.
+
 ## Updating to a new version
 
-Run the new installer over the old one. The upgrade id is fixed, so it replaces the program and
-keeps the data folder. Take a copy of `%LOCALAPPDATA%\MassPOS` first.
+Run the new installer over the old one: the upgrade id is fixed, so a build with a new version
+number replaces the program and keeps the data folder. Rebuilding the *same* version and
+installing it again does not work - Windows refuses it with error 1638, "another version of this
+product is already installed" - so pass a new `-Version` to the build script, or uninstall first.
+Take a copy of `%LOCALAPPDATA%\MassPOS` before any upgrade. A till installed with the first 0.1.0
+build has the program inside the data folder: uninstall that one before installing a later build.
 
 ## If something is wrong
 

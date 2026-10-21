@@ -31,6 +31,17 @@ $running = Get-CimInstance Win32_Process -Filter "Name='java.exe'" |
     Where-Object { $_.CommandLine -like "*target\mass-pos.jar*" }
 if ($running) { throw "Stop the running app first (java -jar target\mass-pos.jar, PID $($running.ProcessId -join ','))" }
 
+# A finished npm step can leave target\node\node.exe running, and then mvnw clean cannot delete it.
+$node = Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
+    Where-Object { $_.ExecutablePath -like "$pwd\target\node\*" }
+if ($node) { throw "A previous build's Node is still running (PID $($node.ProcessId -join ',')): let it finish or stop it" }
+
+# Two builds sharing target\ delete each other's classes, and the tests then fail with
+# NoClassDefFoundError on the app's own classes. One build at a time.
+$other = Get-CimInstance Win32_Process -Filter "Name='cmd.exe'" |
+    Where-Object { $_.CommandLine -like "*$pwd\mvnw.cmd*" }
+if ($other) { throw "Another build is already running (PID $($other.ProcessId -join ',')): wait for it to finish" }
+
 Step "1/4 Building the jar (UI + backend)"
 $mvnArgs = @("-B", "clean", "package")
 if ($SkipTests) { $mvnArgs += "-DskipTests" }
@@ -48,12 +59,15 @@ Step "3/4 Building the installer"
 New-Item -ItemType Directory -Force target\jpackage-input | Out-Null
 Copy-Item target\mass-pos.jar target\jpackage-input\ -Force
 # Never change --win-upgrade-uuid: it is how a new version upgrades an old install in place.
+# --install-dir keeps the program out of the shop's data folder: %LOCALAPPDATA%\MassPOS holds
+# pos.db, the licence and the logs, and an uninstall there could take the database with it.
 jpackage --type exe --name MassPOS --app-version $Version --vendor "GoGo Digital Services" `
   --input target\jpackage-input --main-jar mass-pos.jar --runtime-image target\runtime `
   --java-options "-XX:+UseG1GC" --java-options "-Xms512m" --java-options "-Xmx512m" `
   --java-options "-XX:MaxGCPauseMillis=20" --java-options "-XX:+AlwaysPreTouch" `
   --java-options "-XX:+UseStringDeduplication" --java-options "-XX:+ExitOnOutOfMemoryError" `
-  --win-per-user-install --win-menu --win-shortcut `
+  --win-per-user-install --install-dir GoRockIt `
+  --win-menu --win-menu-group "GO RockIt" --win-shortcut `
   --win-upgrade-uuid 076ca0d4-3fc9-4172-8e1f-c4f9062c6f99 `
   --dest target\installer
 Check "jpackage"
