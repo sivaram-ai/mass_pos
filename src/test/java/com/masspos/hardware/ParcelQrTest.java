@@ -12,13 +12,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class ParcelQrTest {
 
+    /** Printer dots across the paper: 48 and 32 Font A columns, 12 dots each. */
+    private static final int EIGHTY_MM = 576;
+    private static final int FIFTY_EIGHT_MM = 384;
+
     private static final String UPI =
             "upi://pay?pa=shop@okicici&pn=THALAPATHY%20BIRIYANI&am=140.00&cu=INR&tn=T1-2627-00129";
 
     /** Drawing the code ourselves is only worth anything if a phone can still read it. */
     @Test
     void theCodeStillScans() throws Exception {
-        boolean[][] dots = ParcelQr.compose(UPI, 260);
+        boolean[][] dots = ParcelQr.compose(UPI, EIGHTY_MM);
 
         Result read = new QRCodeReader().decode(new BinaryBitmap(new HybridBinarizer(new Dots(dots))));
 
@@ -27,22 +31,26 @@ class ParcelQrTest {
 
     @Test
     void theMarkSitsToTheRightOfTheCodeAndIsRoundedOnNothing() {
-        boolean[][] dots = ParcelQr.compose(UPI, 260);
+        boolean[][] dots = ParcelQr.compose(UPI, EIGHTY_MM);
         int height = dots.length;
         int width = dots[0].length;
 
         assertThat(width).as("wider than it is tall: the mark is beside the code").isGreaterThan(height);
-        // The band to the right of the code carries the mark, and the corners of that band stay clear.
-        int markLeft = height + (width - height) / 4;
-        assertThat(inkIn(dots, markLeft, width, height / 3, 2 * height / 3)).as("the P and its circle")
-                .isGreaterThan(20);
+        assertThat(width).as("never wider than the paper").isLessThanOrEqualTo(EIGHTY_MM);
+
+        // The code sits in the middle of the block, so printing the block centred leaves the code
+        // centred on the paper - the padding on the left is there for exactly that, and is blank.
+        int pad = (width - height) / 2;
+        assertThat(inkIn(dots, 0, pad - 1, 0, height)).as("the blank left pad").isZero();
+        assertThat(inkIn(dots, pad + height + 1, width, height / 4, 3 * height / 4))
+                .as("the P and its circle").isGreaterThan(20);
         assertThat(inkIn(dots, width - 3, width, 0, 3)).as("the top right corner, outside the circle")
                 .isZero();
     }
 
     @Test
     void everyRowIsTheSameLength() {
-        boolean[][] dots = ParcelQr.compose(UPI, 200);
+        boolean[][] dots = ParcelQr.compose(UPI, EIGHTY_MM);
 
         assertThat(dots).isNotEmpty();
         for (boolean[] row : dots) {
@@ -98,7 +106,7 @@ class ParcelQrTest {
     void refusesWhatCannotBeMadeIntoACode() {
         String tooLong = "x".repeat(8000);
 
-        assertThat(catchThrowable(() -> ParcelQr.compose(tooLong, 200)))
+        assertThat(catchThrowable(() -> ParcelQr.compose(tooLong, EIGHTY_MM)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -114,7 +122,7 @@ class ParcelQrTest {
     @Test
     void readsBackOnNarrowPaperToo() throws NotFoundException, com.google.zxing.ChecksumException,
             com.google.zxing.FormatException {
-        boolean[][] dots = ParcelQr.compose(UPI, 170);
+        boolean[][] dots = ParcelQr.compose(UPI, FIFTY_EIGHT_MM);
 
         assertThat(new QRCodeReader().decode(new BinaryBitmap(new HybridBinarizer(new Dots(dots)))).getText())
                 .isEqualTo(UPI);

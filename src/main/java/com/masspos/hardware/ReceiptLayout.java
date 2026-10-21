@@ -39,8 +39,8 @@ class ReceiptLayout {
     /** White space above and below a QR code, as a fraction of a line. */
     private static final double QR_GAP = 0.3;
     /** The parcel mark, and the space before it, against the code they sit beside. */
-    private static final double PARCEL_MARK = 0.52;
-    private static final double PARCEL_GAP = 0.10;
+    private static final double PARCEL_MARK = 0.70;
+    private static final double PARCEL_GAP = 0.08;
     /** Model 2, error correction M: the same symbol the ESC/POS printer would have drawn. */
     private static final Map<EncodeHintType, Object> QR_HINTS = Map.of(
             EncodeHintType.ERROR_CORRECTION, ErrorCorrectionLevel.M,
@@ -151,15 +151,17 @@ class ReceiptLayout {
             return;
         }
         double side = qrSide();
-        double mark = line.parcelMark() ? side * PARCEL_MARK : 0;
         double gap = line.parcelMark() ? side * PARCEL_GAP : 0;
-        // The code and its mark are placed as one block, so the mark cannot fall off the paper.
-        double block = side + gap + mark;
+        // Never wider than the margin beside the code, so the mark cannot fall off the paper.
+        double mark = line.parcelMark()
+                ? Math.max(0, Math.min(side * PARCEL_MARK, (width - side) / 2 - gap))
+                : 0;
         double module = side / matrix.getWidth();
+        // The code is centred whether or not there is a mark: same place, same size, every bill.
         double left = switch (line.align()) {
             case LEFT -> 0;
-            case CENTER -> (width - block) / 2;
-            case RIGHT -> width - block;
+            case CENTER -> (width - side) / 2;
+            case RIGHT -> width - side - gap - mark;
         };
         for (int row = 0; row < matrix.getHeight(); row++) {
             for (int column = 0; column < matrix.getWidth(); column++) {

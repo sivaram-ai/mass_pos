@@ -233,8 +233,12 @@ overridable with `POS_DATA_DIR`. It holds:
     `GS v 0`). Ordinary bills still use the printer's QR command: a picture is many times the
     bytes, which matters on a 9600-baud port. `ParcelQrTest` decodes the drawn code back with
     zxing, which is the only thing that proves it still scans.
-  - The code is sized from the paper (`columns * 12` dots, 45% of the width), so the mark always
-    fits beside it on 58 mm as well as 80 mm.
+  - **The code stays centred on the paper, mark or no mark**, and at the same size: the block is
+    padded on the left by as much as the mark takes on the right, so printing it centred leaves
+    the code where it has always been. `ParcelQr` sizes everything from the paper width
+    (`columns * 12` dots) and clamps the mark to the margin beside the code, so it fits on 58 mm
+    as well as 80 mm. Dots per module are whole numbers, so `CODE_SHARE_PERCENT` is a target: 42%
+    keeps the usual bill at five dots a module, the size it printed at before there was a mark.
 - **Receipt items are four columns**: name, rate, quantity, amount, sized to the widest figure on
   that bill so they line up, with a name too long for its column carried on underneath. **No HSN on
   the line and no per-line tax rate** (asked for by the shop, 2026-10-21): Rule 46 wants the rate

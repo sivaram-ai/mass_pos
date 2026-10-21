@@ -50,8 +50,6 @@ public class ReceiptFormatter {
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("dd-MM-yyyy");
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm");
     private static final int QR_MODULE_DOTS = 6;
-    /** How much of the paper's width the UPI code takes, leaving room for the parcel mark. */
-    private static final int CODE_SHARE_PERCENT = 45;
     private static final int RATE_COLUMN_WIDTH = 6;
     /** Even with huge figures, a name needs room to be readable. */
     private static final int MIN_ITEM_COLUMN = 10;
@@ -284,7 +282,7 @@ public class ReceiptFormatter {
             doc.align(CENTER).line("Scan to pay with any UPI app");
             if (parcel) {
                 // Drawn by the till, because the printer's own QR command leaves no room beside it.
-                doc.raster(ParcelQr.compose(upi, codeDots(doc)), upi, true);
+                doc.raster(ParcelQr.compose(upi, paperDots(doc)), upi, true);
             } else {
                 doc.qrCode(upi, QR_MODULE_DOTS);
             }
@@ -299,9 +297,9 @@ public class ReceiptFormatter {
         }
     }
 
-    /** About the paper the code should take up, in printer dots (a Font A column is 12 dots). */
-    private static int codeDots(EscPos doc) {
-        return doc.columns() * 12 * CODE_SHARE_PERCENT / 100;
+    /** The paper's full width in printer dots: a Font A column is 12 of them. */
+    private static int paperDots(EscPos doc) {
+        return doc.columns() * 12;
     }
 
     /** A parcel bill with no code to sit beside still has to say so. */

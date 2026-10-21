@@ -31,9 +31,15 @@ public final class ParcelQr {
             EncodeHintType.CHARACTER_SET, "UTF-8",
             EncodeHintType.MARGIN, 2);
 
-    /** How wide the mark is, against the code beside it. */
-    private static final double MARK = 0.52;
-    private static final double GAP = 0.10;
+    /** How wide the mark is, against the code beside it, and the space between them. */
+    private static final double MARK = 0.70;
+    private static final double GAP = 0.08;
+    /**
+     * How much of the paper the code aims for; the rest is the margin the mark sits in. Dots per
+     * module are whole numbers, so this is a target, not a width: 42% keeps the usual bill's code
+     * at five dots a module, which is the size it printed at before there was a mark at all.
+     */
+    private static final int CODE_SHARE_PERCENT = 42;
 
     private ParcelQr() {
     }
@@ -41,10 +47,13 @@ public final class ParcelQr {
     /**
      * Black dots for the whole block, as {@code [row][column]}.
      *
-     * @param wantedDots roughly how wide the code itself should print; the real width is rounded
-     *                   to a whole number of dots per module, so the code stays crisp
+     * <p>The block is padded on the left by as much as the mark takes on the right, so that
+     * printing it centred leaves <em>the code</em> centred on the paper - in the same place,
+     * at the same size, whether the bill is a parcel or not.
+     *
+     * @param paperDots the printer's full width in dots (a Font A column is 12 of them)
      */
-    public static boolean[][] compose(String upi, int wantedDots) {
+    public static boolean[][] compose(String upi, int paperDots) {
         BitMatrix matrix;
         try {
             matrix = new QRCodeWriter().encode(upi, BarcodeFormat.QR_CODE, 1, 1, HINTS);
@@ -52,12 +61,15 @@ public final class ParcelQr {
             throw new IllegalArgumentException("Cannot make a QR code from " + upi, e);
         }
         int modules = matrix.getWidth();
-        int scale = Math.max(1, wantedDots / modules);
+        // A whole number of dots per module, or the code comes out ragged and may not scan.
+        int scale = Math.max(1, paperDots * CODE_SHARE_PERCENT / 100 / modules);
         int code = modules * scale;
-        int mark = (int) Math.round(code * MARK);
-        int gap = (int) Math.round(code * GAP);
+        int gap = Math.max(4, (int) Math.round(code * GAP));
+        // Never wider than the margin beside the centred code, or the block would not fit the paper.
+        int mark = Math.max(0, Math.min((int) Math.round(code * MARK), (paperDots - code) / 2 - gap));
+        int lead = gap + mark;
 
-        BufferedImage block = new BufferedImage(code + gap + mark, code, BufferedImage.TYPE_INT_RGB);
+        BufferedImage block = new BufferedImage(lead + code + gap + mark, code, BufferedImage.TYPE_INT_RGB);
         Graphics2D g = block.createGraphics();
         g.setColor(Color.WHITE);
         g.fillRect(0, 0, block.getWidth(), block.getHeight());
@@ -65,11 +77,13 @@ public final class ParcelQr {
         for (int row = 0; row < modules; row++) {
             for (int column = 0; column < modules; column++) {
                 if (matrix.get(column, row)) {
-                    g.fillRect(column * scale, row * scale, scale, scale);
+                    g.fillRect(lead + column * scale, row * scale, scale, scale);
                 }
             }
         }
-        drawMark(g, code + gap, (code - mark) / 2.0, mark);
+        if (mark > 0) {
+            drawMark(g, lead + code + gap, (code - mark) / 2.0, mark);
+        }
         g.dispose();
         return dotsOf(block);
     }
