@@ -33,7 +33,11 @@ public final class EscPos {
      * @param qr payload of a QR code that ends this line, or null
      */
     public record Line(String text, Align align, boolean bold, boolean doubleWidth, boolean doubleHeight,
-                       String qr) {
+                       String qr, boolean parcelMark) {
+
+        public Line(String text, Align align, boolean bold, boolean doubleWidth, boolean doubleHeight, String qr) {
+            this(text, align, bold, doubleWidth, doubleHeight, qr, false);
+        }
 
         /** Columns taken up, counting each double-width character twice. */
         public int columns() {
@@ -62,6 +66,7 @@ public final class EscPos {
     private boolean doubleWidth;
     private boolean doubleHeight;
     private String previewQr;
+    private boolean previewParcelMark;
 
     /** Starts a job: resets the printer ({@code ESC @}) and selects the code page ({@code ESC t n}). */
     public EscPos(CodePage codePage, int columns) {
@@ -222,6 +227,39 @@ public final class EscPos {
         return newLine();
     }
 
+    /**
+     * A picture, dot for dot ({@code GS v 0}). The till only reaches for this where the printer's
+     * own commands cannot do the job - a QR code with something printed beside it - because it
+     * sends many times the bytes a command would.
+     *
+     * @param dots    black dots as {@code [row][column]}; every row must be the same length
+     * @param preview what the text preview should show in its place
+     */
+    public EscPos raster(boolean[][] dots, String preview, boolean parcelMark) {
+        int height = dots.length;
+        int width = height == 0 ? 0 : dots[0].length;
+        if (width == 0) {
+            return this;
+        }
+        int bytesAcross = (width + 7) / 8;
+        raw(GS, 'v', '0', 0, bytesAcross & 0xFF, bytesAcross >> 8, height & 0xFF, height >> 8);
+        for (boolean[] row : dots) {
+            for (int group = 0; group < bytesAcross; group++) {
+                int bits = 0;
+                for (int bit = 0; bit < 8; bit++) {
+                    int x = group * 8 + bit;
+                    if (x < width && row[x]) {
+                        bits |= 0x80 >> bit;
+                    }
+                }
+                out.write(bits);
+            }
+        }
+        previewQr = preview;
+        previewParcelMark = parcelMark;
+        return newLine();
+    }
+
     /** Feeds to the cutter and makes a partial cut ({@code GS V 66 n}). */
     public EscPos cut() {
         if (hasPendingLine()) {
@@ -275,12 +313,15 @@ public final class EscPos {
     }
 
     private Line pendingLine() {
-        return new Line(previewLine.toString(), align, bold, doubleWidth, doubleHeight, previewQr);
+        return new Line(previewLine.toString(), align, bold, doubleWidth, doubleHeight, previewQr, previewParcelMark);
     }
 
     /** The pending line as text, with a QR code standing in as {@code [QR payload]}. */
     private String renderedPendingLine() {
-        return previewQr == null ? previewLine.toString() : previewLine + "[QR " + previewQr + "]";
+        if (previewQr == null) {
+            return previewLine.toString();
+        }
+        return previewLine + "[QR " + previewQr + "]" + (previewParcelMark ? " (P)" : "");
     }
 
     private boolean hasPendingLine() {

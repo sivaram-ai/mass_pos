@@ -98,13 +98,13 @@ class ReceiptFormatterTest {
     void aParcelIsMarkedWithOneBigPBesideTheUpiCode() {
         Invoice parcel = intraStateSale();
         parcel.takeAway(true);
-        List<String> lines = format(48, parcel, shop(), ReceiptCopy.ORIGINAL).lines().toList();
-        int code = lines.indexOf(lines.stream().filter(line -> line.contains("[QR upi://")).findFirst().orElseThrow());
 
-        assertThat(lines.get(code + 1).strip()).isEqualTo("P");
+        // The mark rides on the code's own line, because the two are printed as one picture.
+        assertThat(format(48, parcel, shop(), ReceiptCopy.ORIGINAL).lines())
+                .anySatisfy(line -> assertThat(line).contains("[QR upi://").endsWith("(P)"));
         assertThat(format(48, intraStateSale(), shop(), ReceiptCopy.ORIGINAL).lines())
                 .as("an eat-in bill carries no mark")
-                .noneMatch(line -> line.strip().equals("P"));
+                .noneMatch(line -> line.contains("(P)"));
     }
 
     @Test

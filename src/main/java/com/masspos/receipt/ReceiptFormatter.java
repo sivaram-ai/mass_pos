@@ -8,6 +8,7 @@ import com.masspos.billing.TaxDocument;
 import com.masspos.billing.TaxLine;
 import com.masspos.common.IndiaTime;
 import com.masspos.hardware.EscPos;
+import com.masspos.hardware.ParcelQr;
 import com.masspos.hardware.PrinterProperties;
 import com.masspos.settings.ShopSettings;
 import org.springframework.stereotype.Component;
@@ -49,6 +50,8 @@ public class ReceiptFormatter {
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("dd-MM-yyyy");
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm");
     private static final int QR_MODULE_DOTS = 6;
+    /** How much of the paper's width the UPI code takes, leaving room for the parcel mark. */
+    private static final int CODE_SHARE_PERCENT = 45;
     private static final int RATE_COLUMN_WIDTH = 6;
     /** Even with huge figures, a name needs room to be readable. */
     private static final int MIN_ITEM_COLUMN = 10;
@@ -274,12 +277,19 @@ public class ReceiptFormatter {
                     .line("Authorised Signatory")
                     .align(LEFT);
         }
+        boolean parcel = invoice instanceof Invoice bill && bill.isParcel();
         // Only an open bill asks for money: never a cancelled bill, and never a refund.
         if (invoice instanceof Invoice bill && !bill.isCancelled() && !shop.getUpiVpa().isEmpty()) {
-            doc.align(CENTER).line("Scan to pay with any UPI app")
-                    .qrCode(upiUri(invoice, shop), QR_MODULE_DOTS).align(LEFT);
-        }
-        if (invoice instanceof Invoice bill && bill.isParcel()) {
+            String upi = upiUri(invoice, shop);
+            doc.align(CENTER).line("Scan to pay with any UPI app");
+            if (parcel) {
+                // Drawn by the till, because the printer's own QR command leaves no room beside it.
+                doc.raster(ParcelQr.compose(upi, codeDots(doc)), upi, true);
+            } else {
+                doc.qrCode(upi, QR_MODULE_DOTS);
+            }
+            doc.align(LEFT);
+        } else if (parcel) {
             parcelMark(doc);
         }
         if (!shop.receiptFooter().isEmpty()) {
@@ -289,11 +299,12 @@ public class ReceiptFormatter {
         }
     }
 
-    /**
-     * One big P for a parcel, beside the UPI code. A receipt printer lays its page out line by
-     * line, so "beside" is the next line hard against the right margin, level with the edge of the
-     * code block - there is no way to set type alongside a QR the printer draws itself.
-     */
+    /** About the paper the code should take up, in printer dots (a Font A column is 12 dots). */
+    private static int codeDots(EscPos doc) {
+        return doc.columns() * 12 * CODE_SHARE_PERCENT / 100;
+    }
+
+    /** A parcel bill with no code to sit beside still has to say so. */
     private void parcelMark(EscPos doc) {
         doc.align(RIGHT).size(true, true).bold(true)
                 .line("P")

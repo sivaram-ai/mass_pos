@@ -75,6 +75,10 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 - **Screen keys**: `useScreenKeys` (shortcuts.ts) binds a screen's own F-keys while it is open —
   F2 its search box, F3/F4 what it does next (Bills: day, new return; Products: add). `KeyBox`
   (ui.tsx) draws the key inside the box. Pass `!dialogOpen` so they do nothing behind a dialog.
+- **Refreshing is a page reload, and the screen survives it.** `App` keeps the current screen in
+  `localStorage` (`masspos.screen`) and comes back to it, instead of dropping a manager reading a
+  report back onto the billing grid. The header has a Refresh button on every screen; **F5 reloads
+  everywhere except billing**, where it has long been "remove this line" and the cart is live.
 - **Esc Esc has two jobs.** From another screen, App brings you back to billing. On the billing
   screen App installs no handler at all, so Billing has its own: it puts the cursor back on the
   green row after a click has taken focus off the grid. Both ignore an Esc a dialog is using.
@@ -220,11 +224,17 @@ overridable with `POS_DATA_DIR`. It holds:
   the GST summary nets them off rates and HSN. `DayReport.totals` is the net figure.
 - **Nothing is stamped on the customer's own bill**: `ReceiptCopy.ORIGINAL` has an empty label and
   only a reprint says DUPLICATE COPY (asked for 2026-10-21).
-- **A parcel bill carries one big P beside the UPI code.** `Invoice.parcel` is set before the
-  invoice is persisted and is in `AuditTrailGuard.FROZEN_INVOICE_COLUMNS`, so it cannot be changed
-  after issue; an edited parcel bill stays a parcel unless the cashier says otherwise. A receipt
-  printer lays its page out line by line, so "beside" is the next line hard against the right
-  margin - type cannot be set alongside a QR the printer draws itself.
+- **A parcel bill carries a circled P beside the UPI code**, the way a counter marks one by hand.
+  `Invoice.parcel` is set before the invoice is persisted and is in
+  `AuditTrailGuard.FROZEN_INVOICE_COLUMNS`, so it cannot be changed after issue; an edited parcel
+  bill stays a parcel unless the cashier says otherwise.
+  - **A printer that draws its own QR leaves no room beside it**, so for a parcel the till draws
+    the code and the mark together (`ParcelQr`) and sends the block as a picture (`EscPos.raster`,
+    `GS v 0`). Ordinary bills still use the printer's QR command: a picture is many times the
+    bytes, which matters on a 9600-baud port. `ParcelQrTest` decodes the drawn code back with
+    zxing, which is the only thing that proves it still scans.
+  - The code is sized from the paper (`columns * 12` dots, 45% of the width), so the mark always
+    fits beside it on 58 mm as well as 80 mm.
 - **Receipt items are four columns**: name, rate, quantity, amount, sized to the widest figure on
   that bill so they line up, with a name too long for its column carried on underneath. **No HSN on
   the line and no per-line tax rate** (asked for by the shop, 2026-10-21): Rule 46 wants the rate

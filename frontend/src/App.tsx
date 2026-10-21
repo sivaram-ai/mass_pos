@@ -16,6 +16,23 @@ import { MENU_KEY, useScreenKeys } from './shortcuts'
 
 type Screen = 'billing' | 'products' | 'stock' | 'invoices' | 'reports' | 'users' | 'settings' | 'license'
 
+const SCREEN_KEY = 'masspos.screen'
+
+/**
+ * Refreshing is a page reload, so the screen has to be remembered: a manager checking a report
+ * should land back on the report, not on the billing grid.
+ */
+function remembered(): Screen {
+  try {
+    const saved = localStorage.getItem(SCREEN_KEY) as Screen | null
+    return saved ?? 'billing'
+  } catch {
+    return 'billing'
+  }
+}
+
+const rememberedScreen = remembered()
+
 /** Often enough that a till left on overnight shows the lapse soon after midnight. */
 const LICENSE_REFRESH_MS = 10 * 60 * 1000
 
@@ -35,7 +52,17 @@ export default function App() {
   const [user, setUser] = useState<Principal | null>(null)
   const [settings, setSettings] = useState<SettingsView | null>(null)
   const [license, setLicense] = useState<LicenseStatus | null>(null)
-  const [screen, setScreen] = useState<Screen>('billing')
+  const [screen, setScreen] = useState<Screen>(rememberedScreen)
+
+  /** Moves screen and remembers it, so a reload comes back to the same place. */
+  const goTo = useCallback((next: Screen) => {
+    setScreen(next)
+    try {
+      localStorage.setItem(SCREEN_KEY, next)
+    } catch {
+      // A browser with storage locked down simply forgets; billing is a safe place to land.
+    }
+  }, [])
   const [booting, setBooting] = useState(true)
   const [menuOpen, setMenuOpen] = useState(false)
   const [billingRequest, setBillingRequest] = useState<BillingRequest | null>(null)
@@ -84,6 +111,22 @@ export default function App() {
     }
   }, [signedIn])
 
+  // F5 is the key everyone reaches for to refresh, so it reloads - except on the billing grid,
+  // where it has long been "remove this line" and the cart is live anyway.
+  useEffect(() => {
+    if (screen === 'billing' || !user) {
+      return
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'F5' && !event.repeat) {
+        event.preventDefault()
+        window.location.reload()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [screen, user])
+
   // Esc twice in quick succession on any other screen goes back to billing. A single Esc keeps
   // its usual job, and an Esc a dialog or the menu used to close itself never counts.
   const onBilling = screen === 'billing'
@@ -98,7 +141,7 @@ export default function App() {
       const now = performance.now()
       if (now - lastEscape.current < 600) {
         lastEscape.current = 0
-        setScreen('billing')
+        goTo('billing')
       } else {
         lastEscape.current = now
       }
@@ -133,7 +176,7 @@ export default function App() {
       setUser(null)
       setSettings(null)
       setLicense(null)
-      setScreen('billing')
+      goTo('billing')
     }
   }
 
@@ -166,6 +209,18 @@ export default function App() {
           Menu
           <kbd>{MENU_KEY}</kbd>
         </button>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          title={current === 'billing'
+            ? 'Reload the till'
+            : 'Reload this screen, and come back to it'}
+          className="flex shrink-0 items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-slate-800"
+        >
+          <RefreshIcon />
+          <span className="hidden sm:inline">Refresh</span>
+          {current !== 'billing' && <kbd>F5</kbd>}
+        </button>
         {/* A long shop name gives way first: it is cut, rather than pushing the rest off the row. */}
         <div className="flex min-w-0 shrink items-baseline gap-2">
           <span className="max-w-[20rem] truncate text-base font-semibold">{shopName}</span>
@@ -184,7 +239,7 @@ export default function App() {
             {canBill && (
               <button
                 type="button"
-                onClick={() => setScreen('billing')}
+                onClick={() => goTo('billing')}
                 className="flex items-center gap-2 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
               >
                 Back to billing <kbd>Esc</kbd><kbd>Esc</kbd>
@@ -198,7 +253,7 @@ export default function App() {
         <LicenseBanner
           status={license}
           onOpen={allowed.some((item) => item.id === 'license') && current !== 'license'
-            ? () => setScreen('license')
+            ? () => goTo('license')
             : undefined}
         />
       )}
@@ -210,7 +265,7 @@ export default function App() {
         items={allowed}
         current={current}
         onPick={(id) => {
-          setScreen(id)
+          goTo(id)
           setMenuOpen(false)
         }}
         onClose={() => setMenuOpen(false)}
@@ -245,7 +300,7 @@ export default function App() {
             onToast={setToast}
             onOpenInBilling={canBill ? (kind, invoiceId) => {
               setBillingRequest({ kind, invoiceId, at: performance.now() })
-              setScreen('billing')
+              goTo('billing')
             } : undefined}
           />
         )}
@@ -380,6 +435,15 @@ function MenuDrawer({ open, shopName, user, items, current, onPick, onClose, onS
         </div>
       </nav>
     </div>
+  )
+}
+
+function RefreshIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5" aria-hidden="true">
+      <path fillRule="evenodd" clipRule="evenodd"
+            d="M15.312 11.424a5.5 5.5 0 0 1-9.201 2.466l-.312-.311h2.433a.75.75 0 0 0 0-1.5H3.989a.75.75 0 0 0-.75.75v4.242a.75.75 0 0 0 1.5 0v-2.43l.31.31a7 7 0 0 0 11.712-3.138.75.75 0 0 0-1.449-.389Zm1.23-3.723a.75.75 0 0 0 .219-.53V2.929a.75.75 0 0 0-1.5 0V5.36l-.31-.31A7 7 0 0 0 3.239 8.188a.75.75 0 1 0 1.448.389A5.5 5.5 0 0 1 13.89 6.11l.311.31h-2.432a.75.75 0 0 0 0 1.5h4.243a.75.75 0 0 0 .53-.219Z" />
+    </svg>
   )
 }
 

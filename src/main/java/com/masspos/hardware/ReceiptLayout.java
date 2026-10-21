@@ -38,6 +38,9 @@ class ReceiptLayout {
     private static final int QR_COLUMNS = 16;
     /** White space above and below a QR code, as a fraction of a line. */
     private static final double QR_GAP = 0.3;
+    /** The parcel mark, and the space before it, against the code they sit beside. */
+    private static final double PARCEL_MARK = 0.52;
+    private static final double PARCEL_GAP = 0.10;
     /** Model 2, error correction M: the same symbol the ESC/POS printer would have drawn. */
     private static final Map<EncodeHintType, Object> QR_HINTS = Map.of(
             EncodeHintType.ERROR_CORRECTION, ErrorCorrectionLevel.M,
@@ -148,11 +151,15 @@ class ReceiptLayout {
             return;
         }
         double side = qrSide();
+        double mark = line.parcelMark() ? side * PARCEL_MARK : 0;
+        double gap = line.parcelMark() ? side * PARCEL_GAP : 0;
+        // The code and its mark are placed as one block, so the mark cannot fall off the paper.
+        double block = side + gap + mark;
         double module = side / matrix.getWidth();
         double left = switch (line.align()) {
             case LEFT -> 0;
-            case CENTER -> (width - side) / 2;
-            case RIGHT -> width - side;
+            case CENTER -> (width - block) / 2;
+            case RIGHT -> width - block;
         };
         for (int row = 0; row < matrix.getHeight(); row++) {
             for (int column = 0; column < matrix.getWidth(); column++) {
@@ -160,6 +167,9 @@ class ReceiptLayout {
                     g.fill(new Rectangle2D.Double(left + column * module, top + row * module, module, module));
                 }
             }
+        }
+        if (line.parcelMark()) {
+            ParcelQr.drawMark(g, left + side + gap, top + (side - mark) / 2, mark);
         }
     }
 
