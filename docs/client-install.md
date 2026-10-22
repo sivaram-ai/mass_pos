@@ -30,12 +30,20 @@ For the person who sets up a till. The vendor builds the installer with
    server has no window of its own: to restart it without rebooting, end `GoRockitPOS-Server.exe`
    in Task Manager and click the shortcut again.
 6. **Settings:** legal name and address (billing stays blocked until both are set), GSTIN if the
-   shop is GST-registered, receipt footer, UPI ID.
+   shop is GST-registered, receipt footer, UPI ID. **Load from file** fills these in from a sheet
+   instead - `docs/sample-company-details.csv` shows the shape - and nothing is saved until you
+   press Save settings, so you see what arrived first. **Extract company details** writes the
+   same sheet back out, which is how to set a second till up without retyping anything.
 7. **Settings > Printer:** pick the printer. A printer that has only a Windows driver (inkjet,
    laser) uses type `WINDOWS`; a thermal receipt printer on a COM port or LAN uses `SERIAL` or `TCP`.
 8. **Licence:** Menu > Licence shows the **machine ID**. Send it to the GO RockIt supplier, paste
    the key they return. Until then everything works except new bills, edits and returns.
-9. **Add products** (Products), record opening stock (Stock), take a test bill and cancel it.
+9. **Add products.** A handful: Add product on the Products screen. A shopful: press **Extract
+   products** for a sheet with the right columns (or start from `docs/sample-products.csv`), fill
+   it in Excel, and press **Load from file**. Prices are in rupees and tax in percent, codes
+   already in the catalogue are repriced, new codes are added, and a file with a bad row is
+   refused whole, naming the row to fix. Then record opening stock (Stock), take a test bill and
+   cancel it.
 
 ## Vendor: issuing the licence
 

@@ -1,0 +1,20 @@
+Setting,Value
+Legal name,Mass Stores Private Limited
+Trade name,Mass Stores
+GSTIN,
+Address 1,12 Mount Road
+Address 2,T Nagar
+Address 3,Chennai 600017
+Phone,044 2345 6789
+Email,billing@massstores.example
+Website,www.massstores.example
+CIN,
+FSSAI licence,
+UPI ID,massstores@upi
+Receipt footer 1,Thank you. Goods once sold are not taken back.
+Receipt footer 2,Bills are issued by GO RockIt
+Service provider,GoGo Digital Services
+Service phone,98400 00000
+Service email,service@gogodigital.example
+Round invoice total,Yes
+Block negative stock,No
