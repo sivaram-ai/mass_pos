@@ -58,6 +58,6 @@ class ShopSettingsCsvTest {
         return new ShopSettingsForm("Mass Stores Private Limited", "Mass Stores", "33AACCM1234F1Z5",
                 List.of("12 Mount Road", "Chennai 600002"), "044 2345 6789", "shop@mass.example",
                 "www.mass.example", "", "", "mass@upi", List.of("Thank you", "Visit again"),
-                "GoGo Digital Services", "98400 00000", "service@gogo.example", true, false);
+                "GoGo Digital Services", "98400 00000", "service@gogo.example", true, false, true, true);
     }
 }

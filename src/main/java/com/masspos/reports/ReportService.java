@@ -50,32 +50,32 @@ public class ReportService {
     }
 
     /**
-     * Takings over a stretch of days. Every figure here was already asked of the database as a
-     * range - one day was simply the same date twice - so a week or a month costs the same queries
-     * a single day did.
+     * Takings between two moments: a day, a week, or the evening shift. Every figure was already
+     * asked of the database as a range, so a month costs the same queries one day did. These go by
+     * when a bill was issued, not its invoice date - the GST report keeps the fiscal one.
      */
     @Transactional(readOnly = true)
-    public Reports.DayReport day(LocalDate from, LocalDate to) {
-        Reports.Totals sales = totalsOf(invoices.totals(from, to, InvoiceStatus.ISSUED));
-        Reports.Totals returned = totalsOf(creditNotes.totals(from, to));
+    public Reports.DayReport day(Instant from, Instant to) {
+        Reports.Totals sales = totalsOf(invoices.totalsAt(from, to, InvoiceStatus.ISSUED));
+        Reports.Totals returned = totalsOf(creditNotes.totalsAt(from, to));
 
         // Money in per mode, less money paid back in that mode. A mode used only for refunds still shows.
         Map<PaymentMode, long[]> modes = new TreeMap<>();
-        payments.byMode(from, to, InvoiceStatus.ISSUED).forEach(row ->
+        payments.byModeAt(from, to, InvoiceStatus.ISSUED).forEach(row ->
                 add(modes, (PaymentMode) row[0], count(row[1]), amount(row[2])));
-        refunds.byMode(from, to).forEach(row -> add(modes, (PaymentMode) row[0], 0, -amount(row[2])));
+        refunds.byModeAt(from, to).forEach(row -> add(modes, (PaymentMode) row[0], 0, -amount(row[2])));
 
         return new Reports.DayReport(from, to,
-                invoices.countByInvoiceDateBetweenAndStatus(from, to, InvoiceStatus.ISSUED),
-                invoices.countByInvoiceDateBetweenAndStatus(from, to, InvoiceStatus.CANCELLED),
-                creditNotes.countByNoteDateBetween(from, to),
+                invoices.countByIssuedAtBetweenAndStatus(from, to, InvoiceStatus.ISSUED),
+                invoices.countByIssuedAtBetweenAndStatus(from, to, InvoiceStatus.CANCELLED),
+                creditNotes.countByIssuedAtBetween(from, to),
                 sales, returned, sales.minus(returned),
                 modes.entrySet().stream()
                         .map(mode -> new Reports.ModeRow(mode.getKey(), mode.getValue()[0], mode.getValue()[1]))
                         .toList(),
-                net(invoices.takingsByCashier(from, to, InvoiceStatus.ISSUED), creditNotes.refundsByCashier(from, to)),
-                net(invoices.takingsByTerminal(from, to, InvoiceStatus.ISSUED), creditNotes.refundsByTerminal(from, to)),
-                items.bestSellers(from, to, InvoiceStatus.ISSUED, Limit.of(BEST_SELLERS)).stream()
+                net(invoices.takingsByCashierAt(from, to, InvoiceStatus.ISSUED), creditNotes.refundsByCashierAt(from, to)),
+                net(invoices.takingsByTerminalAt(from, to, InvoiceStatus.ISSUED), creditNotes.refundsByTerminalAt(from, to)),
+                items.bestSellersAt(from, to, InvoiceStatus.ISSUED, Limit.of(BEST_SELLERS)).stream()
                         .map(row -> new Reports.ProductRow((String) row[0], amount(row[1]), amount(row[2]),
                                 count(row[3])))
                         .toList());

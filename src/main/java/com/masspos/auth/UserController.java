@@ -61,6 +61,7 @@ public class UserController {
     }
 
     @PostMapping
+
     @RequiresRole({UserRole.ADMIN})
     @ResponseStatus(HttpStatus.CREATED)
     public UserSummary create(@Valid @RequestBody CreateUserRequest request) {

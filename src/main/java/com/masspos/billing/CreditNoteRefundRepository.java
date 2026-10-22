@@ -4,6 +4,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -18,4 +19,13 @@ public interface CreditNoteRefundRepository extends JpaRepository<CreditNoteRefu
             group by r.mode
             """)
     List<Object[]> byMode(@Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    @Query("""
+            select r.mode, count(r), sum(r.amountPaise)
+            from CreditNoteRefund r
+            where r.creditNote.issuedAt between :from and :to
+            group by r.mode
+            order by r.mode
+            """)
+    List<Object[]> byModeAt(@Param("from") Instant from, @Param("to") Instant to);
 }

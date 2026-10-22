@@ -4,6 +4,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -54,4 +55,40 @@ public interface InvoiceRepository extends JpaRepository<Invoice, UUID> {
             """)
     List<Object[]> takingsByTerminal(@Param("from") LocalDate from, @Param("to") LocalDate to,
                                      @Param("status") InvoiceStatus status);
+
+    /**
+     * The takings report filters on the moment a bill was issued, so a shift between two times can
+     * be read off. The GST and audit reports stay on the invoice date, which is the fiscal one and
+     * must not move with the clock.
+     */
+    long countByIssuedAtBetweenAndStatus(Instant from, Instant to, InvoiceStatus status);
+
+    @Query("""
+            select sum(i.taxableValuePaise), sum(i.cgstPaise), sum(i.sgstPaise), sum(i.igstPaise),
+                   sum(i.cessPaise), sum(i.roundOffPaise), sum(i.grandTotalPaise)
+            from Invoice i
+            where i.issuedAt between :from and :to and i.status = :status
+            """)
+    List<Object[]> totalsAt(@Param("from") Instant from, @Param("to") Instant to,
+                            @Param("status") InvoiceStatus status);
+
+    @Query("""
+            select i.cashier.displayName, count(i), sum(i.grandTotalPaise)
+            from Invoice i
+            where i.issuedAt between :from and :to and i.status = :status
+            group by i.cashier.displayName
+            order by sum(i.grandTotalPaise) desc
+            """)
+    List<Object[]> takingsByCashierAt(@Param("from") Instant from, @Param("to") Instant to,
+                                      @Param("status") InvoiceStatus status);
+
+    @Query("""
+            select i.terminalCode, count(i), sum(i.grandTotalPaise)
+            from Invoice i
+            where i.issuedAt between :from and :to and i.status = :status
+            group by i.terminalCode
+            order by i.terminalCode
+            """)
+    List<Object[]> takingsByTerminalAt(@Param("from") Instant from, @Param("to") Instant to,
+                                       @Param("status") InvoiceStatus status);
 }

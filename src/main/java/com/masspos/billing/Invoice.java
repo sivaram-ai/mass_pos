@@ -93,6 +93,19 @@ public class Invoice extends BaseEntity implements TaxDocument {
     private boolean parcel;
 
     /**
+     * Table this bill is for, in a shop that seats people. Asked for as the bill is started, when
+     * the shop has turned that on, and printed above the bill number where a waiter looks for it.
+     * Empty everywhere else. A default is required: SQLite will not add a NOT NULL column to a
+     * table that already has rows, which every till in the field has.
+     */
+    @Column(nullable = false, columnDefinition = "varchar(20) default ''", length = 20)
+    private String tableNo = "";
+
+    /** Supplier this bill is against, by their Supplier ID from the Staff screen. */
+    @Column(nullable = false, columnDefinition = "varchar(50) default ''", length = 50)
+    private String supplierId = "";
+
+    /**
      * State code of the place of supply. Differs from the seller's state ⇒ IGST instead of CGST + SGST.
      * Empty on the bill of a shop without a GSTIN, where no tax applies.
      */
@@ -301,6 +314,20 @@ public class Invoice extends BaseEntity implements TaxDocument {
     /** Only while the bill is being built: after it is issued the trigger freezes this column. */
     public void takeAway(boolean parcel) {
         this.parcel = parcel;
+    }
+
+    /** Both are set before the invoice is persisted; the audit trigger freezes them after that. */
+    public void serveAt(String tableNo, String supplierId) {
+        this.tableNo = tableNo == null ? "" : tableNo.trim();
+        this.supplierId = supplierId == null ? "" : supplierId.trim();
+    }
+
+    public String getTableNo() {
+        return tableNo;
+    }
+
+    public String getSupplierId() {
+        return supplierId;
     }
 
     public boolean isParcel() {

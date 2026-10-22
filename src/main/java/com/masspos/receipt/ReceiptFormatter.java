@@ -110,6 +110,11 @@ public class ReceiptFormatter {
             doc.size(false, true).bold(true).line("*** CANCELLED ***").size(false, false).bold(false);
         }
         doc.align(LEFT).separator('-');
+        // Above the bill number, because a waiter carrying this back to a table looks there first.
+        if (invoice instanceof Invoice seated && (hasText(seated.getTableNo()) || hasText(seated.getSupplierId()))) {
+            doc.leftRight(hasText(seated.getTableNo()) ? "Table: " + seated.getTableNo() : "",
+                    hasText(seated.getSupplierId()) ? "Supplier: " + seated.getSupplierId() : "");
+        }
         doc.leftRight(numberLabel(invoice) + invoice.getNumber(), "Date: " + DATE.format(invoice.getDocumentDate()));
         doc.leftRight("Cashier: " + invoice.getCashier().getDisplayName(),
                 "Time: " + TIME.format(invoice.getIssuedAt().atZone(IndiaTime.ZONE)));

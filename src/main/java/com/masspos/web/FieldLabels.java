@@ -18,6 +18,7 @@ final class FieldLabels {
             Map.entry("buyerGstin", "Customer GSTIN"),
             Map.entry("buyerName", "Customer name"),
             Map.entry("cin", "CIN"),
+            Map.entry("supplierId", "Supplier ID"),
             Map.entry("fssaiLicense", "FSSAI licence"),
             Map.entry("upiVpa", "UPI ID"),
             Map.entry("hsnCode", "HSN/SAC code"),

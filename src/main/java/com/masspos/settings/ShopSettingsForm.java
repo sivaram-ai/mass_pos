@@ -32,5 +32,7 @@ public record ShopSettingsForm(@Size(max = 200) String legalName,
                                @Size(max = 40) String servicePhone,
                                @Email @Size(max = 100) String serviceEmail,
                                boolean roundInvoiceTotal,
-                               boolean blockNegativeStock) {
+                               boolean blockNegativeStock,
+                               boolean askForTable,
+                               boolean askForSupplier) {
 }

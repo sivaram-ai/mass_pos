@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -45,4 +46,14 @@ public interface InvoiceItemRepository extends JpaRepository<InvoiceItem, UUID> 
             """)
     List<Object[]> bestSellers(@Param("from") LocalDate from, @Param("to") LocalDate to,
                                @Param("status") InvoiceStatus status, Limit limit);
+
+    @Query("""
+            select i.productName, sum(i.quantityMilli), sum(i.lineTotalPaise), count(i)
+            from InvoiceItem i
+            where i.invoice.issuedAt between :from and :to and i.invoice.status = :status
+            group by i.productName
+            order by sum(i.lineTotalPaise) desc
+            """)
+    List<Object[]> bestSellersAt(@Param("from") Instant from, @Param("to") Instant to,
+                                 @Param("status") InvoiceStatus status, Limit limit);
 }

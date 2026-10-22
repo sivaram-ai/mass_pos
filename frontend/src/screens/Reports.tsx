@@ -14,10 +14,27 @@ function firstOfMonth(): string {
   return today().slice(0, 8) + '01'
 }
 
+/**
+ * The takings report goes by the moment a bill was issued, so its boxes carry a time. Built from
+ * the local parts rather than an ISO string, which is UTC and names yesterday after midnight here.
+ */
+function pad(value: number): string {
+  return String(value).padStart(2, '0')
+}
+
+function localDay(): string {
+  const now = new Date()
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+}
+
+function endOfDay(moment: string): string {
+  return `${moment.slice(0, 10)}T23:59`
+}
+
 export default function Reports({ onToast }: { onToast: Toast }) {
   const [tab, setTab] = useState<Tab>('day')
-  const [date, setDate] = useState(today())
-  const [dayTo, setDayTo] = useState(today())
+  const [date, setDate] = useState(`${localDay()}T00:00`)
+  const [dayTo, setDayTo] = useState(`${localDay()}T23:59`)
   const [dayRange, setDayRange] = useState(false)
   const [from, setFrom] = useState(firstOfMonth())
   const [to, setTo] = useState(today())
@@ -31,7 +48,9 @@ export default function Reports({ onToast }: { onToast: Toast }) {
 
   useEffect(() => {
     if (tab === 'day') {
-      api.get<DayReport>(`/api/reports/day?from=${date}&to=${dayRange ? dayTo : date}`).then(setDay).catch(fail)
+      // Without a range the end is left off, and the server runs to the end of that day.
+      const window = dayRange ? `from=${date}&to=${dayTo}` : `from=${date}`
+      api.get<DayReport>(`/api/reports/day?${window}`).then(setDay).catch(fail)
     } else if (tab === 'gst') {
       api.get<GstReport>(`/api/reports/gst?from=${from}&to=${to}`).then(setGst).catch(fail)
     } else {
@@ -58,19 +77,19 @@ export default function Reports({ onToast }: { onToast: Toast }) {
         </div>
         {tab === 'day' ? (
           <div className="flex items-center gap-2">
-            <input type="date" className={`${inputClass} w-auto`} value={date}
+            <input type="datetime-local" className={`${inputClass} w-auto`} value={date}
                    onChange={(event) => setDate(event.target.value)} />
             {dayRange && (
               <>
                 <span className="text-sm text-slate-400">to</span>
-                <input type="date" className={`${inputClass} w-auto`} value={dayTo}
+                <input type="datetime-local" className={`${inputClass} w-auto`} value={dayTo}
                        onChange={(event) => setDayTo(event.target.value)} />
               </>
             )}
             <Button
               onClick={() => {
                 if (!dayRange) {
-                  setDayTo(date)
+                  setDayTo(endOfDay(date))
                 }
                 setDayRange(!dayRange)
               }}

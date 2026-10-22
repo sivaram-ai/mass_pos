@@ -22,7 +22,9 @@ public record EditRequest(@NotEmpty List<SaleRequest.@Valid Line> lines,
                           @Size(max = 120) String reason,
                           boolean print,
                           boolean openDrawer,
-                          boolean parcel) {
+                          boolean parcel,
+                          @Size(max = 20) String tableNo,
+                          @Size(max = 50) String supplierId) {
 
     public List<SaleRequest.Payment> paymentsOrNone() {
         return payments == null ? List.of() : payments;

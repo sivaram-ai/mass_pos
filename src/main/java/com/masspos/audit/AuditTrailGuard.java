@@ -33,7 +33,8 @@ public class AuditTrailGuard {
             "issued_at", "seller_legal_name", "seller_trade_name", "seller_gstin", "seller_state_code",
             "seller_address", "seller_cin", "seller_fssai_license", "buyer_gstin", "buyer_name",
             "replaces_invoice_number", "place_of_supply", "taxable_value_paise", "cgst_paise", "sgst_paise", "igst_paise",
-            "cess_paise", "round_off_paise", "grand_total_paise", "parcel", "cashier_id", "created_at");
+            "cess_paise", "round_off_paise", "grand_total_paise", "parcel", "table_no", "supplier_id",
+            "cashier_id", "created_at");
 
     private final JdbcTemplate jdbc;
     private final TransactionTemplate tx;

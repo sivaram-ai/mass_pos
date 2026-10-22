@@ -44,7 +44,7 @@ public class SettingsBootstrap implements ApplicationRunner {
         ShopSettings shop = settings.seedOnce(new ShopSettingsForm(company.legalName(), company.tradeName(),
                 company.gstin(), company.address(), company.phone(), company.email(), company.website(),
                 company.cin(), company.fssaiLicense(), company.upiVpa(), receipt.footer(), "", "", "",
-                billing.roundInvoiceTotal(), billing.blockNegativeStock()));
+                billing.roundInvoiceTotal(), billing.blockNegativeStock(), false, false));
 
         List<String> missing = shop.missingForInvoicing();
         if (missing.isEmpty()) {

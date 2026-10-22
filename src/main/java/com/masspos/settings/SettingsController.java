@@ -96,7 +96,7 @@ public class SettingsController {
                 shop.addressLines(), shop.getPhone(), shop.getEmail(), shop.getWebsite(), shop.getCin(),
                 shop.getFssaiLicense(), shop.getUpiVpa(), shop.receiptFooter(), shop.getServiceProviderName(),
                 shop.getServicePhone(), shop.getServiceEmail(), shop.isRoundInvoiceTotal(),
-                shop.isBlockNegativeStock());
+                shop.isBlockNegativeStock(), shop.isAskForTable(), shop.isAskForSupplier());
         PosProperties.Terminal me = pos.terminal();
         return new SettingsView(form, shop.isReadyToInvoice(), shop.missingForInvoicing(), shop.isGstRegistered(),
                 new TerminalView(me.code(), me.name(), me.section(), me.type(), true, Instant.now()),

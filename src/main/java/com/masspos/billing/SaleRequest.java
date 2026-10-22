@@ -17,6 +17,8 @@ import java.util.UUID;
  * @param placeOfSupply state code; empty for a walk-in customer, which means the seller's own state
  * @param print         print the receipt; a printer failure never undoes the sale
  * @param openDrawer    kick the drawer, normally set when any part of the bill is cash
+ * @param tableNo       which table, in a shop that asks; empty everywhere else
+ * @param supplierId    the Supplier ID this bill is against, in a shop that asks
  */
 public record SaleRequest(@NotEmpty List<@Valid Line> lines,
                           @ValidGstin String buyerGstin,
@@ -25,7 +27,9 @@ public record SaleRequest(@NotEmpty List<@Valid Line> lines,
                           @NotEmpty List<@Valid Payment> payments,
                           boolean print,
                           boolean openDrawer,
-                          boolean parcel) {
+                          boolean parcel,
+                          @Size(max = 20) String tableNo,
+                          @Size(max = 50) String supplierId) {
 
     /**
      * @param unitPricePaise overrides the catalogue price for this line only, e.g. a haggled price

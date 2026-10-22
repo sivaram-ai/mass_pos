@@ -38,10 +38,13 @@ public final class ShopSettingsCsv {
     private static final String SERVICE_EMAIL = "Service email";
     private static final String ROUND_TOTAL = "Round invoice total";
     private static final String BLOCK_STOCK = "Block negative stock";
+    private static final String ASK_TABLE = "Ask for table number";
+    private static final String ASK_SUPPLIER = "Ask for supplier";
 
     /** Everything but the numbered lines, which are written out as many as the shop has. */
     private static final List<String> SINGLE_FIELDS = List.of(LEGAL_NAME, TRADE_NAME, GSTIN, PHONE, EMAIL,
-            WEBSITE, CIN, FSSAI, UPI, SERVICE_NAME, SERVICE_PHONE, SERVICE_EMAIL, ROUND_TOTAL, BLOCK_STOCK);
+            WEBSITE, CIN, FSSAI, UPI, SERVICE_NAME, SERVICE_PHONE, SERVICE_EMAIL, ROUND_TOTAL, BLOCK_STOCK,
+            ASK_TABLE, ASK_SUPPLIER);
 
     private ShopSettingsCsv() {
     }
@@ -65,6 +68,8 @@ public final class ShopSettingsCsv {
         rows.add(List.of(SERVICE_EMAIL, text(shop.serviceEmail())));
         rows.add(List.of(ROUND_TOTAL, yesNo(shop.roundInvoiceTotal())));
         rows.add(List.of(BLOCK_STOCK, yesNo(shop.blockNegativeStock())));
+        rows.add(List.of(ASK_TABLE, yesNo(shop.askForTable())));
+        rows.add(List.of(ASK_SUPPLIER, yesNo(shop.askForSupplier())));
         return Csv.write(rows);
     }
 
@@ -107,7 +112,8 @@ public final class ShopSettingsCsv {
                 values.get(key(WEBSITE)), values.get(key(CIN)), values.get(key(FSSAI)), values.get(key(UPI)),
                 footer, values.get(key(SERVICE_NAME)), values.get(key(SERVICE_PHONE)),
                 values.get(key(SERVICE_EMAIL)), isYes(values.get(key(ROUND_TOTAL))),
-                isYes(values.get(key(BLOCK_STOCK))));
+                isYes(values.get(key(BLOCK_STOCK))), isYes(values.get(key(ASK_TABLE))),
+                isYes(values.get(key(ASK_SUPPLIER))));
     }
 
     /** One row per line the shop has, and one empty row when it has none, so the heading is there to fill in. */

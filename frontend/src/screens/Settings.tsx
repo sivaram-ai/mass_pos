@@ -222,6 +222,16 @@ export default function Settings({ role, settings, onSaved, onToast }: {
                      onChange={(event) => set({ blockNegativeStock: event.target.checked })} />
               Refuse to sell items the stock says you do not have
             </label>
+            <label className="flex items-center gap-2 text-sm text-slate-600">
+              <input type="checkbox" checked={form.askForTable}
+                     onChange={(event) => set({ askForTable: event.target.checked })} />
+              Ask for a table number when a bill is started
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-600">
+              <input type="checkbox" checked={form.askForSupplier}
+                     onChange={(event) => set({ askForSupplier: event.target.checked })} />
+              Ask for a supplier when a bill is started
+            </label>
           </div>
         </fieldset>
       </Panel>

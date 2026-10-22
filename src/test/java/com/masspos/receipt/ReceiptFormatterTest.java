@@ -44,7 +44,7 @@ class ReceiptFormatterTest {
     void sellerIsPrintedAsIssuedNotAsCurrentlyConfigured() {
         ShopSettings renamed = new ShopSettings();
         renamed.apply(new ShopSettingsForm("Renamed Traders LLP", "RENAMED", "29AABCU9603R1ZJ",
-                List.of("New Address"), "", "", "", "", "", "", List.of(), "", "", "", true, false));
+                List.of("New Address"), "", "", "", "", "", "", List.of(), "", "", "", true, false, false, false));
 
         assertThat(format(48, intraStateSale(), renamed, ReceiptCopy.DUPLICATE))
                 .contains("MASS MART", "12 MG Road, Camp", "GSTIN: 27AAPFU0939F1ZV")
@@ -108,6 +108,36 @@ class ReceiptFormatterTest {
     }
 
     @Test
+    void theTableAndSupplierSitAboveTheBillNumber() {
+        Invoice seated = intraStateSale();
+        seated.serveAt("7", "SUP-001");
+
+        List<String> lines = format(48, seated, shop(), ReceiptCopy.ORIGINAL).lines().toList();
+        int info = indexOfLineContaining(lines, "Table: 7");
+        int number = indexOfLineContaining(lines, seated.getInvoiceNumber());
+
+        assertThat(info).as("the row is printed").isGreaterThanOrEqualTo(0);
+        assertThat(lines.get(info)).contains("Supplier: SUP-001");
+        assertThat(info).as("above the bill number, where a waiter looks").isLessThan(number);
+    }
+
+    @Test
+    void aCounterSaleCarriesNoTableRowAtAll() {
+        List<String> lines = format(48, intraStateSale(), shop(), ReceiptCopy.ORIGINAL).lines().toList();
+
+        assertThat(lines).noneMatch(line -> line.contains("Table:") || line.contains("Supplier:"));
+    }
+
+    private static int indexOfLineContaining(List<String> lines, String text) {
+        for (int at = 0; at < lines.size(); at++) {
+            if (lines.get(at).contains(text)) {
+                return at;
+            }
+        }
+        return -1;
+    }
+
+    @Test
     void everyPrintedLineFitsThePaper() {
         for (int columns : new int[] {32, 48}) {
             for (Invoice invoice : List.of(intraStateSale(), interStateB2bSale())) {
@@ -160,7 +190,7 @@ class ReceiptFormatterTest {
                 List.of("12 MG Road, Camp", "Pune 411001"), "020-5550100", "accounts@massmart.example",
                 "www.massmart.example", "U52100MH2020PTC123456", "11521999000123", "massmart@okicici",
                 List.of("Goods once sold are exchanged within 7 days", "Thank you! Visit again"),
-                "Ravi Systems", "98200-00000", "support@example.com", true, false));
+                "Ravi Systems", "98200-00000", "support@example.com", true, false, false, false));
         return shop;
     }
 

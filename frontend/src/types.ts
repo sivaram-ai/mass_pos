@@ -2,6 +2,14 @@
 
 export type Role = 'CASHIER' | 'MANAGER' | 'AUDITOR' | 'ADMIN'
 
+/** Who a bill is against: an ID and a name. Not somebody who signs in. */
+export interface Supplier {
+  id: string
+  supplierId: string
+  supplierName: string
+  active: boolean
+}
+
 export type PaymentMode = 'CASH' | 'UPI' | 'CARD' | 'VOUCHER' | 'ON_ACCOUNT'
 
 export type LicenseState = 'ACTIVE' | 'EXPIRING' | 'GRACE' | 'EXPIRED' | 'NOT_ACTIVATED' | 'WRONG_MACHINE' | 'INVALID'
@@ -275,6 +283,10 @@ export interface ShopSettingsForm {
   serviceEmail: string
   roundInvoiceTotal: boolean
   blockNegativeStock: boolean
+  /** Ask which table the bill is for as it is started. */
+  askForTable: boolean
+  /** Ask which supplier the bill is against as it is started. */
+  askForSupplier: boolean
 }
 
 export interface TerminalView {

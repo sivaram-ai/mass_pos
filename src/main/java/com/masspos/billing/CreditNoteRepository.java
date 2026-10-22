@@ -4,6 +4,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -41,4 +42,31 @@ public interface CreditNoteRepository extends JpaRepository<CreditNote, UUID> {
             group by c.terminalCode
             """)
     List<Object[]> refundsByTerminal(@Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    /** By the moment the note was issued, for the takings report; the rest go by note date. */
+    long countByIssuedAtBetween(Instant from, Instant to);
+
+    @Query("""
+            select sum(c.taxableValuePaise), sum(c.cgstPaise), sum(c.sgstPaise), sum(c.igstPaise),
+                   sum(c.cessPaise), sum(c.roundOffPaise), sum(c.grandTotalPaise)
+            from CreditNote c
+            where c.issuedAt between :from and :to
+            """)
+    List<Object[]> totalsAt(@Param("from") Instant from, @Param("to") Instant to);
+
+    @Query("""
+            select c.cashier.displayName, count(c), sum(c.grandTotalPaise)
+            from CreditNote c
+            where c.issuedAt between :from and :to
+            group by c.cashier.displayName
+            """)
+    List<Object[]> refundsByCashierAt(@Param("from") Instant from, @Param("to") Instant to);
+
+    @Query("""
+            select c.terminalCode, count(c), sum(c.grandTotalPaise)
+            from CreditNote c
+            where c.issuedAt between :from and :to
+            group by c.terminalCode
+            """)
+    List<Object[]> refundsByTerminalAt(@Param("from") Instant from, @Param("to") Instant to);
 }

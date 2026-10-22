@@ -6,7 +6,7 @@ import {
 } from '../api'
 import type {
   CartLine, Customer, EditResponse, HeldBill, Invoice, PaymentMode, Product, QuotedCart, Refund, Returnable,
-  ReturnResponse, Role, SaleResponse, SettingsView, Tender,
+  ReturnResponse, Role, SaleResponse, SettingsView, Supplier, Tender,
 } from '../types'
 import { WHOLE_UNITS } from '../types'
 import { AskModal, Banner, Button, Empty, Field, inputClass, isModalOpen, Modal } from '../components/ui'
@@ -18,6 +18,11 @@ import type { Toast } from '../App'
 
 const ONE_UNIT = 1000
 const NO_CUSTOMER: Customer = { name: '', gstin: '', placeOfSupply: '' }
+
+/** Which table the bill is for and which supplier it is against, asked before anything is rung up. */
+type BillInfo = { tableNo: string; supplierId: string }
+
+const NO_BILL_INFO: BillInfo = { tableNo: '', supplierId: '' }
 
 /** The editable columns of a bill row, left to right. Amount is worked out by the server. */
 type Col = 'code' | 'name' | 'rate' | 'qty' | 'disc'
@@ -176,6 +181,9 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
   const [shortcuts, setShortcuts] = useState(loadShortcuts)
   const [showShortcuts, setShowShortcuts] = useState(loadShowShortcuts)
   const [askCashReceived, setAskCashReceived] = useState(loadAskCashReceived)
+  const [billInfo, setBillInfo] = useState<BillInfo>(NO_BILL_INFO)
+  const [askingInfo, setAskingInfo] = useState(false)
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
 
   const cells = useRef(new Map<string, HTMLInputElement>())
   const listItems = useRef(new Map<number, HTMLTableRowElement>())
@@ -582,6 +590,33 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
 
   const priceOf = (cart: Row[]) => quoteFor(cart, modeRef.current, customer.placeOfSupply)
 
+  const asksForBillInfo = Boolean(settings?.shop.askForTable || settings?.shop.askForSupplier)
+  const askedForFirstBill = useRef(false)
+
+  // The whole supplier list in one call: a shop has a handful, and filtering in the browser keeps
+  // the dropdown instant instead of a round trip per keystroke.
+  useEffect(() => {
+    if (!settings?.shop.askForSupplier) {
+      return
+    }
+    api.get<Supplier[]>('/api/suppliers').then(setSuppliers).catch(() => setSuppliers([]))
+  }, [settings?.shop.askForSupplier])
+
+  /** Asked at the start of a bill, which is when a waiter knows the table. */
+  const startNextBill = useCallback(() => {
+    setBillInfo(NO_BILL_INFO)
+    if (asksForBillInfo) {
+      setAskingInfo(true)
+    }
+  }, [asksForBillInfo])
+
+  useEffect(() => {
+    if (active && !blocked && asksForBillInfo && !askedForFirstBill.current) {
+      askedForFirstBill.current = true
+      setAskingInfo(true)
+    }
+  }, [active, blocked, asksForBillInfo])
+
   const sell = async (cart: Row[], tenders: Tender[], parcel: boolean) => {
     const sale = await api.post<SaleResponse>('/api/sales', {
       lines: cartBody(cart),
@@ -592,9 +627,12 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
       print: true,
       openDrawer: tenders.some((tender) => tender.mode === 'CASH'),
       parcel,
+      tableNo: billInfo.tableNo || null,
+      supplierId: billInfo.supplierId || null,
     })
     setLastBill(lastBillOf(sale.invoice))
     clearBill()
+    startNextBill()
     setError(null)
     onToast(sale.printed
       ? { tone: 'good', text: `Bill ${sale.invoice.invoiceNumber} taken and printed` }
@@ -664,6 +702,8 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
       print: true,
       openDrawer: tenders.some((tender) => tender.mode === 'CASH') || refundsCash,
       parcel,
+      tableNo: billInfo.tableNo || null,
+      supplierId: billInfo.supplierId || null,
     })
     setLastBill(lastBillOf(edited.invoice))
     clearBill()
@@ -1504,6 +1544,17 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
                   onSubmit={runAsk} onClose={() => { setAsk(null); focusEntry() }} />
       )}
 
+      {askingInfo && (
+        <BillInfoDialog
+          askTable={Boolean(settings?.shop.askForTable)}
+          askSupplier={Boolean(settings?.shop.askForSupplier)}
+          suppliers={suppliers}
+          initial={billInfo}
+          onClose={() => { setAskingInfo(false); focusEntry() }}
+          onDone={(info) => { setBillInfo(info); setAskingInfo(false); focusEntry() }}
+        />
+      )}
+
       {payment && (
         <PaymentDialog
           due={payment.due}
@@ -2249,6 +2300,128 @@ function PaymentDialog({ due, title = 'Payment', confirmLabel = 'Take bill', ask
           </div>
         </div>
       </form>
+    </Modal>
+  )
+}
+
+/**
+ * Asked at the start of a bill, when a waiter knows the table and before a single item is rung up.
+ * Both answers are optional: a shop that turns the prompt on still takes counter sales that belong
+ * to no table and no supplier, so Skip is a real answer rather than a trap.
+ *
+ * <p>The supplier list is small and already in hand, so the search filters it here: typing an ID
+ * or any part of a name narrows the list, and Enter takes the highlighted one.
+ */
+function BillInfoDialog({ askTable, askSupplier, suppliers, initial, onClose, onDone }: {
+  askTable: boolean
+  askSupplier: boolean
+  suppliers: Supplier[]
+  initial: BillInfo
+  onClose: () => void
+  onDone: (info: BillInfo) => void
+}) {
+  const [tableNo, setTableNo] = useState(initial.tableNo)
+  const [search, setSearch] = useState(initial.supplierId)
+  const [picked, setPicked] = useState<Supplier | null>(
+    suppliers.find((one) => one.supplierId === initial.supplierId) ?? null,
+  )
+  const [highlight, setHighlight] = useState(0)
+
+  const text = search.trim().toLowerCase()
+  const matches = text
+    ? suppliers.filter((one) => one.supplierId.toLowerCase().includes(text)
+      || one.supplierName.toLowerCase().includes(text))
+    : suppliers
+  const showList = askSupplier && !picked && matches.length > 0
+
+  const choose = (one: Supplier) => {
+    setPicked(one)
+    setSearch(`${one.supplierId} - ${one.supplierName}`)
+  }
+
+  const done = () => onDone({ tableNo: tableNo.trim(), supplierId: picked?.supplierId ?? '' })
+
+  // The browser pane does not fire a click on Enter, so every dialog answers Enter itself.
+  const onSupplierKey = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      setHighlight((at) => Math.max(0, Math.min(matches.length - 1, event.key === 'ArrowDown' ? at + 1 : at - 1)))
+      return
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      if (showList && matches[highlight]) {
+        choose(matches[highlight])
+      } else {
+        done()
+      }
+    }
+  }
+
+  return (
+    <Modal title="New bill" onClose={onClose}>
+      <div className="space-y-3">
+        {askTable && (
+          <Field label="Table" hint="Leave empty for a counter sale">
+            <input
+              className={inputClass}
+              autoFocus
+              value={tableNo}
+              onChange={(event) => setTableNo(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  done()
+                }
+              }}
+            />
+          </Field>
+        )}
+        {askSupplier && (
+          <Field label="Supplier" hint="Type an ID or any part of a name, then pick one">
+            <div>
+              <input
+                className={inputClass}
+                autoFocus={!askTable}
+                value={search}
+                onChange={(event) => {
+                  setSearch(event.target.value)
+                  setPicked(null)
+                  setHighlight(0)
+                }}
+                onKeyDown={onSupplierKey}
+              />
+              {showList && (
+                <ul className="mt-1 max-h-44 overflow-y-auto rounded-md border border-slate-200">
+                  {matches.slice(0, 25).map((one, at) => (
+                    <li key={one.supplierId}>
+                      <button
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => choose(one)}
+                        className={`block w-full px-3 py-1.5 text-left text-sm ${
+                          at === highlight ? 'bg-sky-50 text-sky-900' : 'hover:bg-slate-50'}`}
+                      >
+                        <span className="font-medium">{one.supplierId}</span>
+                        <span className="text-slate-500"> - {one.supplierName}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {suppliers.length === 0 && (
+                <p className="mt-1 text-xs text-slate-400">
+                  No suppliers yet. An admin adds them on the Staff screen.
+                </p>
+              )}
+            </div>
+          </Field>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>Skip</Button>
+          <Button tone="primary" onClick={done}>Start bill</Button>
+        </div>
+      </div>
     </Modal>
   )
 }

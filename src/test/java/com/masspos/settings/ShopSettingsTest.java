@@ -80,6 +80,6 @@ class ShopSettingsTest {
         return new ShopSettingsForm(legalName, tradeName, gstin, address, "020-5550100", "shop@example.com",
                 "www.example.com", "U52100MH2020PTC123456", "11521999000123", "massmart@okicici",
                 List.of("Exchange within 7 days", "Thank you!"), "Ravi Systems", "98200-00000",
-                "support@example.com", true, false);
+                "support@example.com", true, false, false, false);
     }
 }

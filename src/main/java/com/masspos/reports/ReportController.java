@@ -12,6 +12,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.List;
 
 @RestController
@@ -29,22 +31,25 @@ public class ReportController {
 
     /**
      * Closing report: takings, tender split, who billed, and what sold. One day by default, or any
-     * stretch of them - a week, a month, a festival - with from and to.
+     * stretch of time - a week, a month, or this evening's shift - with from and to, which carry a
+     * time of day and are matched against when each bill was issued.
      *
-     * @param date a single day, kept for anything that still asks that way; from and to win
+     * @param date a whole single day, for anything that still asks that way; from and to win
      */
     @GetMapping("/day")
     public Reports.DayReport day(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
-        LocalDate one = date == null ? LocalDate.now(IndiaTime.ZONE) : date;
-        LocalDate start = from == null ? one : from;
-        LocalDate end = to == null ? (from == null ? one : from) : to;
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
+        LocalDate oneDay = date == null ? LocalDate.now(IndiaTime.ZONE) : date;
+        LocalDateTime start = from == null ? oneDay.atStartOfDay() : from;
+        // No time given for the end means the whole of that day, to midnight; a shop asking for
+        // "the 22nd" wants the 22nd, not a window of zero length.
+        LocalDateTime end = to != null ? to : start.toLocalDate().atTime(LocalTime.MAX);
         if (end.isBefore(start)) {
-            throw new FieldRejectedException("to", "is before the date the range starts on");
+            throw new FieldRejectedException("to", "is before the moment the range starts");
         }
-        return reports.day(start, end);
+        return reports.day(start.atZone(IndiaTime.ZONE).toInstant(), end.atZone(IndiaTime.ZONE).toInstant());
     }
 
     /** Rate-wise and HSN-wise figures for a GSTR-1 filing period. */

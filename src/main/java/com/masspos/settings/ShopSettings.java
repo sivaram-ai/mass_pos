@@ -101,6 +101,18 @@ public class ShopSettings extends BaseEntity {
 
     private boolean blockNegativeStock;
 
+    /**
+     * Ask for a table number as each bill is started. A restaurant wants it; a kirana does not,
+     * so it is off until a shop turns it on. A default is required: SQLite will not add a NOT
+     * NULL column to a table that already has rows, which every shipped till has.
+     */
+    @Column(nullable = false, columnDefinition = "boolean default 0")
+    private boolean askForTable;
+
+    /** Ask which supplier the bill is against, picked from the Staff screen's supplier list. */
+    @Column(nullable = false, columnDefinition = "boolean default 0")
+    private boolean askForSupplier;
+
     public ShopSettings() {
     }
 
@@ -121,6 +133,8 @@ public class ShopSettings extends BaseEntity {
         this.serviceEmail = trim(form.serviceEmail());
         this.roundInvoiceTotal = form.roundInvoiceTotal();
         this.blockNegativeStock = form.blockNegativeStock();
+        this.askForTable = form.askForTable();
+        this.askForSupplier = form.askForSupplier();
     }
 
     /**
@@ -222,6 +236,14 @@ public class ShopSettings extends BaseEntity {
 
     public boolean isBlockNegativeStock() {
         return blockNegativeStock;
+    }
+
+    public boolean isAskForTable() {
+        return askForTable;
+    }
+
+    public boolean isAskForSupplier() {
+        return askForSupplier;
     }
 
     private static String trim(String value) {

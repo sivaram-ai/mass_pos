@@ -34,7 +34,7 @@ public final class Reports {
      * @param totals       sales less returns: what the shop actually kept
      * @param payments     taken in less paid back, per mode
      */
-    public record DayReport(LocalDate from, LocalDate to, long bills, long cancelledBills, long returns, Totals salesTotals,
+    public record DayReport(Instant from, Instant to, long bills, long cancelledBills, long returns, Totals salesTotals,
                             Totals returnTotals, Totals totals, List<ModeRow> payments, List<NameRow> cashiers,
                             List<NameRow> terminals, List<ProductRow> bestSellers) {
     }
