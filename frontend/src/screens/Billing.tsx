@@ -19,7 +19,7 @@ import type { Toast } from '../App'
 const ONE_UNIT = 1000
 const NO_CUSTOMER: Customer = { name: '', gstin: '', placeOfSupply: '' }
 
-/** Which table the bill is for and which supplier it is against, asked before anything is rung up. */
+/** Which table the bill is for and who is serving it, asked before anything is rung up. */
 type BillInfo = { tableNo: string; supplierId: string }
 
 const NO_BILL_INFO: BillInfo = { tableNo: '', supplierId: '' }
@@ -602,7 +602,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     api.get<Supplier[]>('/api/suppliers').then(setSuppliers).catch(() => setSuppliers([]))
   }, [settings?.shop.askForSupplier])
 
-  /** Asked at the start of a bill, which is when a waiter knows the table. */
+  /** Once per bill, at the start, which is when the steward knows the table. Never per row. */
   const startNextBill = useCallback(() => {
     setBillInfo(NO_BILL_INFO)
     if (asksForBillInfo) {
@@ -2305,9 +2305,9 @@ function PaymentDialog({ due, title = 'Payment', confirmLabel = 'Take bill', ask
 }
 
 /**
- * Asked at the start of a bill, when a waiter knows the table and before a single item is rung up.
- * Both answers are optional: a shop that turns the prompt on still takes counter sales that belong
- * to no table and no supplier, so Skip is a real answer rather than a trap.
+ * Asked at the start of every bill, when the steward knows the table and before a single item is
+ * rung up. Both answers are optional: a hotel that turns the prompt on still sells parcels and
+ * counter orders belonging to no table, so Skip is a real answer rather than a trap.
  *
  * <p>The supplier list is small and already in hand, so the search filters it here: typing an ID
  * or any part of a name narrows the list, and Enter takes the highlighted one.
@@ -2362,7 +2362,7 @@ function BillInfoDialog({ askTable, askSupplier, suppliers, initial, onClose, on
     <Modal title="New bill" onClose={onClose}>
       <div className="space-y-3">
         {askTable && (
-          <Field label="Table" hint="Leave empty for a counter sale">
+          <Field label="Table" hint="Leave empty for a parcel or a counter order">
             <input
               className={inputClass}
               autoFocus
@@ -2378,7 +2378,7 @@ function BillInfoDialog({ askTable, askSupplier, suppliers, initial, onClose, on
           </Field>
         )}
         {askSupplier && (
-          <Field label="Supplier" hint="Type an ID or any part of a name, then pick one">
+          <Field label="Supplier" hint="Who is serving this table. Type an ID or part of a name, then pick one">
             <div>
               <input
                 className={inputClass}

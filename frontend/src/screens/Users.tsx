@@ -225,9 +225,10 @@ function ResetPinDialog({ user, onClose, onDone, onToast }: {
 }
 
 /**
- * Suppliers sit beside the staff because that is where someone goes to add one, but they are not
- * people who use the till: an ID and a name, no PIN and no sign-in. They are stopped rather than
- * deleted, because bills already issued carry the code and have to keep making sense.
+ * Whoever carries the food to the table. They sit beside the staff because that is where someone
+ * goes to add one, but they are not people who use the till: an ID and a name, no PIN and no
+ * sign-in. Stopped rather than deleted, because the bills they served carry the code and have to
+ * keep making sense long after they have left.
  */
 function SupplierPanel({ canManage, onToast }: { canManage: boolean; onToast: Toast }) {
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
@@ -258,7 +259,8 @@ function SupplierPanel({ canManage, onToast }: { canManage: boolean; onToast: To
         : <span className="text-xs text-slate-500">Only an admin can change these</span>}
     >
       <p className="mb-2 text-xs text-slate-400">
-        Picked at the start of a bill when Settings asks for one, and printed above the bill number.
+        Whoever serves the table. Picked at the start of every bill when Settings asks for one, and
+        printed beside the table number above the bill number.
       </p>
       {suppliers.length === 0 ? <Empty>No suppliers yet</Empty> : (
         <table className="w-full text-sm">
@@ -341,7 +343,7 @@ function AddSupplierDialog({ onClose, onDone, onToast }: {
           <input className={inputClass} autoFocus value={supplierName}
                  onChange={(event) => setSupplierName(event.target.value)} />
         </Field>
-        <Field label="Supplier ID" hint="Printed on every bill against them" error={err('supplierId')}>
+        <Field label="Supplier ID" hint="Printed on every bill they serve" error={err('supplierId')}>
           <input className={inputClass} value={supplierId}
                  onChange={(event) => setSupplierId(event.target.value)} />
         </Field>

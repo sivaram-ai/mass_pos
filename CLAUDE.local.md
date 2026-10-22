@@ -24,6 +24,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 5B | One folder per till, `%LOCALAPPDATA%\GoRockitPOS`, data in `data\`, with an automatic move from the old `MassPOS` folder | Done: 235 tests green, this PC's own till migrated |
 | 5C | Desktop shell: the shortcut starts the server when it is down, waits for it, and opens the screen in an Edge `--app` window | Done: driven from the installed shortcut |
 | 5D | A copy of the database, settings and licence outside the till's folder at every start and clean shutdown | Done: survived an uninstall that removed the program |
+| 5E | Hotel billing: suppliers (who served) in their own table, table number asked once per bill when Settings says so, both frozen on the invoice and printed above the bill number; takings by the hour | Done: 256 tests green, driven in the browser |
 | 4 | Counter → master sync over LAN (see [docs/multi-terminal-and-rbac.md](docs/multi-terminal-and-rbac.md)) | Designed, not built |
 | Later | Flyway migrations, cloud sync, composition scheme / bill of supply, periodic offsite copies, tray icon with Quit, single instance | Not started |
 
@@ -278,6 +279,15 @@ folder and everything under it, so that is the only copy that survives one.
   the field `@Column(nullable = false, columnDefinition = "<type> default <value>")`;
   `RestartOnExistingDatabaseTest.aNewColumnReachesATableThatAlreadyHasRows` drops the column from a
   populated table and restarts to prove it.
+- **A new value in a persisted enum breaks every database already out there.** Hibernate writes an
+  `@Enumerated(STRING)` column as `role varchar(16) not null check (role in ('CASHIER','MANAGER',
+  'AUDITOR','ADMIN'))`, on the entity table *and* its `_aud` twin. SQLite cannot alter a CHECK
+  constraint and `ddl-auto=update` leaves it alone, so a fresh install accepts the new value and
+  every till in a shop refuses it with `SQLITE_CONSTRAINT_CHECK`. Found by adding `SUPPLIER` to
+  `UserRole` and starting on an existing database; a fresh test database would have passed and
+  shipped it. Add a table instead - SQLite takes a new table on upgrade - or plan the
+  create-copy-drop-rename rebuild of both tables, which for `*_aud` means working around the
+  append-only triggers.
 - **Invoices.** Build the invoice fully, then persist it once, in the same transaction as
   `InvoiceSequence.next()` and the SALE ledger events. There are no drafts.
 - **The seller is a snapshot.** Invoices get `SellerDetails.from(companyProperties)` at issue time.

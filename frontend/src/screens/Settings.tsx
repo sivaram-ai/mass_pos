@@ -230,7 +230,7 @@ export default function Settings({ role, settings, onSaved, onToast }: {
             <label className="flex items-center gap-2 text-sm text-slate-600">
               <input type="checkbox" checked={form.askForSupplier}
                      onChange={(event) => set({ askForSupplier: event.target.checked })} />
-              Ask for a supplier when a bill is started
+              Ask who is serving when a bill is started
             </label>
           </div>
         </fieldset>

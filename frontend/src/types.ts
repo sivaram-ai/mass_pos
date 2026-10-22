@@ -2,7 +2,7 @@
 
 export type Role = 'CASHIER' | 'MANAGER' | 'AUDITOR' | 'ADMIN'
 
-/** Who a bill is against: an ID and a name. Not somebody who signs in. */
+/** Whoever served the food on a bill: an ID and a name. Not somebody who signs in. */
 export interface Supplier {
   id: string
   supplierId: string
@@ -283,9 +283,9 @@ export interface ShopSettingsForm {
   serviceEmail: string
   roundInvoiceTotal: boolean
   blockNegativeStock: boolean
-  /** Ask which table the bill is for as it is started. */
+  /** Ask which table the bill is for before anything is rung up. */
   askForTable: boolean
-  /** Ask which supplier the bill is against as it is started. */
+  /** Ask who is serving the table before anything is rung up. */
   askForSupplier: boolean
 }
 

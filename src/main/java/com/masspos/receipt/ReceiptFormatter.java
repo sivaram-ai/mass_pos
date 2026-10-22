@@ -110,7 +110,7 @@ public class ReceiptFormatter {
             doc.size(false, true).bold(true).line("*** CANCELLED ***").size(false, false).bold(false);
         }
         doc.align(LEFT).separator('-');
-        // Above the bill number, because a waiter carrying this back to a table looks there first.
+        // Above the bill number: a steward carrying this back to the floor looks there first.
         if (invoice instanceof Invoice seated && (hasText(seated.getTableNo()) || hasText(seated.getSupplierId()))) {
             doc.leftRight(hasText(seated.getTableNo()) ? "Table: " + seated.getTableNo() : "",
                     hasText(seated.getSupplierId()) ? "Supplier: " + seated.getSupplierId() : "");

@@ -109,7 +109,7 @@ public class ShopSettings extends BaseEntity {
     @Column(nullable = false, columnDefinition = "boolean default 0")
     private boolean askForTable;
 
-    /** Ask which supplier the bill is against, picked from the Staff screen's supplier list. */
+    /** Ask who is serving the table, picked from the Staff screen's supplier list. */
     @Column(nullable = false, columnDefinition = "boolean default 0")
     private boolean askForSupplier;
 

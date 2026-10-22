@@ -23,8 +23,8 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Suppliers: who a bill is against. Added on the Staff screen beside the people, picked on the
- * billing screen when the shop asks for one.
+ * Suppliers: whoever served the food on a bill. Added on the Staff screen beside the people,
+ * picked on the billing screen at the start of every bill when the hotel asks for one.
  */
 @RestController
 @RequestMapping("/api/suppliers")
@@ -51,10 +51,10 @@ public class SupplierController {
     }
 
     /**
-     * A cashier needs this to pick one at the start of a bill, so it is open wider than the staff
-     * roster. Nothing here is a secret: both fields are printed on the bill.
+     * A cashier picks one at the start of every bill, so this is open wider than the staff roster
+     * is. Nothing here is a secret: both fields are printed on the bill.
      *
-     * @param all true on the Staff screen, which shows the ones no longer used as well
+     * @param all true on the Staff screen, which shows the ones who have left as well
      */
     @GetMapping
     @RequiresRole({UserRole.CASHIER, UserRole.MANAGER, UserRole.AUDITOR})
@@ -83,7 +83,7 @@ public class SupplierController {
         return SupplierView.of(supplier);
     }
 
-    /** Stopped rather than deleted: bills already issued carry the code and must still read. */
+    /** Stopped rather than deleted: bills they served carry the code and must still read. */
     @PostMapping("/{id}/deactivate")
     @RequiresRole({UserRole.ADMIN})
     @Transactional
