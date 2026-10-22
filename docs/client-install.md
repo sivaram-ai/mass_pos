@@ -1,7 +1,7 @@
 # GO RockIt: installing at a shop
 
 For the person who sets up a till. The vendor builds the installer with
-`tools\build-installer.ps1`; this page is what to do with the `MassPOS-<version>.exe` it produces.
+`tools\build-installer.ps1`; this page is what to do with the `GoRockitPOS-<version>.exe` it produces.
 
 ## The shop's PC needs
 
@@ -12,20 +12,23 @@ For the person who sets up a till. The vendor builds the installer with
 
 ## Install, in order
 
-1. **Copy `MassPOS-<version>.exe`** to the PC (pen drive is fine) and run it. It installs for the
-   current Windows user and adds a Start-menu entry and a desktop shortcut. The installer is not
-   code-signed yet, so Windows SmartScreen says "unknown publisher": click **More info**, then
-   **Run anyway**.
-2. **Start GO RockIt** from the Start menu. It starts the till's server in the background; no
-   window opens.
-3. **Make the shop's icon.** The app does not open the browser itself. Create a shortcut to
-   `http://127.0.0.1:8765` on the desktop (right-click, New, Shortcut) and name it GO RockIt.
-   Also put a shortcut to GO RockIt in `shell:startup` so the till is ready after a reboot.
+1. **Copy `GoRockitPOS-<version>.exe`** to the PC (a pen drive is fine) and run it. It installs for
+   the current Windows user into `%LOCALAPPDATA%\GoRockitPOS` and puts **GO RockIt** on the desktop
+   and in the Start menu. The installer is not code-signed yet, so Windows SmartScreen says
+   "unknown publisher": click **More info**, then **Run anyway**.
+2. **Double-click GO RockIt.** The shortcut starts the till's server if it is not already running,
+   waits for it, and opens the shop's screen in a window of its own - no browser, no address bar.
+   The first start takes around half a minute while the database is built; after that it is
+   seconds, and clicking the icon again simply opens another window.
+3. **Have it ready after a reboot.** Press Win+R, type `shell:startup`, and copy the GO RockIt
+   shortcut into the folder that opens.
 4. **Sign in as `admin`.** The first-start PIN is in
-   `%LOCALAPPDATA%\MassPOS\logs\pos.log`. The app makes you choose your own PIN straight away.
-5. **Name the till.** Close GO RockIt, edit `%LOCALAPPDATA%\MassPOS\pos.properties`, set
+   `%LOCALAPPDATA%\GoRockitPOS\data\logs\pos.log`. The app makes you choose your own PIN straight away.
+5. **Name the till.** Edit `%LOCALAPPDATA%\GoRockitPOS\data\pos.properties`, set
    `pos.terminal.code` (T1, T2, ...: unique per till, at most 3 characters, it prefixes every
-   invoice number) and `pos.terminal.name`, then start it again.
+   invoice number) and `pos.terminal.name`, then restart the PC so the till picks them up. The
+   server has no window of its own: to restart it without rebooting, end `GoRockitPOS-Server.exe`
+   in Task Manager and click the shortcut again.
 6. **Settings:** legal name and address (billing stays blocked until both are set), GSTIN if the
    shop is GST-registered, receipt footer, UPI ID.
 7. **Settings > Printer:** pick the printer. A printer that has only a Windows driver (inkjet,
@@ -43,7 +46,7 @@ java tools\license\LicenseTool.java issue --dir C:\Users\sivar\MassPOS-licensing
 
 ## Data and backup
 
-Everything the shop owns is in `%LOCALAPPDATA%\MassPOS` (database `pos.db` and its `-wal` and
+Everything the shop owns is in `%LOCALAPPDATA%\GoRockitPOS\data` (database `pos.db` and its `-wal` and
 `-shm` files, `pos.properties`, `license.lic`, `logs`). There is no backup button yet. Until there
 is: **close GO RockIt every evening and copy that whole folder to a pen drive or cloud folder.**
 Copying `pos.db` alone while the app runs gives a stale copy.
@@ -55,9 +58,21 @@ old PC is retired.
 
 ## Where things live
 
-The program is installed in `%LOCALAPPDATA%\GoRockIt`; everything the shop owns stays in
-`%LOCALAPPDATA%\MassPOS`. They are deliberately apart, so removing the program can never take
-the database with it.
+A till is one folder, `%LOCALAPPDATA%\GoRockitPOS`: the program (`GoRockitPOS.exe`,
+`GoRockitPOS-Server.exe`, `app`, `runtime`) and, in `data`, everything the shop owns - `pos.db`
+with its `-wal` and `-shm` files, `pos.properties`, `license.lic`, `logs`, `backups`,
+`printer-out`.
+
+Installing and upgrading leave `data` alone. That is measured, not assumed: upgrading 0.1.4 to
+0.1.5 left the database and all 274 files exactly as they were.
+
+**Uninstalling does not.** Windows deletes the installed folder and everything under it, `data`
+included, so the shop's bills, licence and settings go with the program. Copy `data` to a pen
+drive before you ever uninstall. To move a till to another PC, install there and copy `data`
+across - do not uninstall the old one until the new one is billing.
+
+A till set up before 0.1.2 kept its data in `%LOCALAPPDATA%\MassPOS`; the first start after the
+upgrade moves that folder into `data` and says so in `pos.log`.
 
 ## Updating to a new version
 
@@ -65,15 +80,16 @@ Run the new installer over the old one: the upgrade id is fixed, so a build with
 number replaces the program and keeps the data folder. Rebuilding the *same* version and
 installing it again does not work - Windows refuses it with error 1638, "another version of this
 product is already installed" - so pass a new `-Version` to the build script, or uninstall first.
-Take a copy of `%LOCALAPPDATA%\MassPOS` before any upgrade. A till installed with the first 0.1.0
-build has the program inside the data folder: uninstall that one before installing a later build.
+Take a copy of `%LOCALAPPDATA%\GoRockitPOS\data` before any upgrade. A till installed with the 0.1.0 or 0.1.1
+build keeps its data in `%LOCALAPPDATA%\MassPOS`; the first start of 0.1.2 moves it in for you.
 
 ## If something is wrong
 
 | Symptom | Fix |
 |---|---|
-| Page does not open | GO RockIt is not running: start it from the Start menu. Use `http://127.0.0.1:8765`, not `localhost` |
-| Cannot sign in | The admin PIN is in `%LOCALAPPDATA%\MassPOS\logs\pos.log` |
+| Nothing happens when I click GO RockIt | Give it half a minute on a cold start. If a message appears, it names the problem; otherwise look in `data\logs\pos.log` |
+| The window opens but the page does not load | The server is still starting, or stopped: close the window and click the shortcut again |
+| Cannot sign in | The admin PIN is in `%LOCALAPPDATA%\GoRockitPOS\data\logs\pos.log` |
 | "Billing locked" | Menu > Licence says why |
 | Bills print to files, not paper | No printer chosen: Settings > Printer |
 | App closes at startup | A bad value in `pos.properties`; `logs\pos.log` names it |

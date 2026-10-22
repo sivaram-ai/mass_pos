@@ -48,6 +48,7 @@ if ($SkipTests) { $mvnArgs += "-DskipTests" }
 & .\mvnw.cmd @mvnArgs
 Check "Maven build"
 if ((Get-Item target\mass-pos.jar).Length -lt 20MB) { throw "target\mass-pos.jar is too small: not repackaged" }
+if (-not (Test-Path target\mass-pos-launcher.jar)) { throw "target\mass-pos-launcher.jar is missing: the desktop-launcher jar did not build" }
 
 Step "2/4 Building the trimmed Java runtime"
 jlink --add-modules java.base,java.compiler,java.desktop,java.instrument,java.management,java.net.http,java.prefs,java.rmi,java.scripting,java.security.jgss,java.sql.rowset,jdk.jfr,jdk.unsupported,jdk.crypto.ec,jdk.localedata,jdk.charsets `
@@ -58,16 +59,35 @@ Check "jlink"
 Step "3/4 Building the installer"
 New-Item -ItemType Directory -Force target\jpackage-input | Out-Null
 Copy-Item target\mass-pos.jar target\jpackage-input\ -Force
+Copy-Item target\mass-pos-launcher.jar target\jpackage-input\ -Force
+# The server launcher must name its own main class, or jpackage gives it the main application's -
+# the desktop launcher - and the server starts another server. Take it from the jar Spring Boot
+# repackaged, so this cannot drift the next time Boot moves JarLauncher.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$jar = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path target\mass-pos.jar))
+$reader = New-Object System.IO.StreamReader($jar.GetEntry("META-INF/MANIFEST.MF").Open())
+$manifest = $reader.ReadToEnd(); $reader.Dispose(); $jar.Dispose()
+$serverMain = [regex]::Match($manifest, 'Main-Class:\s*(\S+)').Groups[1].Value
+if (-not $serverMain) { throw "No Main-Class in target\mass-pos.jar: Spring Boot did not repackage it" }
+$serverProps = "target\server-launcher.properties"
+(Get-Content tools\server-launcher.properties) -replace '^main-class=.*', "main-class=$serverMain" |
+    Set-Content $serverProps -Encoding ascii
+Write-Host "    server launcher runs $serverMain"
 # Never change --win-upgrade-uuid: it is how a new version upgrades an old install in place.
-# --install-dir keeps the program out of the shop's data folder: %LOCALAPPDATA%\MassPOS holds
-# pos.db, the licence and the logs, and an uninstall there could take the database with it.
-jpackage --type exe --name MassPOS --app-version $Version --vendor "GoGo Digital Services" `
-  --input target\jpackage-input --main-jar mass-pos.jar --runtime-image target\runtime `
-  --java-options "-XX:+UseG1GC" --java-options "-Xms512m" --java-options "-Xmx512m" `
-  --java-options "-XX:MaxGCPauseMillis=20" --java-options "-XX:+AlwaysPreTouch" `
-  --java-options "-XX:+UseStringDeduplication" --java-options "-XX:+ExitOnOutOfMemoryError" `
-  --win-per-user-install --install-dir GoRockIt `
-  --win-menu --win-menu-group "GO RockIt" --win-shortcut `
+# One folder per till, %LOCALAPPDATA%\GoRockitPOS, holding two: the program in program\ and the
+# shop's database, licence and logs in data\. The program goes a level down because uninstalling
+# deletes the install directory and everything under it - measured, not assumed - so a shop whose
+# database sat beside the exe would lose it the moment someone removed the app.
+# The shortcut runs the desktop launcher, which starts GoRockitPOS-Server.exe when the till is not
+# already up; the JVM tuning moved there with it.
+# --main-class is deliberately absent below: the main launcher takes its own from
+# mass-pos-launcher.jar's manifest, and passing it here would hand it to the added launcher too.
+jpackage --type exe --name GoRockitPOS --app-version $Version --vendor "GoGo Digital Services" `
+  --input target\jpackage-input --main-jar mass-pos-launcher.jar `
+  --runtime-image target\runtime `
+  --add-launcher GoRockitPOS-Server=$serverProps `
+  --install-dir GoRockitPOS `
+  --win-per-user-install --win-menu --win-menu-group "GO RockIt" --win-shortcut `
   --win-upgrade-uuid 076ca0d4-3fc9-4172-8e1f-c4f9062c6f99 `
   --dest target\installer
 Check "jpackage"

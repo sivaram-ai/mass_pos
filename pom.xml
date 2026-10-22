@@ -96,6 +96,32 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
+            <!-- A second, plain jar holding only the desktop launcher: the shortcut's exe runs it
+                 with a bare classpath, which a Spring Boot fat jar cannot be launched from. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>desktop-launcher</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                        <configuration>
+                            <classifier>launcher</classifier>
+                            <includes>
+                                <include>com/masspos/desktop/**</include>
+                            </includes>
+                            <archive>
+                                <manifest>
+                                    <mainClass>com.masspos.desktop.DesktopLauncher</mainClass>
+                                </manifest>
+                            </archive>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 

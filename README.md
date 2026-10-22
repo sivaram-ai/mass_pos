@@ -47,7 +47,7 @@ Then open **http://127.0.0.1:8765**.
    returns.
 4. Add a product under **Products**, record what arrived under **Stock**, and bill it.
 
-Data lives in `%LOCALAPPDATA%\MassPOS` (Windows) or `~/MassPOS`: the database, logs,
+Data lives in `%LOCALAPPDATA%\GoRockitPOS\data` (Windows) or `~/GoRockitPOS/data`: the database, logs,
 `pos.properties` and, when no printer is configured, the receipts as text files under
 `printer-out`.
 
@@ -342,22 +342,20 @@ before going live.
 
 ## Building the installer
 
+One script does all of it - checks the prerequisites and that no other build or copy of the app is
+running, builds the jar with the UI inside, jlinks the trimmed runtime, runs jpackage through WiX
+and copies the result to `dist\`:
+
 ```powershell
-.\mvnw.cmd -B clean package
-jlink --add-modules java.base,java.compiler,java.desktop,java.instrument,java.management,java.net.http,java.prefs,java.rmi,java.scripting,java.security.jgss,java.sql.rowset,jdk.jfr,jdk.unsupported,jdk.crypto.ec,jdk.localedata,jdk.charsets `
-      --include-locales=en,hi --strip-debug --no-man-pages --no-header-files --compress=zip-6 `
-      --output target\runtime
-New-Item -ItemType Directory -Force target\jpackage-input | Out-Null
-Copy-Item target\mass-pos.jar target\jpackage-input\
-jpackage --type exe --name MassPOS --app-version 0.1.0 --vendor "GoGo Digital Services" `
-  --input target\jpackage-input --main-jar mass-pos.jar --runtime-image target\runtime `
-  --java-options "-XX:+UseG1GC" --java-options "-Xms512m" --java-options "-Xmx512m" `
-  --java-options "-XX:MaxGCPauseMillis=20" --java-options "-XX:+AlwaysPreTouch" `
-  --java-options "-XX:+UseStringDeduplication" --java-options "-XX:+ExitOnOutOfMemoryError" `
-  --win-per-user-install --win-menu --win-shortcut `
-  --win-upgrade-uuid 076ca0d4-3fc9-4172-8e1f-c4f9062c6f99 `
-  --dest target\installer
+powershell -ExecutionPolicy Bypass -File tools\build-installer.ps1 -Version 0.1.2
 ```
+
+`-SkipTests` skips the test run. One app image carries two launchers: `GoRockitPOS.exe`, which the
+desktop shortcut runs, starts the server if the till is not already up and opens the screen in an
+app window; `GoRockitPOS-Server.exe` is Spring Boot itself and carries the JVM tuning, in
+`tools\server-launcher.properties`. A till is one folder, `%LOCALAPPDATA%\GoRockitPOS`: the
+program at the top, the shop's database and logs in `data`. Installing and upgrading leave `data`
+alone; uninstalling deletes the whole folder, so copy `data` before removing a till.
 
 Windows needs WiX Toolset 3.14 on `PATH`; `--type app-image` builds a runnable folder without it.
 On macOS use `--type dmg --mac-package-identifier com.masspos.pos`.

@@ -31,6 +31,10 @@ public class FirstRunSetup implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) throws IOException {
+        String migration = DataDirMigration.report();
+        if (migration != null) {
+            log.info(migration);
+        }
         Path settings = pos.dataDir().resolve("pos.properties").toAbsolutePath();
         if (Files.notExists(settings)) {
             try (InputStream template = new ClassPathResource(TEMPLATE).getInputStream()) {
