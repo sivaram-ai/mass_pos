@@ -66,10 +66,24 @@ with its `-wal` and `-shm` files, `pos.properties`, `license.lic`, `logs`, `back
 Installing and upgrading leave `data` alone. That is measured, not assumed: upgrading 0.1.4 to
 0.1.5 left the database and all 274 files exactly as they were.
 
-**Uninstalling does not.** Windows deletes the installed folder and everything under it, `data`
-included, so the shop's bills, licence and settings go with the program. Copy `data` to a pen
-drive before you ever uninstall. To move a till to another PC, install there and copy `data`
-across - do not uninstall the old one until the new one is billing.
+**Uninstalling can take `data` with it.** Windows deletes the folder the installer created and
+everything under it. Measured on this machine it went both ways - the whole folder on a till
+where the installer had made it, `data` left behind on one where the folder already existed - so
+treat the shop's records as gone the moment someone uninstalls. A program installed from an MSI
+gets no chance to run while it is being removed, so it cannot save them at that point either.
+
+So the till does not wait for that moment. At every start and every clean shutdown it writes the
+database, `pos.properties` and `license.lic` into `%LOCALAPPDATA%\GoRockitPOS-backups` - a folder
+the installer does not own and never touches. The newest copy there is from the last time the
+till ran, which is also the last time before any update. Ten copies are kept.
+
+To put one back after reinstalling, with GO RockIt closed: copy the newest `pos-<date>-<moment>.db`
+into `%LOCALAPPDATA%\GoRockitPOS\data`, rename it `pos.db`, and copy `pos.properties` and
+`license.lic` in beside it. To move a till to another PC, install there and copy `data` across;
+do not uninstall the old one until the new one is billing.
+
+Set `pos.backup.offsite-dir` in `pos.properties` to a pen drive or a synced folder and the shop
+has a copy off the machine as well - worth doing, since a dead disk takes both folders.
 
 A till set up before 0.1.2 kept its data in `%LOCALAPPDATA%\MassPOS`; the first start after the
 upgrade moves that folder into `data` and says so in `pos.log`.

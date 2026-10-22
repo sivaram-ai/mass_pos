@@ -49,7 +49,9 @@ Then open **http://127.0.0.1:8765**.
 
 Data lives in `%LOCALAPPDATA%\GoRockitPOS\data` (Windows) or `~/GoRockitPOS/data`: the database, logs,
 `pos.properties` and, when no printer is configured, the receipts as text files under
-`printer-out`.
+`printer-out`. A copy of the database, settings and licence goes to
+`%LOCALAPPDATA%\GoRockitPOS-backups` at every start and clean shutdown: uninstalling deletes the
+till's folder and everything in it, and an MSI gives the program no chance to run as it goes.
 
 For UI development with hot reload, run the backend as above and `npm run dev` in `frontend/`
 (port 5173, proxying `/api` to 8765).

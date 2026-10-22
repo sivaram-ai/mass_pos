@@ -70,7 +70,7 @@ public class DatabaseBackups {
 
     /** A complete copy, taken without stopping the till. */
     public BackupFile backUpNow() {
-        return backUpAs("pos-" + STAMP.format(ZonedDateTime.now(IndiaTime.ZONE)));
+        return backUpInto(folder(), "pos-" + STAMP.format(ZonedDateTime.now(IndiaTime.ZONE)));
     }
 
     public List<BackupFile> list() {
@@ -115,7 +115,7 @@ public class DatabaseBackups {
             throw new IllegalArgumentException("There is no backup called \"" + name + "\" in " + folder());
         }
         refuseUnlessATillDatabase(chosen);
-        BackupFile safety = backUpAs("before-restore-" + STAMP.format(ZonedDateTime.now(IndiaTime.ZONE)));
+        BackupFile safety = backUpInto(folder(), "before-restore-" + STAMP.format(ZonedDateTime.now(IndiaTime.ZONE)));
         try {
             Files.copy(chosen, dataDir.resolve(PENDING), StandardCopyOption.REPLACE_EXISTING);
             Files.writeString(dataDir.resolve(PENDING + ".from"), name);
@@ -167,15 +167,19 @@ public class DatabaseBackups {
         }
     }
 
-    private BackupFile backUpAs(String baseName) {
+    /**
+     * A complete copy in a folder of the caller's choosing, so that the copy kept outside the
+     * till's own folder is taken the same safe way as the ones on the settings screen.
+     */
+    public BackupFile backUpInto(Path folder, String baseName) {
         try {
-            Files.createDirectories(folder());
+            Files.createDirectories(folder);
         } catch (IOException e) {
-            throw new UncheckedIOException("Cannot create " + folder(), e);
+            throw new UncheckedIOException("Cannot create " + folder, e);
         }
-        Path file = folder().resolve(baseName + ".db");
+        Path file = folder.resolve(baseName + ".db");
         for (int attempt = 2; Files.exists(file); attempt++) {
-            file = folder().resolve(baseName + "-" + attempt + ".db");
+            file = folder.resolve(baseName + "-" + attempt + ".db");
         }
         // VACUUM INTO refuses an existing file, which is why the name is made unique first.
         jdbc.execute("VACUUM INTO '" + file.toAbsolutePath().toString().replace("'", "''") + "'");
