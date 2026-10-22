@@ -37,7 +37,7 @@ type Draft = {
 
 const EMPTY: Draft = {
   sku: '', barcode: '', name: '', hsnCode: '', unit: 'NOS',
-  sellingPrice: '', mrp: '', taxInclusive: true, gstRateBp: 1800, cessRateBp: 0, billWithoutStock: false,
+  sellingPrice: '', mrp: '', taxInclusive: true, gstRateBp: 1800, cessRateBp: 0, billWithoutStock: true,
 }
 
 function draftOf(product: Product): Draft {
