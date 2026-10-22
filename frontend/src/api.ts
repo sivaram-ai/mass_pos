@@ -116,6 +116,48 @@ export const api = {
   delete: <T,>(path: string) => request<T>('DELETE', path),
 }
 
+function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'X-POS-Client': 'mass-pos-ui' }
+  const token = savedToken()
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+  return headers
+}
+
+/**
+ * Saves a CSV the server built. A plain link cannot carry the bearer token, so the file is
+ * fetched like any other call and handed to the browser as a blob under a name of our choosing.
+ */
+export async function downloadCsv(path: string, filename: string): Promise<void> {
+  const response = await fetch(path, { headers: authHeaders() })
+  const text = await response.text()
+  if (!response.ok) {
+    throw new ApiError(response.status, messageOf(text ? safeParse(text) : null, response.status), {})
+  }
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+/** Sends a sheet the shop picked. Field errors come back the same way a form's do. */
+export async function uploadCsv<T>(path: string, csv: string): Promise<T> {
+  const headers = authHeaders()
+  headers['Content-Type'] = 'text/csv'
+  const response = await fetch(path, { method: 'POST', headers, body: csv })
+  const text = await response.text()
+  const payload = text ? safeParse(text) : null
+  if (!response.ok) {
+    const errors = (payload as { errors?: Record<string, string> } | null)?.errors
+    throw new ApiError(response.status, messageOf(payload, response.status),
+      errors && typeof errors === 'object' ? errors : {})
+  }
+  return payload as T
+}
+
 /** 1234567 paise → "₹12,345.67", grouped the Indian way (lakh, crore). */
 export function rupees(paise: number): string {
   return (paise < 0 ? '-₹' : '₹') + plainRupees(Math.abs(paise))

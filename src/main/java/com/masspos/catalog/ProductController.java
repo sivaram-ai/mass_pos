@@ -1,11 +1,15 @@
 package com.masspos.catalog;
 
 import com.masspos.auth.RequiresRole;
+import com.masspos.common.Csv;
+import com.masspos.common.IndiaTime;
 import com.masspos.inventory.InventoryService;
 import com.masspos.user.UserRole;
 import com.masspos.web.FieldRejectedException;
 import jakarta.persistence.EntityNotFoundException;
+import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Valid;
+import jakarta.validation.Validator;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -14,7 +18,10 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 import org.springframework.data.domain.Limit;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -26,8 +33,12 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /** The catalogue. Search is what the billing screen hits on every keystroke, so it stays cheap. */
@@ -39,10 +50,16 @@ public class ProductController {
 
     private final ProductRepository products;
     private final InventoryService inventory;
+    private final Validator validator;
 
-    public ProductController(ProductRepository products, InventoryService inventory) {
+    public ProductController(ProductRepository products, InventoryService inventory, Validator validator) {
         this.products = products;
         this.inventory = inventory;
+        this.validator = validator;
+    }
+
+    /** @param added rows whose code was not already in the catalogue */
+    public record ImportResult(int added, int updated) {
     }
 
     public record ProductView(UUID id, String sku, String barcode, String name, String hsnCode, UnitOfMeasure unit,
@@ -93,6 +110,70 @@ public class ProductController {
         return ProductView.of(product, inventory.onHand(id));
     }
 
+    /**
+     * The whole catalogue as a sheet. A shop with four hundred items would rather reprice them in
+     * Excel than one dialog at a time, and this is the file the load button takes back.
+     */
+    @GetMapping(value = "/export", produces = "text/csv")
+    @Transactional(readOnly = true)
+    public ResponseEntity<String> export() {
+        List<Product> all = products.findAllByActiveTrueOrderByNameAsc();
+        Map<UUID, Long> stock = inventory.onHandFor(all.stream().map(Product::getId).toList());
+        String csv = ProductCsv.write(all.stream()
+                .map(product -> ProductView.of(product, stock.getOrDefault(product.getId(), 0L)))
+                .toList());
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"products-" + LocalDate.now(IndiaTime.ZONE) + ".csv\"")
+                .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
+                .body(Csv.EXCEL_BOM + csv);
+    }
+
+    /**
+     * Loads a sheet back. An item whose code is already in the catalogue is updated, one whose
+     * code is new is added, and nothing is touched at all unless every row is good: a catalogue
+     * half loaded, with row 40 refused, is worse to untangle than a refusal naming the rows.
+     */
+    @PostMapping(value = "/import", consumes = "text/csv")
+    @RequiresRole({UserRole.MANAGER})
+    @Transactional
+    public ImportResult load(@RequestBody String csv) {
+        List<SaveProductRequest> rows = ProductCsv.read(csv);
+        List<String> problems = new ArrayList<>();
+        for (int index = 0; index < rows.size(); index++) {
+            int line = index + 2; // the headings are row 1
+            for (ConstraintViolation<SaveProductRequest> broken : validator.validate(rows.get(index))) {
+                problems.add("row " + line + ": " + broken.getPropertyPath() + " " + broken.getMessage());
+            }
+        }
+        if (!problems.isEmpty()) {
+            throw ProductCsv.refuse(problems);
+        }
+        int added = 0;
+        for (SaveProductRequest row : rows) {
+            added += apply(row) ? 1 : 0;
+        }
+        return new ImportResult(added, rows.size() - added);
+    }
+
+    /** @return true when the row added an item rather than changing one */
+    private boolean apply(SaveProductRequest request) {
+        Optional<Product> found = products.findBySkuIgnoreCase(request.sku().trim());
+        checkPriceAndBarcode(found.map(Product::getId).orElse(null), request);
+        Product product = found.orElseGet(() -> new Product(request.sku().trim(), request.name().trim(),
+                request.hsnCode(), request.unit(), request.sellingPricePaise(), request.mrpPaise(),
+                request.taxInclusive(), request.gstRateBp()));
+        product.describe(request.name().trim(), request.hsnCode(), request.unit());
+        product.reprice(request.sellingPricePaise(), request.mrpPaise());
+        product.changeTax(request.gstRateBp(), request.cessRateBp(), request.taxInclusive());
+        product.assignBarcode(request.barcodeOrNull());
+        product.allowBillingWithoutStock(request.billWithoutStock());
+        if (found.isEmpty()) {
+            products.save(product);
+            return true;
+        }
+        return false;
+    }
     @PostMapping
     @RequiresRole({UserRole.MANAGER})
     @ResponseStatus(HttpStatus.CREATED)

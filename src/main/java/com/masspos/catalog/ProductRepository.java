@@ -38,4 +38,7 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
     List<Product> search(@Param("text") String text, Limit limit);
 
     List<Product> findByActiveTrueOrderByNameAsc(Limit limit);
+
+    /** The whole catalogue, for the sheet the shop edits in Excel. */
+    List<Product> findAllByActiveTrueOrderByNameAsc();
 }

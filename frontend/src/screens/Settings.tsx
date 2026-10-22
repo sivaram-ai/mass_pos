@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { api, fieldErrorsOf, messageOfFailure } from '../api'
+import { useEffect, useRef, useState } from 'react'
+import { api, downloadCsv, fieldErrorsOf, messageOfFailure, uploadCsv } from '../api'
 import type { Role, SettingsView, ShopSettingsForm } from '../types'
 import { Banner, Button, Empty, errorFor, Field, inputClass, Panel } from '../components/ui'
 import PrinterPanel from '../components/PrinterPanel'
@@ -49,6 +49,7 @@ export default function Settings({ role, settings, onSaved, onToast }: {
   const [busy, setBusy] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [saveError, setSaveError] = useState<string | null>(null)
+  const fileBox = useRef<HTMLInputElement>(null)
 
   useEffect(() => setForm(settings?.shop ?? null), [settings])
 
@@ -75,6 +76,29 @@ export default function Settings({ role, settings, onSaved, onToast }: {
     }
   }
 
+  /**
+   * Fills the form and saves nothing. Whoever loaded the file sees what arrived and presses Save,
+   * which is where the GSTIN, CIN and FSSAI checks happen and where their errors are shown.
+   */
+  const loadFromFile = async (file: File) => {
+    try {
+      setForm(await uploadCsv<ShopSettingsForm>('/api/settings/import', await file.text()))
+      setErrors({})
+      setSaveError(null)
+      onToast({ tone: 'good', text: `Read ${file.name}. Check the details, then press Save settings.` })
+    } catch (failure) {
+      onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not read that file') })
+    }
+  }
+
+  const extract = async () => {
+    try {
+      await downloadCsv('/api/settings/export', `shop-details-${new Date().toISOString().slice(0, 10)}.csv`)
+    } catch (failure) {
+      onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not make the file') })
+    }
+  }
+
   const err = (field: string) => errorFor(errors, field)
 
   return (
@@ -83,8 +107,32 @@ export default function Settings({ role, settings, onSaved, onToast }: {
         title="Shop details"
         className="xl:col-span-2"
         actions={canEdit
-          ? <Button tone="primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save settings'}</Button>
-          : <span className="text-xs text-slate-500">Only an admin can change these</span>}
+          ? (
+            <div className="flex items-center gap-2">
+              <input
+                ref={fileBox}
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={(event) => {
+                  const chosen = event.target.files?.[0]
+                  event.target.value = '' // so picking the same file again still counts as a change
+                  if (chosen) {
+                    void loadFromFile(chosen)
+                  }
+                }}
+              />
+              <Button onClick={() => fileBox.current?.click()}
+                      title="Fill these details from a sheet. Nothing is saved until you press Save.">
+                Load from file
+              </Button>
+              <Button onClick={() => void extract()}
+                      title="Save the shop details as a sheet, to set another till up from">
+                Extract company details
+              </Button>
+              <Button tone="primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save settings'}</Button>
+            </div>
+          )          : <span className="text-xs text-slate-500">Only an admin can change these</span>}
       >
         {saveError && (
           <div className="mb-3">

@@ -1,19 +1,27 @@
 package com.masspos.settings;
 
 import com.masspos.auth.RequiresRole;
+import com.masspos.common.Csv;
+import com.masspos.common.IndiaTime;
 import com.masspos.config.PosProperties;
 import com.masspos.terminal.TerminalRepository;
 import com.masspos.terminal.TerminalType;
 import com.masspos.user.UserRole;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 
 /** The settings screen: shop identity, GST details, receipt text, service contact, and the tills. */
@@ -58,6 +66,31 @@ public class SettingsController {
         return viewOf(settings.update(form));
     }
 
+    /**
+     * The shop's details as a sheet. Setting a second till up, or handing the lot to an accountant,
+     * beats reading sixteen fields off one screen and typing them into another.
+     */
+    @GetMapping(value = "/export", produces = "text/csv")
+    @Transactional(readOnly = true)
+    public ResponseEntity<String> export() {
+        String csv = ShopSettingsCsv.write(viewOf(settings.current()).shop());
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"shop-details-" + LocalDate.now(IndiaTime.ZONE) + ".csv\"")
+                .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
+                .body(Csv.EXCEL_BOM + csv);
+    }
+
+    /**
+     * Reads a sheet into the form on screen and saves nothing. Whoever loaded it sees what arrived
+     * and presses Save, which is where the GSTIN, CIN and FSSAI checks happen - the same place they
+     * happen when the details are typed by hand, and the same place the errors are shown.
+     */
+    @PostMapping(value = "/import", consumes = "text/csv")
+    @RequiresRole({UserRole.ADMIN})
+    public ShopSettingsForm load(@RequestBody String csv) {
+        return ShopSettingsCsv.read(csv);
+    }
     private SettingsView viewOf(ShopSettings shop) {
         ShopSettingsForm form = new ShopSettingsForm(shop.getLegalName(), shop.getTradeName(), shop.getGstin(),
                 shop.addressLines(), shop.getPhone(), shop.getEmail(), shop.getWebsite(), shop.getCin(),

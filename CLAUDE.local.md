@@ -369,17 +369,17 @@ folder and everything under it, so that is the only copy that survives one.
 
 ### Installer and the desktop shell
 
-- **The shortcut runs `DesktopLauncher`, not the server.** It probes the till''s port, starts
+- **The shortcut runs `DesktopLauncher`, not the server.** It probes the till's port, starts
   `GoRockitPOS-Server.exe` when nothing answers, waits for the port, then opens Edge - Chrome,
   then the default browser - with `--app=`. Clicking it again with the till up costs one connect.
 - **Two jpackage traps, each of which cost a build:**
   - `--main-class` on the command line is inherited by an added launcher. Passing it made the
     server a second copy of the desktop launcher, which started another server, eight deep.
-  - An added launcher inherits the main application''s main class unless its own properties name
+  - An added launcher inherits the main application's main class unless its own properties name
     one, so `build-installer.ps1` reads `Main-Class` out of the repackaged jar and writes it into
     `target\server-launcher.properties`. Never hardcode `JarLauncher`: Boot has moved it once.
   - `DesktopLauncher` marks the process it starts and refuses to run if it finds that mark on
-    itself, so a mispackaged build gives one dialog instead of filling a till''s memory.
+    itself, so a mispackaged build gives one dialog instead of filling a till's memory.
 - **`--java-options` belongs on the server launcher, not the command line.** The shell is a
   short-lived JVM with no use for a 512 MB pre-touched heap, and the command line would hand the
   options to both.
@@ -387,14 +387,14 @@ folder and everything under it, so that is the only copy that survives one.
   the whole folder where the installer had created it, `data` left behind where the folder
   already existed. Treat the data as gone - which is what `OffsiteBackups` exists for.
 - **The program cannot be installed a level down** (`--install-dir GoRockitPOS\program`), which
-  would have put `data` out of the uninstaller''s reach: WiX fails with ICE64, the intermediate
+  would have put `data` out of the uninstaller's reach: WiX fails with ICE64, the intermediate
   user-profile directory is not in the RemoveFile table, and jpackage passes no `-sice:` through.
 - **Windows refuses the same app version over itself** (error 1638), so a rebuild for a till that
   already has one needs a new `-Version` or an uninstall first.
 - **`DataDirMigration` runs from `main`, before Spring.** By the time any bean exists, logging has
   created the new data folder and the datasource is about to create an empty `pos.db` in it.
 - **The offsite folder is worked out from the data directory**, not named outright, so the
-  integration tests write under `target\` instead of into the developer''s own AppData.
+  integration tests write under `target\` instead of into the developer's own AppData.
 
 ## SQLite notes
 - The URL pragmas (`WAL`, `synchronous=FULL`, `transaction_mode=IMMEDIATE`, `foreign_keys=true`,

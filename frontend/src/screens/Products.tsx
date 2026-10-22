@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { api, fieldErrorsOf, messageOfFailure, paiseFromRupees, percent, quantity, rupees } from '../api'
+import {
+  api, downloadCsv, fieldErrorsOf, messageOfFailure, paiseFromRupees, percent, quantity, rupees, uploadCsv,
+} from '../api'
 import type { Product, Unit } from '../types'
 import { UNIT_NAMES } from '../types'
 import {
@@ -67,6 +69,7 @@ export default function Products({ onToast }: { onToast: Toast }) {
   const [editing, setEditing] = useState<{ id: string | null; draft: Draft } | null>(null)
   const [stopping, setStopping] = useState<Product | null>(null)
   const [saveErrors, setSaveErrors] = useState<{ message: string; fields: Record<string, string> } | null>(null)
+  const fileBox = useRef<HTMLInputElement>(null)
   const list = useRef<HTMLDivElement>(null)
   const searchBox = useRef<HTMLInputElement>(null)
   const rows = useRef(new Map<string, HTMLTableRowElement>())
@@ -82,6 +85,28 @@ export default function Products({ onToast }: { onToast: Toast }) {
     const timer = setTimeout(load, 150)
     return () => clearTimeout(timer)
   }, [load])
+
+  /** A sheet of items: codes already in the catalogue are repriced, new codes are added. */
+  const loadFromFile = async (file: File) => {
+    try {
+      const done = await uploadCsv<{ added: number; updated: number }>('/api/products/import', await file.text())
+      onToast({
+        tone: 'good',
+        text: `${done.added} added and ${done.updated} updated from ${file.name}`,
+      })
+      load()
+    } catch (failure) {
+      onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not read that file') })
+    }
+  }
+
+  const extract = async () => {
+    try {
+      await downloadCsv('/api/products/export', `products-${new Date().toISOString().slice(0, 10)}.csv`)
+    } catch (failure) {
+      onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not make the file') })
+    }
+  }
 
   // The cursor starts in the list, so the arrows work the moment the screen opens.
   useEffect(() => {
@@ -223,6 +248,27 @@ export default function Products({ onToast }: { onToast: Toast }) {
               onKeyDown={onSearchKeyDown}
             />
           </KeyBox>
+          <input
+            ref={fileBox}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={(event) => {
+              const chosen = event.target.files?.[0]
+              event.target.value = '' // so picking the same file again still counts as a change
+              if (chosen) {
+                void loadFromFile(chosen)
+              }
+            }}
+          />
+          <Button className="whitespace-nowrap px-2 py-1" onClick={() => fileBox.current?.click()}
+                  title="Add or reprice items from a sheet. Start from one Extract products made.">
+            Load from file
+          </Button>
+          <Button className="whitespace-nowrap px-2 py-1" onClick={() => void extract()}
+                  title="Save the whole catalogue as a sheet you can edit in Excel">
+            Extract products
+          </Button>
           <Button tone="primary" className="whitespace-nowrap px-2 py-1" hint={ADD_KEY}
                   onClick={() => openEditor(null, EMPTY)}>
             Add product

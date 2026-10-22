@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, percent, quantity, rupees } from '../api'
 import type { AuditEntry, DayReport, GstReport } from '../types'
-import { Empty, inputClass, Panel } from '../components/ui'
+import { Button, Empty, inputClass, Panel } from '../components/ui'
 import type { Toast } from '../App'
 
 type Tab = 'day' | 'gst' | 'audit'
@@ -17,6 +17,8 @@ function firstOfMonth(): string {
 export default function Reports({ onToast }: { onToast: Toast }) {
   const [tab, setTab] = useState<Tab>('day')
   const [date, setDate] = useState(today())
+  const [dayTo, setDayTo] = useState(today())
+  const [dayRange, setDayRange] = useState(false)
   const [from, setFrom] = useState(firstOfMonth())
   const [to, setTo] = useState(today())
   const [day, setDay] = useState<DayReport | null>(null)
@@ -29,13 +31,13 @@ export default function Reports({ onToast }: { onToast: Toast }) {
 
   useEffect(() => {
     if (tab === 'day') {
-      api.get<DayReport>(`/api/reports/day?date=${date}`).then(setDay).catch(fail)
+      api.get<DayReport>(`/api/reports/day?from=${date}&to=${dayRange ? dayTo : date}`).then(setDay).catch(fail)
     } else if (tab === 'gst') {
       api.get<GstReport>(`/api/reports/gst?from=${from}&to=${to}`).then(setGst).catch(fail)
     } else {
       api.get<AuditEntry[]>(`/api/reports/audit?from=${from}&to=${to}&limit=300`).then(setAudit).catch(fail)
     }
-  }, [tab, date, from, to, fail])
+  }, [tab, date, dayRange, dayTo, from, to, fail])
 
   return (
     <div className="space-y-4">
@@ -55,8 +57,28 @@ export default function Reports({ onToast }: { onToast: Toast }) {
             ))}
         </div>
         {tab === 'day' ? (
-          <input type="date" className={`${inputClass} w-auto`} value={date}
-                 onChange={(event) => setDate(event.target.value)} />
+          <div className="flex items-center gap-2">
+            <input type="date" className={`${inputClass} w-auto`} value={date}
+                   onChange={(event) => setDate(event.target.value)} />
+            {dayRange && (
+              <>
+                <span className="text-sm text-slate-400">to</span>
+                <input type="date" className={`${inputClass} w-auto`} value={dayTo}
+                       onChange={(event) => setDayTo(event.target.value)} />
+              </>
+            )}
+            <Button
+              onClick={() => {
+                if (!dayRange) {
+                  setDayTo(date)
+                }
+                setDayRange(!dayRange)
+              }}
+              title={dayRange ? 'Back to a single day' : 'Add the takings up over a stretch of days'}
+            >
+              {dayRange ? 'Single day' : 'Choose date range'}
+            </Button>
+          </div>
         ) : (
           <div className="flex items-center gap-2">
             <input type="date" className={`${inputClass} w-auto`} value={from}

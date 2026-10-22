@@ -84,7 +84,7 @@ Write-Host "    server launcher runs $serverMain"
 # mass-pos-launcher.jar's manifest, and passing it here would hand it to the added launcher too.
 jpackage --type exe --name GoRockitPOS --app-version $Version --vendor "GoGo Digital Services" `
   --input target\jpackage-input --main-jar mass-pos-launcher.jar `
-  --runtime-image target\runtime `
+  --runtime-image target\runtime --icon tools\gorockit.ico `
   --add-launcher GoRockitPOS-Server=$serverProps `
   --install-dir GoRockitPOS `
   --win-per-user-install --win-menu --win-menu-group "GO RockIt" --win-shortcut `

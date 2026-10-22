@@ -3,6 +3,7 @@ package com.masspos.reports;
 import com.masspos.auth.RequiresRole;
 import com.masspos.common.IndiaTime;
 import com.masspos.user.UserRole;
+import com.masspos.web.FieldRejectedException;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -26,11 +27,24 @@ public class ReportController {
         this.reports = reports;
     }
 
-    /** Closing report for one day: takings, tender split, who billed, and what sold. */
+    /**
+     * Closing report: takings, tender split, who billed, and what sold. One day by default, or any
+     * stretch of them - a week, a month, a festival - with from and to.
+     *
+     * @param date a single day, kept for anything that still asks that way; from and to win
+     */
     @GetMapping("/day")
     public Reports.DayReport day(
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-        return reports.day(date == null ? LocalDate.now(IndiaTime.ZONE) : date);
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        LocalDate one = date == null ? LocalDate.now(IndiaTime.ZONE) : date;
+        LocalDate start = from == null ? one : from;
+        LocalDate end = to == null ? (from == null ? one : from) : to;
+        if (end.isBefore(start)) {
+            throw new FieldRejectedException("to", "is before the date the range starts on");
+        }
+        return reports.day(start, end);
     }
 
     /** Rate-wise and HSN-wise figures for a GSTR-1 filing period. */

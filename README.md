@@ -256,12 +256,13 @@ is not a loopback name are refused. Together these stop a web page open on the t
 | Sign-in | `POST /api/auth/login`, `/logout`, `/change-pin`, `GET /api/auth/me` |
 | Staff | `GET/POST /api/users`, `PUT /api/users/{id}`, `POST /api/users/{id}/pin` |
 | Catalogue | `GET /api/products?q=`, `POST /api/products`, `PUT /api/products/{id}`, `POST /api/products/{id}/deactivate` |
+| Catalogue as a sheet | `GET /api/products/export` (CSV out), `POST /api/products/import` (CSV in, all rows or none) |
 | Stock | `GET /api/stock`, `POST /api/stock/receipts`, `/adjustments`, `/damages` |
 | Billing | `POST /api/sales`, `POST /api/sales/quote`, `GET /api/invoices`, `GET /api/invoices/last`, `GET /api/invoices/lookup?number=`, `GET /api/invoices/{id}`, `GET /api/invoices/{id}/history`, `POST /api/invoices/{id}/cancel`, `POST /api/invoices/{id}/replace` (edit), `POST /api/invoices/{id}/receipt` |
 | Returns | `GET /api/invoices/{id}/returnable`, `POST /api/returns/quote`, `POST /api/returns`, `GET /api/returns`, `GET /api/returns/lookup?number=`, `GET /api/returns/{id}`, `POST /api/returns/{id}/receipt` |
 | Held bills | `GET/POST /api/holds`, `DELETE /api/holds/{id}` |
-| Reports | `GET /api/reports/day`, `/gst`, `/audit` |
-| Settings | `GET/PUT /api/settings` |
+| Reports | `GET /api/reports/day?from=&to=`, `/gst`, `/audit` |
+| Settings | `GET/PUT /api/settings`, `GET /api/settings/export` (CSV out), `POST /api/settings/import` (CSV into the form, saved by PUT) |
 | Licence | `GET /api/license` (any signed-in user), `POST /api/license` (admin: install or renew a key) |
 | Hardware | `GET /api/hardware/printer/status`, `/printer/settings`, `/serial-ports`, `PUT /api/hardware/printer/settings`, `POST /api/hardware/printer/test-page`, `/drawer/open` |
 

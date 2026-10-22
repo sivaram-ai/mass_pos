@@ -366,7 +366,9 @@ export interface PrinterStatus {
 }
 
 export interface DayReport {
-  date: string
+  /** The same date twice for a single day; a stretch of them when a range was asked for. */
+  from: string
+  to: string
   bills: number
   cancelledBills: number
   returns: number
