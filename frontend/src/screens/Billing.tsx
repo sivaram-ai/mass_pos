@@ -556,7 +556,13 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     }
   }
 
-  /** Empties the grid. Leaving an edit or a return this way changes nothing already issued. */
+  /**
+   * Empties the grid. Leaving an edit or a return this way changes nothing already issued.
+   *
+   * <p>Whatever emptied it - a bill taken, a bill held, a bill cleared - what comes next is a new
+   * bill, so the table and the steward are asked for again rather than carried over from the last
+   * one. Every way out of a bill goes through here, which is why the prompt lives here too.
+   */
   const clearBill = () => {
     replaceLines([])
     setCustomer(NO_CUSTOMER)
@@ -566,6 +572,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     modeRef.current = { kind: 'sale' }
     setMode({ kind: 'sale' })
     requestFocus(0, 'code')
+    startNextBill()
   }
 
   /** The checks every way of taking a bill shares. */
@@ -632,7 +639,6 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     })
     setLastBill(lastBillOf(sale.invoice))
     clearBill()
-    startNextBill()
     setError(null)
     onToast(sale.printed
       ? { tone: 'good', text: `Bill ${sale.invoice.invoiceNumber} taken and printed` }
