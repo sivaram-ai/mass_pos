@@ -20,8 +20,12 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3H | `WINDOWS` printer type: tills with no thermal printer bill through any installed driver printer, receipt-width on the sheet, QR drawn by the till | Done: 199 tests green, printed on a real Canon G3080 |
 | 3I | Printer chosen on screen (Settings > Printer): per-till `printer_settings` row seeded from `pos.properties`, device lists from the machine, connection swapped on the next job | Done |
 | L1 | Offline subscription licence per till: Ed25519-signed key bound to a hardware machine ID, warn/grace days, billing lock, Licence screen + banner, vendor `tools/license/LicenseTool.java` | Done: 172 tests green, real key verified on this PC |
+| 5A | Windows installer: jpackage + WiX 3.14, trimmed JDK 21 runtime, one file, `tools/build-installer.ps1` | Done: installed and run from the exe on this PC |
+| 5B | One folder per till, `%LOCALAPPDATA%\GoRockitPOS`, data in `data\`, with an automatic move from the old `MassPOS` folder | Done: 235 tests green, this PC's own till migrated |
+| 5C | Desktop shell: the shortcut starts the server when it is down, waits for it, and opens the screen in an Edge `--app` window | Done: driven from the installed shortcut |
+| 5D | A copy of the database, settings and licence outside the till's folder at every start and clean shutdown | Done: survived an uninstall that removed the program |
 | 4 | Counter → master sync over LAN (see [docs/multi-terminal-and-rbac.md](docs/multi-terminal-and-rbac.md)) | Designed, not built |
-| Later | Flyway migrations, cloud sync, composition scheme / bill of supply, desktop shell | Not started |
+| Later | Flyway migrations, cloud sync, composition scheme / bill of supply, periodic offsite copies, tray icon with Quit, single instance | Not started |
 
 ## UI notes (frontend/)
 
@@ -140,8 +144,14 @@ src/main/java/com/masspos/
 ├── PosApplication.java
 ├── config/              PosProperties (pos.data-dir, pos.terminal), SqliteDataSourceConfig,
 │                        FirstRunSetup (writes pos.properties template, warns on missing seller data),
-│                        SqliteDataSourceConfig (also swaps in a staged backup before the DB opens)
-├── backup/              DatabaseBackups (VACUUM INTO, staged restore), BackupController
+│                        SqliteDataSourceConfig (also swaps in a staged backup before the DB opens),
+│                        DataDirMigration (moves a pre-0.1.2 till's data folder in; runs from main)
+├── backup/              DatabaseBackups (VACUUM INTO, staged restore), BackupController,
+│                        OffsiteBackups + BackupProperties (the copy kept outside the till's
+│                        folder, written at every start and every clean shutdown)
+├── desktop/             DesktopLauncher (what the shortcut runs: finds or starts the server, then
+│                        opens the screen in an app window), PosPaths (one definition of where a
+│                        till keeps its program and its data, shared with the app)
 ├── common/              IndiaTime (Asia/Kolkata)
 ├── common/persistence/  BaseEntity, UuidV7 + @GeneratedUuidV7 + UuidV7IdGenerator, PosSqliteDialect, LocalDateIsoConverter
 ├── audit/               AuditRevision, AuditRevisionListener, AuditActor / AuditContext, AuditTrailGuard (triggers)
@@ -160,14 +170,21 @@ src/main/resources/      application.properties (defaults), pos-template.propert
 src/test/java/com/masspos/  TestFixtures, PersistenceIntegrationTest, HardwareApiIntegrationTest, + unit tests per package
 ```
 
-Runtime data lives in `pos.data-dir`: `%LOCALAPPDATA%\MassPOS` on Windows, `~/MassPOS` elsewhere,
-overridable with `POS_DATA_DIR`. It holds:
+A till is one folder. The installer puts the program in `%LOCALAPPDATA%\GoRockitPOS` and
+`pos.data-dir` defaults to its `data` subfolder; elsewhere it is `~/GoRockitPOS/data`.
+`POS_DATA_DIR` overrides it. It holds:
 
 - `pos.db` and its WAL files
 - `pos.properties`: per-till settings, loaded through `spring.config.import`; a template is written
   on first start
+- `license.lic`
 - `logs/`
+- `backups/`: the copies taken from the settings screen
 - `printer-out/`: FILE printer output
+
+Beside it, outside anything the installer owns, `%LOCALAPPDATA%\GoRockitPOS-backups` holds what
+`OffsiteBackups` writes at every start and every clean shutdown. Uninstalling deletes the till's
+folder and everything under it, so that is the only copy that survives one.
 
 ## Configuration model
 
@@ -181,6 +198,7 @@ overridable with `POS_DATA_DIR`. It holds:
   | `pos.company` | seller | `CompanyProperties` |
   | `pos.printer` | printer settings, **first start only** | `PrinterProperties` -> `printer_settings` |
   | `pos.receipt` | footer | `ReceiptProperties` |
+  | `pos.backup` | where the copy outside the till folder goes, and how many to keep | `BackupProperties` |
 
 - **A new setting** needs three things:
   - a record component
@@ -349,8 +367,36 @@ overridable with `POS_DATA_DIR`. It holds:
 - **Serial status reads must not call `flushIOBuffers()`**, which purges the unsent tail of the
   previous job.
 
-## SQLite notes
+### Installer and the desktop shell
 
+- **The shortcut runs `DesktopLauncher`, not the server.** It probes the till''s port, starts
+  `GoRockitPOS-Server.exe` when nothing answers, waits for the port, then opens Edge - Chrome,
+  then the default browser - with `--app=`. Clicking it again with the till up costs one connect.
+- **Two jpackage traps, each of which cost a build:**
+  - `--main-class` on the command line is inherited by an added launcher. Passing it made the
+    server a second copy of the desktop launcher, which started another server, eight deep.
+  - An added launcher inherits the main application''s main class unless its own properties name
+    one, so `build-installer.ps1` reads `Main-Class` out of the repackaged jar and writes it into
+    `target\server-launcher.properties`. Never hardcode `JarLauncher`: Boot has moved it once.
+  - `DesktopLauncher` marks the process it starts and refuses to run if it finds that mark on
+    itself, so a mispackaged build gives one dialog instead of filling a till''s memory.
+- **`--java-options` belongs on the server launcher, not the command line.** The shell is a
+  short-lived JVM with no use for a 512 MB pre-touched heap, and the command line would hand the
+  options to both.
+- **Uninstalling deletes the installed folder and everything under it.** Measured both ways here:
+  the whole folder where the installer had created it, `data` left behind where the folder
+  already existed. Treat the data as gone - which is what `OffsiteBackups` exists for.
+- **The program cannot be installed a level down** (`--install-dir GoRockitPOS\program`), which
+  would have put `data` out of the uninstaller''s reach: WiX fails with ICE64, the intermediate
+  user-profile directory is not in the RemoveFile table, and jpackage passes no `-sice:` through.
+- **Windows refuses the same app version over itself** (error 1638), so a rebuild for a till that
+  already has one needs a new `-Version` or an uninstall first.
+- **`DataDirMigration` runs from `main`, before Spring.** By the time any bean exists, logging has
+  created the new data folder and the datasource is about to create an empty `pos.db` in it.
+- **The offsite folder is worked out from the data directory**, not named outright, so the
+  integration tests write under `target\` instead of into the developer''s own AppData.
+
+## SQLite notes
 - The URL pragmas (`WAL`, `synchronous=FULL`, `transaction_mode=IMMEDIATE`, `foreign_keys=true`,
   `busy_timeout`) are explained in `application.properties` and tested.
 - `synchronous=FULL` is a deliberate durability choice: power cuts are routine in Indian retail.
@@ -441,11 +487,20 @@ till or a licence already in the field:
 | Kept as it is | Why |
 |---|---|
 | `com.masspos` packages, `mass-pos.jar`, `spring.application.name` | Internal names; renaming churns every file and changes the installed artifact |
-| `<data-dir>` `MassPOS` | A renamed folder orphans the shop's database, licence and settings |
 | Licence key prefix `MPL1`, the machine-ID salt | Changing either invalidates every licence already issued |
 | `X-POS-Client: mass-pos-ui` | The guard checks the header is present, not what it says |
 
+The data directory was on that list until 0.1.2, and came off it deliberately: a till is now one
+folder, `%LOCALAPPDATA%\GoRockitPOS`, with the shop's data in `data\`. `DataDirMigration` moves an
+older till's `%LOCALAPPDATA%\MassPOS` across on the first start after the upgrade, which is what
+made the rename safe. Renaming it again would need the same treatment.
+
 ## Open decisions and known gaps
+- **Offsite copies are taken at start and clean shutdown only.** A till left running for days and
+  then updated has a copy from the morning it was last started, and one killed from Task Manager
+  never writes the shutdown copy at all. A periodic copy while it runs would bound that; so would
+  a tray icon with Quit, so restarting no longer means Task Manager. Both are phase 9 in the
+  README roadmap.
 
 - **JSON old/new state**: Envers snapshots plus `_mod` flags. A JSON projection is planned in the
   audit-report API. Pending sign-off.
