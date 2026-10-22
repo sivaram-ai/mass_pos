@@ -406,6 +406,8 @@ docs/                    multi-terminal and RBAC design
 | 4 | React UI: billing, products, stock, bills, reports, staff, settings | Done |
 | 5 | Counter → master sync over the LAN | Designed |
 | 6 | Flyway migrations, cloud sync for multiple shops, composition scheme / bill of supply | Planned |
-| 7 | Desktop shell: open the browser on start, single instance, tray icon | Planned |
+| 7 | Desktop shell: the shortcut starts the till and opens it in its own window | Done |
+| 8 | Data safety: a copy of the database, settings and licence kept outside the till's folder, written at every start and every clean shutdown | Done |
+| 9 | Later: a periodic copy while the till runs, so an always-on till is never a whole session behind; a tray icon with Quit, so restarting does not mean Task Manager; single instance | Planned |
 | L1 | Offline subscription licence per till: hardware-bound signed key, warning and grace periods, vendor tool | Done |
 | L2 | Licence server: check-in when online, automatic renewal, block or re-key a machine, reused-key alerts | Planned |
