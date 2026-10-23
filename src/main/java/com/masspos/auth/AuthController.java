@@ -2,6 +2,8 @@ package com.masspos.auth;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import com.masspos.web.LocalApiGuard;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -9,6 +11,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -30,10 +35,27 @@ public class AuthController {
     }
 
     /** The only public endpoint besides the UI files. */
+    /**
+     * The counter a machine claims comes in as a header rather than in the body: the browser adds
+     * it to every request it makes, and sign-in is simply the one where it is acted on. Whether
+     * the machine is on the network is read from the connection, never from what it says about
+     * itself, so a counter cannot talk its way into being the server.
+     */
     @PostMapping("/login")
-    public LoginResponse login(@Valid @RequestBody LoginRequest request) {
-        AuthService.LoginResult result = auth.signIn(request.username(), request.pin());
+    public LoginResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest http) {
+        AuthService.LoginResult result = auth.signIn(request.username(), request.pin(),
+                http.getHeader(LocalApiGuard.COUNTER_HEADER), overTheNetwork(http));
         return new LoginResponse(result.token(), result.principal());
+    }
+
+    /** Loopback means the browser is on the server machine itself. */
+    private static boolean overTheNetwork(HttpServletRequest http) {
+        try {
+            return !InetAddress.getByName(http.getRemoteAddr()).isLoopbackAddress();
+        } catch (UnknownHostException unreadable) {
+            // Cannot tell, so treat it as a client: the stricter of the two answers.
+            return true;
+        }
     }
 
     @PostMapping("/logout")

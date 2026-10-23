@@ -13,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.MessageSourceResolvable;
 import org.springframework.dao.DataIntegrityViolationException;
+import com.masspos.client.ClientRefusedException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -82,6 +83,18 @@ public class ApiExceptionHandler {
     }
 
     /** Bad input that bean validation cannot express, e.g. a PIN that is too easy or a duplicate username. */
+    /**
+     * This machine may not bill here: no counter number, the server's own, or no place left. 403
+     * rather than 400, because nothing about the request is malformed - the answer would be the
+     * same however carefully it were retyped.
+     */
+    @ExceptionHandler(ClientRefusedException.class)
+    public ProblemDetail clientRefused(ClientRefusedException e) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, e.getMessage());
+        problem.setTitle("This counter cannot bill against that server");
+        return problem;
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ProblemDetail badRequest(IllegalArgumentException e) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.getMessage());

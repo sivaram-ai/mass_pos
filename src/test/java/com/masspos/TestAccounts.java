@@ -7,7 +7,8 @@ import com.masspos.user.UserRole;
 public final class TestAccounts {
 
     private static final String HANDOVER_PIN = "471102";
-    private static final String CHOSEN_PIN = "883914";
+    /** What the account ends up with, so a test can sign the same person in from another machine. */
+    public static final String CHOSEN_PIN = "883914";
 
     private TestAccounts() {
     }

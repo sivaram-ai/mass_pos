@@ -1,9 +1,9 @@
 package com.masspos.inventory;
 
+import com.masspos.client.CurrentCounter;
 import com.masspos.auth.AuthContext;
 import com.masspos.catalog.Product;
 import com.masspos.catalog.ProductRepository;
-import com.masspos.config.PosProperties;
 import com.masspos.user.User;
 import com.masspos.user.UserRepository;
 import org.springframework.stereotype.Service;
@@ -26,14 +26,14 @@ public class InventoryService {
     private final InventoryLedgerRepository ledger;
     private final ProductRepository products;
     private final UserRepository users;
-    private final PosProperties pos;
+    private final CurrentCounter counter;
 
     public InventoryService(InventoryLedgerRepository ledger, ProductRepository products, UserRepository users,
-                            PosProperties pos) {
+                            CurrentCounter counter) {
         this.ledger = ledger;
         this.products = products;
         this.users = users;
-        this.pos = pos;
+        this.counter = counter;
     }
 
     @Transactional(readOnly = true)
@@ -80,7 +80,7 @@ public class InventoryService {
                                        String note) {
         Product product = products.findById(productId)
                 .orElseThrow(() -> new IllegalArgumentException("No such product: " + productId));
-        return ledger.save(new InventoryLedgerEvent(product, type, deltaMilli, referenceId, pos.terminal().code(),
+        return ledger.save(new InventoryLedgerEvent(product, type, deltaMilli, referenceId, counter.code(),
                 Instant.now(), currentUser(), note));
     }
 

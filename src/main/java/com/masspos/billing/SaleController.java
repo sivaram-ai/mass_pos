@@ -1,7 +1,7 @@
 package com.masspos.billing;
 
+import com.masspos.client.CurrentCounter;
 import com.masspos.auth.RequiresRole;
-import com.masspos.config.PosProperties;
 import com.masspos.hardware.PrinterException;
 import com.masspos.hardware.ThermalPrinter;
 import com.masspos.license.RequiresLicense;
@@ -40,15 +40,15 @@ public class SaleController {
     private final InvoiceRepository invoices;
     private final ReceiptService receipts;
     private final ThermalPrinter printer;
-    private final PosProperties pos;
+    private final CurrentCounter counter;
 
     public SaleController(SaleService sales, InvoiceRepository invoices, ReceiptService receipts,
-                          ThermalPrinter printer, PosProperties pos) {
+                          ThermalPrinter printer, CurrentCounter counter) {
         this.sales = sales;
         this.invoices = invoices;
         this.receipts = receipts;
         this.printer = printer;
-        this.pos = pos;
+        this.counter = counter;
     }
 
     /**
@@ -109,7 +109,7 @@ public class SaleController {
     @RequiresRole({UserRole.CASHIER, UserRole.MANAGER, UserRole.AUDITOR})
     @Transactional(readOnly = true)
     public ResponseEntity<InvoiceView> last() {
-        return invoices.findFirstByTerminalCodeOrderByIssuedAtDesc(pos.terminal().code())
+        return invoices.findFirstByTerminalCodeOrderByIssuedAtDesc(counter.code())
                 .map(invoice -> ResponseEntity.ok(InvoiceView.of(invoice)))
                 .orElseGet(() -> ResponseEntity.noContent().build());
     }

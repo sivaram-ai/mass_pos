@@ -1,11 +1,11 @@
 package com.masspos.billing;
 
+import com.masspos.client.CurrentCounter;
 import com.masspos.auth.AuthContext;
 import com.masspos.catalog.Product;
 import com.masspos.catalog.ProductRepository;
 import com.masspos.common.IndiaTime;
 import com.masspos.common.Money;
-import com.masspos.config.PosProperties;
 import com.masspos.inventory.InventoryService;
 import com.masspos.inventory.LedgerEventType;
 import com.masspos.settings.ShopSettings;
@@ -44,11 +44,11 @@ public class SaleService {
     private final UserRepository users;
     private final InventoryService inventory;
     private final ShopSettingsService settings;
-    private final PosProperties pos;
+    private final CurrentCounter counter;
 
     public SaleService(InvoiceRepository invoices, InvoiceSequenceRepository sequences, CreditNoteRepository creditNotes,
                        ProductRepository products, UserRepository users, InventoryService inventory,
-                       ShopSettingsService settings, PosProperties pos) {
+                       ShopSettingsService settings, CurrentCounter counter) {
         this.invoices = invoices;
         this.sequences = sequences;
         this.creditNotes = creditNotes;
@@ -56,7 +56,7 @@ public class SaleService {
         this.users = users;
         this.inventory = inventory;
         this.settings = settings;
-        this.pos = pos;
+        this.counter = counter;
     }
 
     /**
@@ -119,7 +119,7 @@ public class SaleService {
         // The new number is reserved first so the old bill is cancelled once, with a reason naming its
         // replacement: a cancelled bill is frozen, so the reason cannot be filled in afterwards.
         long sequenceNo = reserveNumber(today);
-        String replacementNumber = InvoiceNumbers.format(pos.terminal().code(),
+        String replacementNumber = InvoiceNumbers.format(counter.code(),
                 InvoiceNumbers.financialYearCode(today), sequenceNo);
         original.cancel(cashier, reasonFor(request.reason(), replacementNumber), Instant.now());
         // Its stock goes back before the new lines are checked against the shelf.
@@ -204,7 +204,7 @@ public class SaleService {
     public InvoiceView lookup(String number) {
         String text = number == null ? "" : number.trim().toUpperCase(java.util.Locale.ROOT);
         String full = text.matches("\\d{1,9}")
-                ? InvoiceNumbers.format(pos.terminal().code(),
+                ? InvoiceNumbers.format(counter.code(),
                         InvoiceNumbers.financialYearCode(LocalDate.now(IndiaTime.ZONE)), Long.parseLong(text))
                 : text;
         return invoices.findByInvoiceNumber(full)
@@ -214,7 +214,7 @@ public class SaleService {
 
     /** The next bill number of this till. Only inside the transaction that issues the bill. */
     private long reserveNumber(LocalDate today) {
-        String terminalCode = pos.terminal().code();
+        String terminalCode = counter.code();
         String financialYear = InvoiceNumbers.financialYearCode(today);
         return sequences.findByTerminalCodeAndFinancialYear(terminalCode, financialYear)
                 .orElseGet(() -> sequences.save(new InvoiceSequence(terminalCode, financialYear)))
@@ -253,7 +253,7 @@ public class SaleService {
                           List<SaleRequest.Line> lines, String buyerGstin, String buyerName,
                           String requestedPlaceOfSupply, boolean parcel, String tableNo, String supplierId) {
         SellerDetails seller = SellerDetails.from(shop);
-        String terminalCode = pos.terminal().code();
+        String terminalCode = counter.code();
         boolean gst = seller.isGstRegistered();
         if (!gst && blankToNull(buyerGstin) != null) {
             throw new IllegalArgumentException("This shop has no GSTIN, so its bills carry no GST for a customer to"

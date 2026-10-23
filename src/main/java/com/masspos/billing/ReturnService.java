@@ -1,12 +1,12 @@
 package com.masspos.billing;
 
+import com.masspos.client.CurrentCounter;
 import com.masspos.auth.AuthContext;
 import com.masspos.catalog.Product;
 import com.masspos.catalog.ProductRepository;
 import com.masspos.catalog.UnitOfMeasure;
 import com.masspos.common.IndiaTime;
 import com.masspos.common.Money;
-import com.masspos.config.PosProperties;
 import com.masspos.inventory.InventoryService;
 import com.masspos.inventory.LedgerEventType;
 import com.masspos.settings.ShopSettings;
@@ -42,12 +42,12 @@ public class ReturnService {
     private final UserRepository users;
     private final InventoryService inventory;
     private final ShopSettingsService settings;
-    private final PosProperties pos;
+    private final CurrentCounter counter;
 
     public ReturnService(InvoiceRepository invoices, CreditNoteRepository creditNotes,
                          CreditNoteItemRepository creditNoteItems, CreditNoteSequenceRepository sequences,
                          ProductRepository products, UserRepository users, InventoryService inventory,
-                         ShopSettingsService settings, PosProperties pos) {
+                         ShopSettingsService settings, CurrentCounter counter) {
         this.invoices = invoices;
         this.creditNotes = creditNotes;
         this.creditNoteItems = creditNoteItems;
@@ -56,7 +56,7 @@ public class ReturnService {
         this.users = users;
         this.inventory = inventory;
         this.settings = settings;
-        this.pos = pos;
+        this.counter = counter;
     }
 
     /**
@@ -107,7 +107,7 @@ public class ReturnService {
         SellerDetails seller = SellerDetails.from(shop);
         Priced priced = price(request, shop);
 
-        String terminalCode = pos.terminal().code();
+        String terminalCode = counter.code();
         LocalDate today = LocalDate.now(IndiaTime.ZONE);
         String financialYear = InvoiceNumbers.financialYearCode(today);
         CreditNoteSequence sequence = sequences.findByTerminalCodeAndFinancialYear(terminalCode, financialYear)
@@ -155,7 +155,7 @@ public class ReturnService {
     public CreditNoteView lookup(String number) {
         String text = number == null ? "" : number.trim().toUpperCase(java.util.Locale.ROOT);
         String full = text.matches("R?\\d{1,9}")
-                ? InvoiceNumbers.formatCreditNote(pos.terminal().code(),
+                ? InvoiceNumbers.formatCreditNote(counter.code(),
                         InvoiceNumbers.financialYearCode(LocalDate.now(IndiaTime.ZONE)),
                         Long.parseLong(text.replace("R", "")))
                 : text;

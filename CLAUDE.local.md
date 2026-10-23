@@ -320,6 +320,21 @@ folder and everything under it, so that is the only copy that survives one.
     counter issued it is part of the identity. `/api/invoices/lookup` already takes either.
 - **Dates.** Business dates and times use `IndiaTime.ZONE`, never the JVM default.
 - **Sync bookkeeping stays off audited entities.** Use an unaudited outbox table.
+- **"Which till" is `CurrentCounter.code()`, never `pos.terminal().code()`.** With counters billing
+  against a server, the machine holding the database is not the machine ringing up the bill. Bill
+  and credit-note numbering, held bills, stock ledger origin, "last bill on this till" and audit
+  revisions all go through `CurrentCounter`, which answers from the signed-in session and falls
+  back to this machine's own code when nobody is signed in. `pos.terminal().code()` now means only
+  "this physical machine" - its printer, its drawer, its folder.
+  - The counter is fixed **at sign-in** and kept on the `AuthToken`. Not read from a header per
+    request (a signed-in browser could then renumber its own bills) and not from the client's IP
+    (DHCP changes it).
+- **`pos.clients.max` is the one switch for a shop server.** 0 (the default, and every till shipped
+  so far) = loopback only, nothing on the network can reach it. Above 0, `ServerBinding` binds
+  0.0.0.0 and `LocalApiGuard` widens its Host check from loopback to this machine's own addresses
+  and names - never to anything else, so DNS rebinding is still refused. `ClientRegistry.admit`
+  caps the count at sign-in and refuses a counter that claims the server's own code, which would
+  reuse bill numbers.
 
 ### Licensing
 
