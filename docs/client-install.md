@@ -1,7 +1,16 @@
 # GO RockIt: installing at a shop
 
-For the person who sets up a till. The vendor builds the installer with
-`tools\build-installer.ps1`; this page is what to do with the `GoRockitPOS-<version>.exe` it produces.
+For the person who sets up a till. The vendor builds the installers with
+`tools\build-installer.ps1`, which produces **two** files:
+
+| File | Install it on | Holds |
+|---|---|---|
+| `GoRockitPOS-<version>.exe` | One PC in the shop - the server | The shop's database, its licence, and a till of its own |
+| `GoRockitPOS-Counter-<version>.exe` | Every other billing machine | Nothing. It bills against the server |
+
+**A shop with one till needs only the first.** Everything below, up to "More than one till", is
+about that machine and is unchanged. Nothing in a one-till shop behaves differently because the
+counter installer now exists.
 
 ## The shop's PC needs
 
@@ -51,6 +60,52 @@ For the person who sets up a till. The vendor builds the installer with
    already in the catalogue are repriced, new codes are added, and a file with a bad row is
    refused whole, naming the row to fix. Then record opening stock (Stock), take a test bill and
    cancel it.
+
+## More than one till
+
+The shop picks one PC to be the **server**: usually the back office, or counter 1 in a small shop.
+It holds the database and the licence, and it is the machine every other till talks to.
+
+**On the server**
+
+1. Install `GoRockitPOS-<version>.exe` and set it up as above, licence included.
+2. Open `%LOCALAPPDATA%\GoRockitPOS\data\pos.properties` and say how many other machines may bill
+   against it:
+   ```properties
+   pos.clients.max=3
+   ```
+   Left at 0 - the default - the till keeps to itself and is not reachable over the network at
+   all. Above 0 it opens its billing port to the shop's network and answers counters looking for
+   it. Restart GO RockIt afterwards.
+3. Give the server a **fixed address**: a static IP, or a reservation on the shop's router. The
+   counters find it by themselves most of the time, but an address that never changes is what
+   makes the fallback work.
+4. The first time it starts, Windows Firewall asks whether to allow it on the network. **Allow it
+   on private networks.** Refuse, and no counter will ever reach it.
+
+**On each counter**
+
+1. Install `GoRockitPOS-Counter-<version>.exe`. No licence, no database, nothing to back up.
+2. Start **GO RockIt Counter**. It asks two things:
+   - **Counter number** - up to three characters, a letter first: `T2`, `T3`. It goes on every
+     bill that counter takes, and no two machines may share one.
+   - **Where the server is** - leave it on *Find the server on this network* and press **Look for
+     the server**. It names the shop and says how many places are free. If nothing answers (some
+     networks do not pass the broadcast), type the server's address instead.
+3. Set the printer standing on that counter. Each counter prints its own bills on its own printer
+   and opens its own drawer; the server never prints another machine's bill.
+4. Press **Save and start billing**. Staff sign in with the same username and PIN they use
+   anywhere in the shop.
+
+**Worth knowing before you sell this**
+
+- **Nothing bills when the server is off.** A counter has no database of its own. That is the
+  price of every till seeing the same stock and the same bills the instant they are made, so
+  treat the server PC and the network switch as the things that must stay up.
+- Each counter has its **own bill number series** - `T2-2627-00001` - so two counters can never
+  issue the same number. The screen shows the running number with the counter beside it.
+- A counter holds its place for four hours after it was last used, so a machine taken away frees
+  its place by itself. To free one straight away, an admin can release it from the server.
 
 ## Vendor: issuing the licence
 
