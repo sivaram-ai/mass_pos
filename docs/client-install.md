@@ -22,8 +22,15 @@ For the person who sets up a till. The vendor builds the installer with
    seconds, and clicking the icon again simply opens another window.
 3. **Have it ready after a reboot.** Press Win+R, type `shell:startup`, and copy the GO RockIt
    shortcut into the folder that opens.
-4. **Sign in as `admin`.** The first-start PIN is in
-   `%LOCALAPPDATA%\GoRockitPOS\data\logs\pos.log`. The app makes you choose your own PIN straight away.
+4. **Sign in as `admin` with PIN `0000`.** The app makes you choose your own PIN straight away, and
+   will not go anywhere until you do.
+
+   **Replacing a till rather than setting a new shop up?** Do it before you sign in. The sign-in
+   screen offers "Moving from another till? Put a backup back first", lists any copies it finds in
+   `%LOCALAPPDATA%\GoRockitPOS-backups`, and takes a `pos.db` from a pen drive. The shop comes back
+   whole - products, bills, settings and the staff with their own PINs - so you then sign in with
+   the PIN from the old till, not 0000. Close GO RockIt and open it again to finish; the database
+   is swapped on the way up, before anything opens it.
 5. **Name the till.** Edit `%LOCALAPPDATA%\GoRockitPOS\data\pos.properties`, set
    `pos.terminal.code` (T1, T2, ...: unique per till, at most 3 characters, it prefixes every
    invoice number) and `pos.terminal.name`, then restart the PC so the till picks them up. The
@@ -111,7 +118,7 @@ build keeps its data in `%LOCALAPPDATA%\MassPOS`; the first start of 0.1.2 moves
 |---|---|
 | Nothing happens when I click GO RockIt | Give it half a minute on a cold start. If a message appears, it names the problem; otherwise look in `data\logs\pos.log` |
 | The window opens but the page does not load | The server is still starting, or stopped: close the window and click the shortcut again |
-| Cannot sign in | The admin PIN is in `%LOCALAPPDATA%\GoRockitPOS\data\logs\pos.log` |
+| Cannot sign in on a new till | `admin` with PIN `0000`, then pick your own |
 | "Billing locked" | Menu > Licence says why |
 | Bills print to files, not paper | No printer chosen: Settings > Printer |
 | App closes at startup | A bad value in `pos.properties`; `logs\pos.log` names it |

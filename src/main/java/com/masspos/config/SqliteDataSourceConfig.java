@@ -6,6 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import com.masspos.backup.BackupProperties;
 import com.masspos.backup.DatabaseBackups;
 
 import java.io.IOException;
@@ -21,11 +22,12 @@ public class SqliteDataSourceConfig {
      */
     @Bean
     @ConfigurationProperties("spring.datasource.hikari")
-    public HikariDataSource dataSource(DataSourceProperties properties, PosProperties pos) throws IOException {
+    public HikariDataSource dataSource(DataSourceProperties properties, PosProperties pos,
+                                       BackupProperties backups) throws IOException {
         Files.createDirectories(pos.dataDir());
         // The one moment a backup can be put in place: the database is about to be opened, and
         // nothing - not Hibernate, not the audit triggers - has touched it yet.
-        DatabaseBackups.applyPendingRestore(pos.dataDir());
+        DatabaseBackups.applyPendingRestore(pos.dataDir(), backups.backupsDir());
         return properties.initializeDataSourceBuilder().type(HikariDataSource.class).build();
     }
 }

@@ -3,6 +3,7 @@ package com.masspos;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.masspos.auth.AuthService;
+import com.masspos.billing.InvoiceNumbers;
 import com.masspos.user.UserRole;
 import com.masspos.web.LocalApiGuard;
 import org.junit.jupiter.api.BeforeEach;
@@ -88,8 +89,11 @@ class SaleApiIntegrationTest {
         assertThat(invoice.get("changePaise").asLong()).isEqualTo(30_000);
         assertThat(sale.get("printed").asBoolean()).isTrue();
 
+        // The paper carries the counter and the running number as two labelled fields, not one
+        // run-together string: the whole number is still there, just not read as one word.
         assertThat(Files.readString(latestReceipt()))
-                .contains(invoice.get("invoiceNumber").asText(), "MASS MART", "TOTAL Rs.", "200.00");
+                .contains("Invoice: " + InvoiceNumbers.serialOf(invoice.get("invoiceNumber").asText()),
+                        "Counter: T1", "MASS MART", "TOTAL Rs.", "200.00");
     }
 
     @Test

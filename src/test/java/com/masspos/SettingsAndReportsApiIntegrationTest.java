@@ -36,6 +36,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(properties = {
         "pos.data-dir=" + SettingsAndReportsApiIntegrationTest.DATA_DIR,
+        "pos.backup.offsite-dir=" + SettingsAndReportsApiIntegrationTest.BACKUP_DIR,
         "pos.printer.type=FILE",
         "pos.terminal.name=Counter 1",
         "pos.terminal.section=Ground floor"})
@@ -45,6 +46,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class SettingsAndReportsApiIntegrationTest {
 
     static final String DATA_DIR = "target/test-data/settings-it";
+    /** Copies live outside the till's folder now, so the test looks for them where the till puts them. */
+    static final String BACKUP_DIR = "target/test-data/settings-it-backups";
 
     private static String adminToken;
     private static String cashierToken;
@@ -52,6 +55,7 @@ class SettingsAndReportsApiIntegrationTest {
 
     static {
         FileSystemUtils.deleteRecursively(new File(DATA_DIR));
+        FileSystemUtils.deleteRecursively(new File(BACKUP_DIR));
         TestLicensing.install(DATA_DIR);
     }
 
@@ -266,14 +270,16 @@ class SettingsAndReportsApiIntegrationTest {
                 .andExpect(jsonPath("$.backups[0].sizeBytes").value(greaterThan(0)))
                 .andExpect(jsonPath("$.restoreFrom").doesNotExist());
 
-        assertThat(Path.of(DATA_DIR, "backups")).isDirectoryContaining(file -> file.toString().endsWith(".db"));
+        assertThat(Path.of(BACKUP_DIR, "backups")).isDirectoryContaining(file -> file.toString().endsWith(".db"));
+        assertThat(Path.of(DATA_DIR, "backups"))
+                .as("nothing worth keeping is left where an uninstall would delete it").doesNotExist();
     }
 
     /** A holiday snap renamed to .db must not be allowed to replace a shop's takings. */
     @Test
     void refusesToPutBackAFileThatIsNotThisTillsDatabase() throws Exception {
-        Files.createDirectories(Path.of(DATA_DIR, "backups"));
-        Files.writeString(Path.of(DATA_DIR, "backups", "not-a-database.db"), "this is not SQLite");
+        Files.createDirectories(Path.of(BACKUP_DIR, "backups"));
+        Files.writeString(Path.of(BACKUP_DIR, "backups", "not-a-database.db"), "this is not SQLite");
 
         mvc.perform(as(post("/api/settings/database/restore"), adminToken)
                         .header(LocalApiGuard.CLIENT_HEADER, "test")

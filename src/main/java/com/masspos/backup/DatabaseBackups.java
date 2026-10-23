@@ -1,7 +1,13 @@
 package com.masspos.backup;
 
+import com.masspos.catalog.ProductCsv;
+import com.masspos.common.Csv;
+import com.masspos.catalog.ProductRepository;
 import com.masspos.common.IndiaTime;
 import com.masspos.config.PosProperties;
+import com.masspos.settings.ShopSettingsCsv;
+import com.masspos.settings.ShopSettingsForm;
+import com.masspos.settings.ShopSettingsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -24,6 +30,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 /**
@@ -51,10 +58,17 @@ public class DatabaseBackups {
 
     private final JdbcTemplate jdbc;
     private final Path dataDir;
+    private final ProductRepository products;
+    private final ShopSettingsService settings;
+    private final BackupProperties where;
 
-    public DatabaseBackups(JdbcTemplate jdbc, PosProperties pos) {
+    public DatabaseBackups(JdbcTemplate jdbc, PosProperties pos, ProductRepository products,
+                           ShopSettingsService settings, BackupProperties where) {
         this.jdbc = jdbc;
         this.dataDir = pos.dataDir();
+        this.products = products;
+        this.settings = settings;
+        this.where = where;
     }
 
     /**
@@ -64,8 +78,13 @@ public class DatabaseBackups {
     public record BackupFile(String name, long sizeBytes, Instant takenAt, boolean restorePending) {
     }
 
+    /**
+     * Where copies taken by hand live. Outside the till's own folder, because that folder goes
+     * with the program when it is uninstalled - which is the one moment a shop most needs them.
+     * A till upgraded from the old layout has its copies moved across on the first start.
+     */
     public Path folder() {
-        return dataDir.resolve(FOLDER);
+        return where.backupsDir();
     }
 
     /** A complete copy, taken without stopping the till. */
@@ -127,6 +146,30 @@ public class DatabaseBackups {
         return safety;
     }
 
+    /**
+     * Lines up a copy that is not one of this till's own - one from the folder outside the
+     * installed one, or a file handed over on a pen drive. It is checked the same way, copied in
+     * so the next start finds it where it expects to, and then staged like any other.
+     *
+     * @param label what to call it once it is here, for the list and the log
+     */
+    public BackupFile stageRestoreFrom(Path source, String label) {
+        refuseUnlessATillDatabase(source);
+        String name = label.replaceAll("[^A-Za-z0-9._-]", "-");
+        if (!name.endsWith(".db")) {
+            name = name + ".db";
+        }
+        try {
+            Files.createDirectories(folder());
+            Path landed = folder().resolve("brought-in-" + STAMP.format(ZonedDateTime.now(IndiaTime.ZONE))
+                    + "-" + name);
+            Files.copy(source, landed, StandardCopyOption.REPLACE_EXISTING);
+            return stageRestore(landed.getFileName().toString());
+        } catch (IOException e) {
+            throw new UncheckedIOException("Cannot read " + source, e);
+        }
+    }
+
     /** Changed their mind: the staged file is dropped and nothing is replaced. */
     public void cancelRestore() {
         try {
@@ -142,28 +185,73 @@ public class DatabaseBackups {
      * write-ahead log and its shared-memory file all go together: a leftover WAL would be replayed
      * onto the restored database and corrupt it.
      */
-    public static void applyPendingRestore(Path dataDir) {
+    public static void applyPendingRestore(Path dataDir, Path backupFolder) {
         Path pending = dataDir.resolve(PENDING);
         if (!Files.isRegularFile(pending)) {
             return;
         }
         Path live = dataDir.resolve(DATABASE);
-        String stamp = STAMP.format(ZonedDateTime.now(IndiaTime.ZONE));
+        Path replaced = backupFolder.resolve("replaced-" + STAMP.format(ZonedDateTime.now(IndiaTime.ZONE)) + ".db");
         try {
-            Files.createDirectories(dataDir.resolve(FOLDER));
+            Files.createDirectories(backupFolder);
             if (Files.exists(live)) {
-                Files.move(live, dataDir.resolve(FOLDER).resolve("replaced-" + stamp + ".db"),
-                        StandardCopyOption.REPLACE_EXISTING);
+                Files.move(live, replaced, StandardCopyOption.REPLACE_EXISTING);
             }
             Files.deleteIfExists(dataDir.resolve(DATABASE + "-wal"));
             Files.deleteIfExists(dataDir.resolve(DATABASE + "-shm"));
             Files.move(pending, live, StandardCopyOption.REPLACE_EXISTING);
             Files.deleteIfExists(dataDir.resolve(PENDING + ".from"));
-            log.warn("Restored the database from a backup. The database it replaced is in {}",
-                    dataDir.resolve(FOLDER).resolve("replaced-" + stamp + ".db"));
+            log.warn("Restored the database from a backup. The database it replaced is in {}", replaced);
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot put the staged backup in place. The till has been left"
                     + " on its own database; " + pending + " is still there.", e);
+        }
+    }
+
+    /**
+     * Puts the copies of a till set up before the folders were split where they are looked for now.
+     * Two moves, both one-time:
+     *
+     * <ul>
+     *   <li>The ones taken by hand sat in {@code <data-dir>/backups}, inside the folder an
+     *       uninstall deletes - the shop would have found them gone exactly when it went looking.
+     *   <li>The automatic ones sat loose in the root of the offsite folder, which nothing lists
+     *       any more, so the sign-in screen would stop offering them to a till being replaced.
+     * </ul>
+     *
+     * <p>A name already taken at the far end is left where it is, and a move that fails is logged
+     * rather than thrown: this is tidying, and the backup itself is already safely written.
+     */
+    void bringOldCopiesAcross() {
+        moveAll(dataDir.resolve(FOLDER), folder());
+        moveAll(where.offsiteDir().normalize(), where.startStopDir());
+    }
+
+    private void moveAll(Path from, Path to) {
+        if (!Files.isDirectory(from) || from.normalize().equals(to.normalize())) {
+            return;
+        }
+        try (Stream<Path> files = Files.list(from)) {
+            List<Path> loose = files.filter(Files::isRegularFile).toList();
+            if (loose.isEmpty()) {
+                return;
+            }
+            Files.createDirectories(to);
+            int moved = 0;
+            for (Path file : loose) {
+                Path landing = to.resolve(file.getFileName().toString());
+                if (Files.exists(landing)) {
+                    continue;
+                }
+                Files.move(file, landing);
+                moved++;
+            }
+            if (moved > 0) {
+                log.info("Moved {} backup file(s) from {} into {}, where this version looks for them",
+                        moved, from, to);
+            }
+        } catch (IOException e) {
+            log.warn("Could not move the older backups out of {}: {}", from, e.toString());
         }
     }
 
@@ -183,7 +271,42 @@ public class DatabaseBackups {
         }
         // VACUUM INTO refuses an existing file, which is why the name is made unique first.
         jdbc.execute("VACUUM INTO '" + file.toAbsolutePath().toString().replace("'", "''") + "'");
+        writeSidecars(file);
         return describe(file, Optional.empty());
+    }
+
+    /**
+     * The catalogue and the shop's own details, written beside the copy as the same sheets the
+     * Products and Settings screens export.
+     *
+     * <p>A .db is all or nothing: to read one you need this program, and to use part of one you
+     * need all of it. A shop that wants last month's price list, or to set a second till up the
+     * way the first one is, can open these in Excel without restoring anything. Neither failing
+     * loses the backup, which is the thing that matters and is already on disk by now.
+     */
+    private void writeSidecars(Path database) {
+        String base = database.getFileName().toString().replaceFirst("\\.db$", "");
+        write(database.resolveSibling(base + "-products.csv"),
+                () -> ProductCsv.writeCatalogue(products.findAllByActiveTrueOrderByNameAsc()));
+        write(database.resolveSibling(base + "-settings.csv"),
+                () -> ShopSettingsCsv.write(ShopSettingsForm.of(settings.current())));
+    }
+
+    private static void write(Path file, Supplier<String> contents) {
+        try {
+            Files.writeString(file, Csv.EXCEL_BOM + contents.get());
+        } catch (Exception e) {
+            log.warn("Backup written, but {} was not: {}", file.getFileName(), e.toString());
+        }
+    }
+
+    /** Newest first, for any listing of a folder of copies. */
+    static long modifiedAt(Path file) {
+        try {
+            return Files.getLastModifiedTime(file).toMillis();
+        } catch (IOException unreadable) {
+            return 0;
+        }
     }
 
     private static BackupFile describe(Path file, Optional<String> pending) {

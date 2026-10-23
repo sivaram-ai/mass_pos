@@ -46,7 +46,8 @@ public class UserController {
                                     @NotNull UserRole role, @NotBlank String pin) {
     }
 
-    public record UpdateUserRequest(@NotBlank @Size(max = 100) String displayName, @NotNull UserRole role,
+    public record UpdateUserRequest(@NotBlank @Size(max = 50) String username,
+                                    @NotBlank @Size(max = 100) String displayName, @NotNull UserRole role,
                                     boolean active) {
     }
 
@@ -71,7 +72,8 @@ public class UserController {
     @PutMapping("/{id}")
     @RequiresRole({UserRole.ADMIN})
     public UserSummary update(@PathVariable UUID id, @Valid @RequestBody UpdateUserRequest request) {
-        return UserSummary.of(auth.updateUser(id, request.displayName(), request.role(), request.active()));
+        return UserSummary.of(auth.updateUser(id, request.username(), request.displayName(), request.role(),
+                request.active()));
     }
 
     @PostMapping("/{id}/pin")

@@ -22,7 +22,7 @@ class DatabaseBackupsTest {
         Files.writeString(dataDir.resolve("restore-pending.db"), "last week's database");
         Files.writeString(dataDir.resolve("restore-pending.db.from"), "pos-20261014-090000.db");
 
-        DatabaseBackups.applyPendingRestore(dataDir);
+        DatabaseBackups.applyPendingRestore(dataDir, dataDir.resolve("backups"));
 
         assertThat(dataDir.resolve("pos.db")).hasContent("last week's database");
         assertThat(dataDir.resolve("restore-pending.db")).doesNotExist();
@@ -42,7 +42,7 @@ class DatabaseBackupsTest {
         Files.writeString(dataDir.resolve("pos.db-shm"), "shared memory");
         Files.writeString(dataDir.resolve("restore-pending.db"), "last week");
 
-        DatabaseBackups.applyPendingRestore(dataDir);
+        DatabaseBackups.applyPendingRestore(dataDir, dataDir.resolve("backups"));
 
         assertThat(dataDir.resolve("pos.db-wal")).doesNotExist();
         assertThat(dataDir.resolve("pos.db-shm")).doesNotExist();
@@ -53,7 +53,7 @@ class DatabaseBackupsTest {
     void doesNothingAtAllWhenNoRestoreIsWaiting(@TempDir Path dataDir) throws IOException {
         Files.writeString(dataDir.resolve("pos.db"), "today's database");
 
-        DatabaseBackups.applyPendingRestore(dataDir);
+        DatabaseBackups.applyPendingRestore(dataDir, dataDir.resolve("backups"));
 
         assertThat(dataDir.resolve("pos.db")).hasContent("today's database");
         assertThat(dataDir.resolve("backups")).doesNotExist();
@@ -64,7 +64,7 @@ class DatabaseBackupsTest {
     void restoresOntoATillThatHasNoDatabaseYet(@TempDir Path dataDir) throws IOException {
         Files.writeString(dataDir.resolve("restore-pending.db"), "another till's data");
 
-        DatabaseBackups.applyPendingRestore(dataDir);
+        DatabaseBackups.applyPendingRestore(dataDir, dataDir.resolve("backups"));
 
         assertThat(dataDir.resolve("pos.db")).hasContent("another till's data");
         assertThat(replaced(dataDir)).isEmpty();

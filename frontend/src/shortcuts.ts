@@ -14,6 +14,7 @@ export type ShortcutAction =
   | 'customer'
   | 'editBill'
   | 'returnBill'
+  | 'billInfo'
   | 'clearBill'
 
 export const SHORTCUT_LABELS: Record<ShortcutAction, string> = {
@@ -29,6 +30,7 @@ export const SHORTCUT_LABELS: Record<ShortcutAction, string> = {
   customer: 'Customer details',
   editBill: "Edit today's bill",
   returnBill: 'Return',
+  billInfo: 'Table and supplier',
   clearBill: 'Clear bill',
 }
 
@@ -49,6 +51,7 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutAction, string> = {
   customer: 'F1',
   editBill: 'Insert',
   returnBill: 'F12',
+  billInfo: 'F11',
   clearBill: 'Escape',
 }
 

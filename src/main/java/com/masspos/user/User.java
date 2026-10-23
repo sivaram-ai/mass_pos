@@ -67,6 +67,15 @@ public class User extends BaseEntity {
         this.displayName = displayName;
     }
 
+    /**
+     * What they type to sign in. Changing it signs them out everywhere, which the caller does:
+     * their old sessions were opened under the old name and the person needs to see the new one
+     * work before they rely on it. Bills carry the display name, so old ones still read.
+     */
+    public void changeUsername(String username) {
+        this.username = username;
+    }
+
     public void changePinHash(String pinHash) {
         this.pinHash = pinHash;
     }

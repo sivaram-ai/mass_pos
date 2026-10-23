@@ -171,7 +171,7 @@ class HardwareApiIntegrationTest {
 
         assertThat(Files.readString(latestJob(".txt")))
                 .contains("MASS MART", "GSTIN: 27AAPFU0939F1ZV", "CIN: U52100MH2020PTC123456", "DUPLICATE COPY",
-                        "Invoice: T1-2627-00001", "TOTAL Rs.", "Ph: 020-1112223", "Imported footer line")
+                        "Invoice: 00001", "Counter: T1", "TOTAL Rs.", "Ph: 020-1112223", "Imported footer line")
                 .doesNotContain("Imported Mart", "Visit again");
     }
 

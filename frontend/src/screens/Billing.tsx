@@ -2,14 +2,17 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  api, clockTime, messageOfFailure, milliFromUnits, paiseFromRupees, percent, quantity, rupees, rupeesForInput,
+  api, billNo, clockTime, messageOfFailure, milliFromUnits, paiseFromRupees, percent, quantity, rupees,
+  rupeesForInput,
 } from '../api'
 import type {
   CartLine, Customer, EditResponse, HeldBill, Invoice, PaymentMode, Product, QuotedCart, Refund, Returnable,
   ReturnResponse, Role, SaleResponse, SettingsView, Supplier, Tender,
 } from '../types'
 import { WHOLE_UNITS } from '../types'
-import { AskModal, Banner, Button, Empty, Field, inputClass, isModalOpen, Modal } from '../components/ui'
+import {
+  AskModal, Banner, Button, Empty, Field, inputClass, isModalOpen, Modal, smallInputClass,
+} from '../components/ui'
 import {
   actionFor, loadAskCashReceived, loadShortcuts, loadShowShortcuts, SHORTCUT_LABELS, useShortcuts,
 } from '../shortcuts'
@@ -23,6 +26,20 @@ const NO_CUSTOMER: Customer = { name: '', gstin: '', placeOfSupply: '' }
 type BillInfo = { tableNo: string; supplierId: string }
 
 const NO_BILL_INFO: BillInfo = { tableNo: '', supplierId: '' }
+
+/** How a chosen steward reads in the box, and the one spelling the search has to accept back. */
+function supplierLabel(one: Supplier): string {
+  return `${one.supplierId} - ${one.supplierName}`
+}
+
+/** Focus without selecting: the cursor goes after what is there, ready to be corrected. */
+function focusEnd(box: HTMLInputElement | null) {
+  if (!box) {
+    return
+  }
+  box.focus()
+  box.setSelectionRange(box.value.length, box.value.length)
+}
 
 /** The editable columns of a bill row, left to right. Amount is worked out by the server. */
 type Col = 'code' | 'name' | 'rate' | 'qty' | 'disc'
@@ -182,8 +199,13 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
   const [showShortcuts, setShowShortcuts] = useState(loadShowShortcuts)
   const [askCashReceived, setAskCashReceived] = useState(loadAskCashReceived)
   const [billInfo, setBillInfo] = useState<BillInfo>(NO_BILL_INFO)
-  const [askingInfo, setAskingInfo] = useState(false)
+  /** What is typed in the supplier box, which is not the committed supplier until it resolves. */
+  const [supplierText, setSupplierText] = useState('')
+  const [supplierOpen, setSupplierOpen] = useState(false)
+  const [supplierHighlight, setSupplierHighlight] = useState(0)
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  /** Bumped to send the cursor back to the start of a bill; see the layout effect below. */
+  const [startRequest, setStartRequest] = useState(0)
 
   const cells = useRef(new Map<string, HTMLInputElement>())
   const listItems = useRef(new Map<number, HTMLTableRowElement>())
@@ -196,6 +218,14 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
   editRef.current = edit
   const modeRef = useRef(mode)
   modeRef.current = mode
+  const billInfoRef = useRef(billInfo)
+  billInfoRef.current = billInfo
+  const settingsRef = useRef(settings)
+  settingsRef.current = settings
+  /** Filled in below, where focusEntry is defined: the start-of-bill effect is written above it. */
+  const focusEntryRef = useRef<() => void>(() => undefined)
+  const tableBox = useRef<HTMLInputElement>(null)
+  const supplierBox = useRef<HTMLInputElement>(null)
   /** Set while a bill is being taken, so a second Space press can never take it twice. */
   const busy = useRef(false)
 
@@ -269,18 +299,69 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     input?.select()
   }, [focusRequest])
 
-  // Back in front (first open, back from another screen, menu closed): pick up any shortcut
-  // changes made in Settings and put the cursor back where it was.
+  /**
+   * Asks for the cursor to go where a bill starts: the first enabled field that is still empty,
+   * and the grid once both are answered. A till with neither question on never leaves the grid,
+   * which is the whole point of being able to turn them off. The effect below does the moving, so
+   * it happens after the render that cleared the bill rather than before it.
+   */
+  const focusBillStart = useCallback(() => setStartRequest(performance.now()), [])
+
+  /**
+   * The cursor at the start of a bill: the first question still unanswered, or the grid once both
+   * are. Deliberately an effect, and deliberately declared after the one above: clearing a bill
+   * is a render, and focus set before that render is taken back by it. Effects of one commit run
+   * in the order they are written, so this one has the last word.
+   */
+  useLayoutEffect(() => {
+    if (startRequest === 0) {
+      return
+    }
+    const asked = billInfoRef.current
+    if (settingsRef.current?.shop.askForTable && !asked.tableNo) {
+      focusEnd(tableBox.current)
+    } else if (settingsRef.current?.shop.askForSupplier && !asked.supplierId) {
+      focusEnd(supplierBox.current)
+    } else {
+      focusEntryRef.current()
+    }
+  }, [startRequest])
+
+  /**
+   * Back in front: pick up any shortcut changes made in Settings, then put the cursor somewhere.
+   * Where depends on how it got here, and the two cases are not the same thing:
+   *
+   * <ul>
+   *   <li><strong>Arriving at the screen</strong> - Esc Esc from another one, or Billing in the
+   *       menu - starts a bill. The cursor goes where a bill starts: the table if it is asked for
+   *       and still empty, then the steward, then the first empty row.
+   *   <li><strong>The menu closing</strong> over a screen that was already here is not arriving.
+   *       It goes back to the cell it left, mid-bill, as if nothing had happened.
+   * </ul>
+   *
+   * <p>It waits for the settings, which say whether there is a table box to go to at all; the
+   * screen is mounted a moment before they arrive.
+   */
+  const arrived = useRef(false)
   useEffect(() => {
-    if (!inFront) {
+    if (!active) {
+      arrived.current = false
+      return
+    }
+    if (blocked || !settings) {
       return
     }
     setShortcuts(loadShortcuts())
     setShowShortcuts(loadShowShortcuts())
     setAskCashReceived(loadAskCashReceived())
-    const { row, col } = editRef.current
-    requestFocus(Math.min(row, linesRef.current.length), col)
-  }, [inFront, requestFocus])
+    if (arrived.current) {
+      const { row, col } = editRef.current
+      requestFocus(Math.min(row, linesRef.current.length), col)
+    } else {
+      arrived.current = true
+      focusBillStart()
+    }
+  }, [active, blocked, settings, requestFocus, focusBillStart])
 
   // The till's last bill, so it can be seen and reprinted after a restart or a new sign-in.
   useEffect(() => {
@@ -307,11 +388,16 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
       requestFocus(count, 'code')
     }
   }, [requestFocus])
+  focusEntryRef.current = focusEntry
 
   /**
-   * Esc Esc already comes back here from another screen. On this screen it brings the cursor back
-   * to the green row, which is what a cashier needs after a click has taken focus off the grid
-   * altogether - App installs no handler while billing is in front, so nothing was listening.
+   * Esc Esc already comes back here from another screen. On this screen it is what a cashier
+   * presses after a click has taken focus off the grid altogether - App installs no handler while
+   * billing is in front, so nothing was listening.
+   *
+   * <p>It puts the cursor where a bill starts, the one rule for both: an unanswered table or
+   * steward first, the first empty row once they are answered. The two Escapes mean the same
+   * thing wherever they are pressed, which is the only version a cashier can hold in their head.
    */
   useEffect(() => {
     if (!inFront) {
@@ -325,14 +411,14 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
       const now = performance.now()
       if (now - lastEscape < 600) {
         lastEscape = 0
-        focusEntry()
+        focusBillStart()
       } else {
         lastEscape = now
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [inFront, focusEntry])
+  }, [inFront, focusBillStart])
 
   const refuse = (row: number, col: Col, message: string) => {
     setInvalid({ row, col })
@@ -559,9 +645,10 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
   /**
    * Empties the grid. Leaving an edit or a return this way changes nothing already issued.
    *
-   * <p>Whatever emptied it - a bill taken, a bill held, a bill cleared - what comes next is a new
-   * bill, so the table and the steward are asked for again rather than carried over from the last
-   * one. Every way out of a bill goes through here, which is why the prompt lives here too.
+   * <p>The table and the steward go with it: every way of finishing with a bill - taken, held or
+   * cleared - ends a bill, and the next one is asked for both again. Carrying them over saved a
+   * few keystrokes when the same table orders twice, at the cost of the far worse mistake of a
+   * bill quietly going to the table before it.
    */
   const clearBill = () => {
     replaceLines([])
@@ -569,10 +656,12 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     setQuote(null)
     setInvalid(null)
     setConfirmClear(false)
+    setBillInfo(NO_BILL_INFO)
+    billInfoRef.current = NO_BILL_INFO
+    setSupplierText('')
     modeRef.current = { kind: 'sale' }
     setMode({ kind: 'sale' })
-    requestFocus(0, 'code')
-    startNextBill()
+    focusBillStart()
   }
 
   /** The checks every way of taking a bill shares. */
@@ -598,7 +687,6 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
   const priceOf = (cart: Row[]) => quoteFor(cart, modeRef.current, customer.placeOfSupply)
 
   const asksForBillInfo = Boolean(settings?.shop.askForTable || settings?.shop.askForSupplier)
-  const askedForFirstBill = useRef(false)
 
   // The whole supplier list in one call: a shop has a handful, and filtering in the browser keeps
   // the dropdown instant instead of a round trip per keystroke.
@@ -609,20 +697,56 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     api.get<Supplier[]>('/api/suppliers').then(setSuppliers).catch(() => setSuppliers([]))
   }, [settings?.shop.askForSupplier])
 
-  /** Once per bill, at the start, which is when the steward knows the table. Never per row. */
-  const startNextBill = useCallback(() => {
-    setBillInfo(NO_BILL_INFO)
-    if (asksForBillInfo) {
-      setAskingInfo(true)
+  /**
+   * Enter and Esc both move on; Esc just does not stop to take an answer. The grid is entered at
+   * the first empty row, so coming back to the table part-way through a bill and pressing on
+   * carries on where the cashier was instead of landing on the first item they already rang up.
+   */
+  const afterTable = () => {
+    if (settings?.shop.askForSupplier) {
+      focusEnd(supplierBox.current)
+    } else {
+      focusEntry()
     }
-  }, [asksForBillInfo])
+  }
 
-  useEffect(() => {
-    if (active && !blocked && asksForBillInfo && !askedForFirstBill.current) {
-      askedForFirstBill.current = true
-      setAskingInfo(true)
+  /**
+   * Whatever is typed, resolved against the list: an exact ID, or the only thing it can mean.
+   *
+   * <p>It has to accept the box's own text back as well. Once a steward is chosen the box reads
+   * "SUP-002 - Kumar", and leaving the box resolves what is in it again - which dropped the
+   * steward, because that line is neither an ID nor a name.
+   */
+  const commitSupplier = (typed: string): string => {
+    const text = typed.trim().toLowerCase()
+    if (!text) {
+      return ''
     }
-  }, [active, blocked, asksForBillInfo])
+    const exact = suppliers.find((one) => one.supplierId.toLowerCase() === text
+      || supplierLabel(one).toLowerCase() === text)
+    const narrowed = suppliers.filter((one) => one.supplierId.toLowerCase().includes(text)
+      || one.supplierName.toLowerCase().includes(text))
+    const resolved = exact ?? (narrowed.length === 1 ? narrowed[0] : null)
+    return resolved ? resolved.supplierId : ''
+  }
+
+  const supplierSearch = supplierText.trim().toLowerCase()
+  const supplierMatches = supplierSearch
+    ? suppliers.filter((one) => one.supplierId.toLowerCase().includes(supplierSearch)
+      || one.supplierName.toLowerCase().includes(supplierSearch))
+    : suppliers
+
+  /** Shows the committed supplier, so the box never claims something the bill will not carry. */
+  const showSupplier = (id: string) => {
+    const known = suppliers.find((one) => one.supplierId === id)
+    setSupplierText(known ? supplierLabel(known) : '')
+  }
+
+  const takeSupplier = (id: string) => {
+    setBillInfo((was) => ({ ...was, supplierId: id }))
+    showSupplier(id)
+    setSupplierOpen(false)
+  }
 
   const sell = async (cart: Row[], tenders: Tender[], parcel: boolean) => {
     const sale = await api.post<SaleResponse>('/api/sales', {
@@ -641,8 +765,8 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     clearBill()
     setError(null)
     onToast(sale.printed
-      ? { tone: 'good', text: `Bill ${sale.invoice.invoiceNumber} taken and printed` }
-      : { tone: 'warn', text: `Bill ${sale.invoice.invoiceNumber} taken, but printing failed: ${sale.printError ?? ''}` })
+      ? { tone: 'good', text: `Bill ${billNo(sale.invoice.invoiceNumber)} taken and printed` }
+      : { tone: 'warn', text: `Bill ${billNo(sale.invoice.invoiceNumber)} taken, but printing failed: ${sale.printError ?? ''}` })
   }
 
   /**
@@ -742,7 +866,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     setError(null)
     onToast({
       tone: done.printed ? 'good' : 'warn',
-      text: `Return ${done.creditNote.creditNoteNumber}: give back ${rupees(done.creditNote.grandTotalPaise)} by ${refund.mode}.`
+      text: `Return ${billNo(done.creditNote.creditNoteNumber)}: give back ${rupees(done.creditNote.grandTotalPaise)} by ${refund.mode}.`
         + (done.printed ? ' Stock is back on the shelf.' : ` Printing failed: ${done.printError ?? ''}`),
     })
   }
@@ -794,11 +918,11 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
       return
     }
     if (invoice.status === 'CANCELLED') {
-      onToast({ tone: 'bad', text: `Bill ${invoice.invoiceNumber} is cancelled, so it cannot be edited` })
+      onToast({ tone: 'bad', text: `Bill ${billNo(invoice.invoiceNumber)} is cancelled, so it cannot be edited` })
       return
     }
     if (invoice.invoiceDate !== localToday()) {
-      onToast({ tone: 'warn', text: `Only today's bills can be edited. For bill ${invoice.invoiceNumber}, take a return with ${shortcuts.returnBill}` })
+      onToast({ tone: 'warn', text: `Only today's bills can be edited. For bill ${billNo(invoice.invoiceNumber)}, take a return with ${shortcuts.returnBill}` })
       return
     }
     if (!(await leaveCurrentBill())) {
@@ -835,7 +959,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     let rows: Row[] = []
     if (invoice) {
       if (invoice.status === 'CANCELLED') {
-        onToast({ tone: 'bad', text: `Bill ${invoice.invoiceNumber} is cancelled: its stock is already back` })
+        onToast({ tone: 'bad', text: `Bill ${billNo(invoice.invoiceNumber)} is cancelled: its stock is already back` })
         return
       }
       const returnable = await api.get<Returnable>(`/api/invoices/${invoice.id}/returnable`)
@@ -854,7 +978,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
           maxMilli: line.soldMilli - line.returnedMilli,
         }))
       if (rows.length === 0) {
-        onToast({ tone: 'warn', text: `Everything on bill ${invoice.invoiceNumber} has already come back` })
+        onToast({ tone: 'warn', text: `Everything on bill ${billNo(invoice.invoiceNumber)} has already come back` })
         return
       }
     }
@@ -929,7 +1053,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     }
     try {
       await api.post(`/api/invoices/${lastBill.id}/receipt`, { copy: 'DUPLICATE', openDrawer: false })
-      onToast({ tone: 'good', text: `Reprinted ${lastBill.invoiceNumber} as a duplicate` })
+      onToast({ tone: 'good', text: `Reprinted ${billNo(lastBill.invoiceNumber)} as a duplicate` })
     } catch (failure) {
       onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not reprint') })
     }
@@ -979,7 +1103,12 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
       setInvalid(null)
       setError(null)
       setHolds(null)
-      requestFocus(resumed.cart.lines?.length ?? 0, 'code')
+      // A held bill carries no table or steward, and the ones on screen belong to the bill this
+      // one just displaced. Ask again rather than bill the wrong table.
+      setBillInfo(NO_BILL_INFO)
+      billInfoRef.current = NO_BILL_INFO
+      setSupplierText('')
+      focusBillStart()
       onToast({
         tone: 'good',
         text: swapped
@@ -1051,8 +1180,8 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     setAsk({
       action: 'edit',
       title: 'Edit a bill',
-      label: "Bill number, or just its serial (today's bills only)",
-      initial: lastBill?.invoiceNumber ?? '',
+      label: "Bill number (today's bills only)",
+      initial: lastBill ? billNo(lastBill.invoiceNumber) : '',
     })
   }
 
@@ -1064,7 +1193,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     setAsk({
       action: 'return',
       title: 'Return',
-      label: 'Bill number or serial the goods were sold on. Leave empty for a return without the bill',
+      label: 'Bill number the goods were sold on. Leave empty for a return without the bill',
       initial: '',
     })
   }
@@ -1090,6 +1219,17 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     customer: () => setEditingCustomer(true),
     editBill: askEdit,
     returnBill: askReturn,
+    // Back to the table part-way through a bill, to correct it or fill it in late. Nothing is
+    // cleared and the cursor lands after what is already there, so a mistaken press costs one Esc.
+    billInfo: () => {
+      if (settings?.shop.askForTable) {
+        focusEnd(tableBox.current)
+      } else if (settings?.shop.askForSupplier) {
+        focusEnd(supplierBox.current)
+      } else {
+        onToast({ tone: 'warn', text: 'Turn on the table or supplier question in Settings first' })
+      }
+    },
     clearBill: () => {
       if (linesRef.current.length > 0 || modeRef.current.kind !== 'sale') {
         setConfirmClear(true)
@@ -1302,11 +1442,11 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
         <>
           {mode.kind === 'edit' ? (
             <span className="shrink-0 rounded-full bg-amber-400 px-2.5 py-0.5 text-xs font-semibold text-amber-950">
-              Editing bill {mode.invoice.invoiceNumber}
+              Editing bill {billNo(mode.invoice.invoiceNumber)}
             </span>
           ) : mode.kind === 'return' ? (
             <span className="shrink-0 rounded-full bg-rose-500 px-2.5 py-0.5 text-xs font-semibold text-white">
-              {mode.invoice ? `Return on bill ${mode.invoice.invoiceNumber}` : 'Return without a bill'}
+              {mode.invoice ? `Return on bill ${billNo(mode.invoice.invoiceNumber)}` : 'Return without a bill'}
             </span>
           ) : (
             <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${
@@ -1327,7 +1467,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
             <kbd>{shortcuts.customer}</kbd>
           </button>
           <div className="ml-auto flex shrink-0 items-center gap-4 whitespace-nowrap text-sm text-slate-400">
-            <span>Last bill <span className="num font-medium text-white">{lastBill?.invoiceNumber ?? '—'}</span></span>
+            <span>Last bill <span className="num font-medium text-white">{lastBill ? billNo(lastBill.invoiceNumber) : '—'}</span></span>
             <span className="hidden lg:inline">
               Last amount <span className="num font-medium text-white">{lastBill ? rupees(lastBill.grandTotalPaise) : '—'}</span>
               {lastBill && lastBill.changePaise > 0 && (
@@ -1348,7 +1488,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
       {error && <Banner tone="bad" onDismiss={() => setError(null)}>{error}</Banner>}
       {mode.kind === 'edit' && (
         <Banner tone="warn">
-          <span className="font-semibold">Editing bill {mode.invoice.invoiceNumber}</span>
+          <span className="font-semibold">Editing bill {billNo(mode.invoice.invoiceNumber)}</span>
           {' '}(paid {rupees(mode.invoice.grandTotalPaise)}). Change, add or delete rows, then press
           {' '}<kbd>{shortcuts.takeBill}</kbd> to save: that bill is cancelled, a new bill is printed in its place,
           and only the difference is collected or given back. <kbd>{shortcuts.clearBill}</kbd> stops editing.
@@ -1357,7 +1497,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
       {mode.kind === 'return' && (
         <Banner tone="bad">
           <span className="font-semibold">
-            {mode.invoice ? `Return on bill ${mode.invoice.invoiceNumber}.` : 'Return without a bill.'}
+            {mode.invoice ? `Return on bill ${billNo(mode.invoice.invoiceNumber)}.` : 'Return without a bill.'}
           </span>
           {' '}
           {mode.invoice
@@ -1366,6 +1506,109 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
           {' '}Press <kbd>{shortcuts.takeBill}</kbd> to refund: the stock goes back on the shelf.
           {' '}<kbd>{shortcuts.clearBill}</kbd> cancels the return.
         </Banner>
+      )}
+
+      {asksForBillInfo && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+          {settings?.shop.askForTable && (
+            <label className="flex items-center gap-2 text-sm">
+              <span className="font-medium text-slate-500">Table</span>
+              <input
+                ref={tableBox}
+                className={`${smallInputClass} w-24`}
+                value={billInfo.tableNo}
+                aria-label="Table"
+                onChange={(event) => setBillInfo((was) => ({ ...was, tableNo: event.target.value }))}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter' && event.key !== 'Escape') {
+                    return
+                  }
+                  // Escape here means "move on", not "clear the bill", which is what it means in
+                  // the grid: the billing shortcut must never see it.
+                  event.preventDefault()
+                  event.stopPropagation()
+                  afterTable()
+                }}
+              />
+            </label>
+          )}
+          {settings?.shop.askForSupplier && (
+            <label className="relative flex items-center gap-2 text-sm">
+              <span className="font-medium text-slate-500">Supplier</span>
+              <input
+                ref={supplierBox}
+                className={`${smallInputClass} w-60`}
+                value={supplierText}
+                aria-label="Supplier"
+                placeholder={suppliers.length === 0 ? 'None added yet' : 'ID or name'}
+                onChange={(event) => {
+                  setSupplierText(event.target.value)
+                  setSupplierOpen(true)
+                  setSupplierHighlight(0)
+                }}
+                onFocus={() => setSupplierOpen(true)}
+                onBlur={() => {
+                  setSupplierOpen(false)
+                  // Whatever was typed is resolved on the way out, so the box and the bill agree.
+                  const resolved = commitSupplier(supplierText)
+                  setBillInfo((was) => ({ ...was, supplierId: resolved }))
+                  showSupplier(resolved)
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                    event.preventDefault()
+                    setSupplierOpen(true)
+                    setSupplierHighlight((at) => Math.max(0,
+                      Math.min(supplierMatches.length - 1, event.key === 'ArrowDown' ? at + 1 : at - 1)))
+                    return
+                  }
+                  if (event.key !== 'Enter' && event.key !== 'Escape') {
+                    return
+                  }
+                  event.preventDefault()
+                  event.stopPropagation()
+                  if (event.key === 'Enter') {
+                    const picked = supplierOpen && supplierMatches[supplierHighlight]
+                      ? supplierMatches[supplierHighlight].supplierId
+                      : commitSupplier(supplierText)
+                    takeSupplier(picked)
+                  } else {
+                    // Esc leaves the steward as it was and moves on.
+                    showSupplier(billInfoRef.current.supplierId)
+                    setSupplierOpen(false)
+                  }
+                  focusEntry()
+                }}
+              />
+              {supplierOpen && supplierMatches.length > 0 && (
+                <ul className="absolute left-20 top-full z-30 mt-1 max-h-52 w-60 overflow-y-auto rounded-md border border-slate-200 bg-white shadow-lg">
+                  {supplierMatches.slice(0, 25).map((one, at) => (
+                    <li key={one.supplierId}>
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        onMouseDown={(event) => {
+                          // Before blur, or the list is gone by the time the click lands.
+                          event.preventDefault()
+                          takeSupplier(one.supplierId)
+                          focusEntry()
+                        }}
+                        className={`block w-full px-3 py-1.5 text-left text-sm ${
+                          at === supplierHighlight ? 'bg-sky-50 text-sky-900' : 'hover:bg-slate-50'}`}
+                      >
+                        <span className="font-medium">{one.supplierId}</span>
+                        <span className="text-slate-500"> - {one.supplierName}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </label>
+          )}
+          <span className="ml-auto text-xs text-slate-400">
+            <kbd>Enter</kbd> next · <kbd>Esc</kbd> skip · <kbd>{shortcuts.billInfo}</kbd> back here
+          </span>
+        </div>
       )}
 
       {/* The bill */}
@@ -1550,16 +1793,6 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
                   onSubmit={runAsk} onClose={() => { setAsk(null); focusEntry() }} />
       )}
 
-      {askingInfo && (
-        <BillInfoDialog
-          askTable={Boolean(settings?.shop.askForTable)}
-          askSupplier={Boolean(settings?.shop.askForSupplier)}
-          suppliers={suppliers}
-          initial={billInfo}
-          onClose={() => { setAskingInfo(false); focusEntry() }}
-          onDone={(info) => { setBillInfo(info); setAskingInfo(false); focusEntry() }}
-        />
-      )}
 
       {payment && (
         <PaymentDialog
@@ -1579,7 +1812,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
           due={settling.due}
           total={settling.total}
           defaultMode={mode.kind !== 'sale' && mode.invoice ? mode.invoice.payments[0]?.mode ?? 'CASH' : 'CASH'}
-          number={mode.kind !== 'sale' ? mode.invoice?.invoiceNumber ?? null : null}
+          number={mode.kind !== 'sale' ? (mode.invoice ? billNo(mode.invoice.invoiceNumber) : null) : null}
           saving={saving}
           onClose={() => { setSettling(null); focusEntry() }}
           onConfirm={(refund, reason) => void completeSettling(refund, reason)}
@@ -1601,13 +1834,13 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
 
       {confirmClear && (
         <Modal
-          title={mode.kind === 'edit' ? `Stop editing ${mode.invoice.invoiceNumber}?`
+          title={mode.kind === 'edit' ? `Stop editing ${billNo(mode.invoice.invoiceNumber)}?`
             : mode.kind === 'return' ? 'Cancel this return?' : 'Clear this bill?'}
           onClose={() => { setConfirmClear(false); focusEntry() }}
         >
           <p className="text-sm text-slate-600">
             {mode.kind === 'edit'
-              ? `Your changes are dropped and bill ${mode.invoice.invoiceNumber} stays exactly as it was issued.`
+              ? `Your changes are dropped and bill ${billNo(mode.invoice.invoiceNumber)} stays exactly as it was issued.`
               : mode.kind === 'return'
                 ? 'Nothing is refunded and no stock comes back.'
                 : `${lines.length} item${lines.length === 1 ? '' : 's'} will be taken off the screen. Nothing is billed.`}
@@ -2306,128 +2539,6 @@ function PaymentDialog({ due, title = 'Payment', confirmLabel = 'Take bill', ask
           </div>
         </div>
       </form>
-    </Modal>
-  )
-}
-
-/**
- * Asked at the start of every bill, when the steward knows the table and before a single item is
- * rung up. Both answers are optional: a hotel that turns the prompt on still sells parcels and
- * counter orders belonging to no table, so Skip is a real answer rather than a trap.
- *
- * <p>The supplier list is small and already in hand, so the search filters it here: typing an ID
- * or any part of a name narrows the list, and Enter takes the highlighted one.
- */
-function BillInfoDialog({ askTable, askSupplier, suppliers, initial, onClose, onDone }: {
-  askTable: boolean
-  askSupplier: boolean
-  suppliers: Supplier[]
-  initial: BillInfo
-  onClose: () => void
-  onDone: (info: BillInfo) => void
-}) {
-  const [tableNo, setTableNo] = useState(initial.tableNo)
-  const [search, setSearch] = useState(initial.supplierId)
-  const [picked, setPicked] = useState<Supplier | null>(
-    suppliers.find((one) => one.supplierId === initial.supplierId) ?? null,
-  )
-  const [highlight, setHighlight] = useState(0)
-
-  const text = search.trim().toLowerCase()
-  const matches = text
-    ? suppliers.filter((one) => one.supplierId.toLowerCase().includes(text)
-      || one.supplierName.toLowerCase().includes(text))
-    : suppliers
-  const showList = askSupplier && !picked && matches.length > 0
-
-  const choose = (one: Supplier) => {
-    setPicked(one)
-    setSearch(`${one.supplierId} - ${one.supplierName}`)
-  }
-
-  const done = () => onDone({ tableNo: tableNo.trim(), supplierId: picked?.supplierId ?? '' })
-
-  // The browser pane does not fire a click on Enter, so every dialog answers Enter itself.
-  const onSupplierKey = (event: ReactKeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault()
-      setHighlight((at) => Math.max(0, Math.min(matches.length - 1, event.key === 'ArrowDown' ? at + 1 : at - 1)))
-      return
-    }
-    if (event.key === 'Enter') {
-      event.preventDefault()
-      if (showList && matches[highlight]) {
-        choose(matches[highlight])
-      } else {
-        done()
-      }
-    }
-  }
-
-  return (
-    <Modal title="New bill" onClose={onClose}>
-      <div className="space-y-3">
-        {askTable && (
-          <Field label="Table" hint="Leave empty for a parcel or a counter order">
-            <input
-              className={inputClass}
-              autoFocus
-              value={tableNo}
-              onChange={(event) => setTableNo(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault()
-                  done()
-                }
-              }}
-            />
-          </Field>
-        )}
-        {askSupplier && (
-          <Field label="Supplier" hint="Who is serving this table. Type an ID or part of a name, then pick one">
-            <div>
-              <input
-                className={inputClass}
-                autoFocus={!askTable}
-                value={search}
-                onChange={(event) => {
-                  setSearch(event.target.value)
-                  setPicked(null)
-                  setHighlight(0)
-                }}
-                onKeyDown={onSupplierKey}
-              />
-              {showList && (
-                <ul className="mt-1 max-h-44 overflow-y-auto rounded-md border border-slate-200">
-                  {matches.slice(0, 25).map((one, at) => (
-                    <li key={one.supplierId}>
-                      <button
-                        type="button"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => choose(one)}
-                        className={`block w-full px-3 py-1.5 text-left text-sm ${
-                          at === highlight ? 'bg-sky-50 text-sky-900' : 'hover:bg-slate-50'}`}
-                      >
-                        <span className="font-medium">{one.supplierId}</span>
-                        <span className="text-slate-500"> - {one.supplierName}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {suppliers.length === 0 && (
-                <p className="mt-1 text-xs text-slate-400">
-                  No suppliers yet. An admin adds them on the Staff screen.
-                </p>
-              )}
-            </div>
-          </Field>
-        )}
-        <div className="flex justify-end gap-2">
-          <Button onClick={onClose}>Skip</Button>
-          <Button tone="primary" onClick={done}>Start bill</Button>
-        </div>
-      </div>
     </Modal>
   )
 }

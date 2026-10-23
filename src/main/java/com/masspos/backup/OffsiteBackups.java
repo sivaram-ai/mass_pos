@@ -29,6 +29,10 @@ import java.util.stream.Stream;
  * does not own, written at every start and at every clean shutdown. An update is done with the
  * till closed, so the copy from when it was last closed is the one from before the update.
  *
+ * <p>These go in their own {@code start-stop} folder, apart from the copies a person takes from
+ * the settings screen. Pruning is what makes the split matter: a till that opens and closes twice
+ * a day would otherwise push out the copy somebody deliberately kept.
+ *
  * <p>A backup never stops a shop billing: a folder that cannot be written is logged and the till
  * carries on.
  */
@@ -53,6 +57,7 @@ public class OffsiteBackups implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
+        backups.bringOldCopiesAcross();
         copy("start");
     }
 
@@ -66,7 +71,7 @@ public class OffsiteBackups implements ApplicationRunner {
      *               first bill or from the night the till was closed for an update
      */
     void copy(String moment) {
-        Path folder = settings.offsiteDir().normalize();
+        Path folder = settings.startStopDir();
         try {
             DatabaseBackups.BackupFile written =
                     backups.backUpInto(folder, "pos-" + STAMP.format(ZonedDateTime.now(IndiaTime.ZONE)) + "-" + moment);

@@ -29,6 +29,27 @@ class InvoiceNumbersTest {
         assertThat(InvoiceNumbers.format("T12", "2627", 1_000_000)).hasSize(InvoiceNumbers.MAX_LENGTH);
     }
 
+    /**
+     * What a person is shown: the running number on its own, with the counter beside it rather
+     * than stuck to the front of it. The whole string stays the number of record.
+     */
+    @Test
+    void takesTheCounterAndTheRunningNumberBackOutOfANumber() {
+        assertThat(InvoiceNumbers.serialOf("T1-2627-00001")).isEqualTo("00001");
+        assertThat(InvoiceNumbers.counterOf("T1-2627-00001")).isEqualTo("T1");
+        assertThat(InvoiceNumbers.serialOf("T12-2627-R0004")).isEqualTo("R0004");
+        assertThat(InvoiceNumbers.counterOf("T12-2627-R0004")).isEqualTo("T12");
+        assertThat(InvoiceNumbers.serialOf(InvoiceNumbers.format("T1", "2627", 100_000))).isEqualTo("100000");
+    }
+
+    /** A number from somewhere else is shown as it is, rather than cut up on a guess. */
+    @Test
+    void leavesANumberThatIsNotThisTillsShapeAlone() {
+        assertThat(InvoiceNumbers.serialOf("INV/2026/0042")).isEqualTo("INV/2026/0042");
+        assertThat(InvoiceNumbers.counterOf("INV/2026/0042")).isEmpty();
+        assertThat(InvoiceNumbers.serialOf(null)).isNull();
+    }
+
     @Test
     void neverExceedsTheGstLengthLimit() {
         assertThatThrownBy(() -> InvoiceNumbers.format("T12", "2627", 10_000_000))

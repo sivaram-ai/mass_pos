@@ -143,6 +143,19 @@ export async function downloadCsv(path: string, filename: string): Promise<void>
   URL.revokeObjectURL(url)
 }
 
+/** Sends a file exactly as it is, for a backup database the setup screen was handed. */
+export async function postBinary<T>(path: string, bytes: Uint8Array): Promise<T> {
+  const headers = authHeaders()
+  headers['Content-Type'] = 'application/octet-stream'
+  const response = await fetch(path, { method: 'POST', headers, body: bytes as BodyInit })
+  const text = await response.text()
+  const payload = text ? safeParse(text) : null
+  if (!response.ok) {
+    throw new ApiError(response.status, messageOf(payload, response.status), {})
+  }
+  return payload as T
+}
+
 /** Sends a sheet the shop picked. Field errors come back the same way a form's do. */
 export async function uploadCsv<T>(path: string, csv: string): Promise<T> {
   const headers = authHeaders()
@@ -156,6 +169,23 @@ export async function uploadCsv<T>(path: string, csv: string): Promise<T> {
       errors && typeof errors === 'object' ? errors : {})
   }
   return payload as T
+}
+
+/**
+ * "T1-2627-00001" → "00001": the running number on its own, which is what a person reads, says
+ * and searches for. The counter and the financial year are shown beside it where they are worth
+ * knowing; the whole string stays the number of record, stored and filed. Anything not in that
+ * shape comes back unchanged.
+ */
+export function billNo(number: string): string {
+  const parts = number.split('-')
+  return parts.length === 3 ? parts[2] : number
+}
+
+/** "T1-2627-00001" → "T1": which counter took it, empty for a number from somewhere else. */
+export function counterOf(number: string): string {
+  const parts = number.split('-')
+  return parts.length === 3 ? parts[0] : ''
 }
 
 /** 1234567 paise → "₹12,345.67", grouped the Indian way (lakh, crore). */

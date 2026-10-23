@@ -35,4 +35,13 @@ public record ShopSettingsForm(@Size(max = 200) String legalName,
                                boolean blockNegativeStock,
                                boolean askForTable,
                                boolean askForSupplier) {
+
+    /** The saved shop as the form that writes it, used by the settings screen and by a backup. */
+    public static ShopSettingsForm of(ShopSettings shop) {
+        return new ShopSettingsForm(shop.getLegalName(), shop.getTradeName(), shop.getGstin(),
+                shop.addressLines(), shop.getPhone(), shop.getEmail(), shop.getWebsite(), shop.getCin(),
+                shop.getFssaiLicense(), shop.getUpiVpa(), shop.receiptFooter(), shop.getServiceProviderName(),
+                shop.getServicePhone(), shop.getServiceEmail(), shop.isRoundInvoiceTotal(),
+                shop.isBlockNegativeStock(), shop.isAskForTable(), shop.isAskForSupplier());
+    }
 }

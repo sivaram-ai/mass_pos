@@ -311,6 +311,13 @@ folder and everything under it, so that is the only copy that survives one.
   deactivate were broken this way).
 - **Invoice numbers** follow `{terminal}-{FY}-{seq:05d}` and are ≤16 chars, so the terminal code is
   ≤3 chars.
+  - **That is the number of record, not what a person is shown.** Screens and the receipt show the
+    running number alone (`00004`) with the counter beside it as its own labelled field -
+    `InvoiceNumbers.serialOf` / `counterOf`, `billNo()` / `counterOf()` in `api.ts`. Rule 46(b)
+    allows a serial in multiple series, which one series per counter is. The whole string is still
+    what is stored, filed and synced, so it stays on the bill detail dialog, in the audit trail,
+    and in any reference to *another* document ("Replaces bill", "Against bill") where which
+    counter issued it is part of the identity. `/api/invoices/lookup` already takes either.
 - **Dates.** Business dates and times use `IndiaTime.ZONE`, never the JVM default.
 - **Sync bookkeeping stays off audited entities.** Use an unaudited outbox table.
 

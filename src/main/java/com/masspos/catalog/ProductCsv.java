@@ -34,6 +34,11 @@ public final class ProductCsv {
     private ProductCsv() {
     }
 
+    /** The catalogue from the entities, for a backup that has no screen to ask about stock. */
+    public static String writeCatalogue(List<Product> products) {
+        return write(products.stream().map(product -> ProductController.ProductView.of(product, 0)).toList());
+    }
+
     public static String write(List<ProductController.ProductView> products) {
         List<List<String>> rows = new ArrayList<>();
         rows.add(COLUMNS);

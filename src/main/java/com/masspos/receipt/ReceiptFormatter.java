@@ -3,6 +3,7 @@ package com.masspos.receipt;
 import com.masspos.billing.CreditNote;
 import com.masspos.billing.GstStates;
 import com.masspos.billing.Invoice;
+import com.masspos.billing.InvoiceNumbers;
 import com.masspos.billing.SellerDetails;
 import com.masspos.billing.TaxDocument;
 import com.masspos.billing.TaxLine;
@@ -115,9 +116,16 @@ public class ReceiptFormatter {
             doc.leftRight(hasText(seated.getTableNo()) ? "Table: " + seated.getTableNo() : "",
                     hasText(seated.getSupplierId()) ? "Supplier: " + seated.getSupplierId() : "");
         }
-        doc.leftRight(numberLabel(invoice) + invoice.getNumber(), "Date: " + DATE.format(invoice.getDocumentDate()));
-        doc.leftRight("Cashier: " + invoice.getCashier().getDisplayName(),
+        // The counter is its own line rather than three characters stuck to the front of the
+        // number. A customer reading "Bill No: 00001" back over the phone, or a cashier finding it
+        // on the Bills screen, wants the running number and nothing else; which counter took it is
+        // a separate fact, and one that matters only when a shop has more than one.
+        doc.leftRight(numberLabel(invoice) + InvoiceNumbers.serialOf(invoice.getNumber()),
+                "Date: " + DATE.format(invoice.getDocumentDate()));
+        String counter = InvoiceNumbers.counterOf(invoice.getNumber());
+        doc.leftRight(counter.isEmpty() ? "" : "Counter: " + counter,
                 "Time: " + TIME.format(invoice.getIssuedAt().atZone(IndiaTime.ZONE)));
+        doc.wrapped("Cashier: " + invoice.getCashier().getDisplayName());
         if (invoice.isB2b()) {
             if (hasText(invoice.getBuyerName())) {
                 doc.wrapped("Bill to: " + invoice.getBuyerName());

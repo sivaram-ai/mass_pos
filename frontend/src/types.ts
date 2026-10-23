@@ -437,3 +437,20 @@ export interface AuditEntry {
   change: string
   entityId: string
 }
+
+/** What the sign-in screen may still offer: a backup put back before anyone has signed in. */
+export interface SetupView {
+  /** False once a bill has been issued or the factory admin has picked its own PIN. */
+  fresh: boolean
+  candidates: BackupCandidate[]
+  /** Already staged and waiting for the next start, if any. */
+  restoreFrom: string | null
+  lookedIn: string
+}
+
+export interface BackupCandidate {
+  name: string
+  sizeBytes: number
+  takenAt: string
+  folder: string
+}

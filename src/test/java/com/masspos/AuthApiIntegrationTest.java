@@ -20,6 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -128,7 +129,60 @@ class AuthApiIntegrationTest {
         String onlyAdminId = users.findByUsernameIgnoreCase("admin").orElseThrow().getId().toString();
         if (admins == 1) {
             assertThat(org.assertj.core.api.Assertions.catchThrowable(
-                    () -> auth.updateUser(java.util.UUID.fromString(onlyAdminId), "Administrator", UserRole.CASHIER, true)))
+                    () -> auth.updateUser(java.util.UUID.fromString(onlyAdminId), "admin", "Administrator",
+                            UserRole.CASHIER, true)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("only administrator");
+        }
+    }
+
+    /**
+     * The sign-in name is editable, so a shop that typed "cashier1" for a person called Meena can
+     * fix it. Their old sessions go with the old name: a till left signed in under it would be
+     * confusing, and the person needs to see the new name work.
+     */
+    @Test
+    void aPersonsSignInNameCanBeCorrectedAndTheOldOneStopsWorking() throws Exception {
+        String admin = TestAccounts.tokenFor(auth, "owner3", UserRole.ADMIN);
+        String id = auth.createUser("cashier1", "Meena", UserRole.CASHIER, "551923").getId().toString();
+        mvc.perform(login("cashier1", "551923")).andExpect(status().isOk());
+
+        mvc.perform(as(put("/api/users/" + id), admin).header(LocalApiGuard.CLIENT_HEADER, "test")
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"username\":\"meena\",\"displayName\":\"Meena R\",\"role\":\"CASHIER\","
+                                + "\"active\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.username").value("meena"))
+                .andExpect(jsonPath("$.displayName").value("Meena R"));
+
+        mvc.perform(login("meena", "551923")).andExpect(status().isOk());
+        mvc.perform(login("cashier1", "551923")).andExpect(status().isUnauthorized());
+    }
+
+    /** One sign-in name, one person: the box is named so the Staff screen can point at it. */
+    @Test
+    void aSignInNameAlreadyTakenIsRefusedAgainstTheBoxItWasTypedIn() throws Exception {
+        String admin = TestAccounts.tokenFor(auth, "owner4", UserRole.ADMIN);
+        auth.createUser("anand", "Anand", UserRole.CASHIER, "551924");
+        String id = auth.createUser("kumar", "Kumar", UserRole.CASHIER, "551925").getId().toString();
+
+        mvc.perform(as(put("/api/users/" + id), admin).header(LocalApiGuard.CLIENT_HEADER, "test")
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"username\":\"anand\",\"displayName\":\"Kumar\",\"role\":\"CASHIER\","
+                                + "\"active\":true}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.username").value("is already used by Anand"))
+                .andExpect(jsonPath("$.detail").value("Username is already used by Anand."));
+    }
+
+    /** Switching the last admin off locks the shop out of its own till, so it is refused. */
+    @Test
+    void theLastAdminCannotBeSwitchedOffEither() {
+        String onlyAdminId = users.findByUsernameIgnoreCase("admin").orElseThrow().getId().toString();
+        if (users.countByRoleAndActiveTrue(UserRole.ADMIN) == 1) {
+            assertThat(org.assertj.core.api.Assertions.catchThrowable(
+                    () -> auth.updateUser(java.util.UUID.fromString(onlyAdminId), "admin", "Administrator",
+                            UserRole.ADMIN, false)))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("only administrator");
         }

@@ -1,6 +1,6 @@
-import { useState } from 'react'
-import { api, saveToken } from '../api'
-import type { Principal } from '../types'
+import { useEffect, useRef, useState } from 'react'
+import { api, messageOfFailure, postBinary, saveToken } from '../api'
+import type { BackupCandidate, Principal, SetupView } from '../types'
 import { Banner, Button, Field, inputClass } from '../components/ui'
 
 /** Sampled from the company logo, so the product name is written in the brand's own colours. */
@@ -53,6 +53,15 @@ export function Login({ onSignedIn }: { onSignedIn: (user: Principal) => void })
   const [pin, setPin] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [setup, setSetup] = useState<SetupView | null>(null)
+  const [restoring, setRestoring] = useState(false)
+
+  // A till being replaced has its shop on a pen drive, and that file holds the staff and their
+  // PINs. Offering it here means the person never has to sign in with a PIN the old machine
+  // would not recognise. It answers for an untouched till only; afterwards it says so.
+  useEffect(() => {
+    api.get<SetupView>('/api/setup').then(setSetup).catch(() => setSetup(null))
+  }, [])
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -113,10 +122,41 @@ export function Login({ onSignedIn }: { onSignedIn: (user: Principal) => void })
                 className="mt-6 w-full justify-center rounded-lg py-3 text-base">
           {busy ? 'Signing in…' : 'Sign in'}
         </Button>
-        <p className="mt-5 text-center text-xs text-slate-400">
-          First start? The admin PIN is in logs\pos.log
-        </p>
+        {setup?.fresh && !setup.restoreFrom && (
+          <p className="mt-5 text-center text-xs text-slate-400">
+            First start? Sign in as <span className="font-medium text-slate-500">admin</span> with PIN
+            {' '}<span className="font-medium text-slate-500">0000</span>, then pick your own.
+          </p>
+        )}
       </form>
+
+      {setup?.fresh && (
+        <div className="mt-4 w-full max-w-md rounded-2xl bg-white/95 p-5 shadow-xl">
+          {setup.restoreFrom ? (
+            <Banner tone="good">
+              <p className="font-medium">{setup.restoreFrom} is ready to go back.</p>
+              <p className="mt-1">
+                Close GO RockIt and open it again. The shop comes back as it was, staff and PINs
+                included, and you sign in with the PIN you used on the old till.
+              </p>
+            </Banner>
+          ) : restoring ? (
+            <RestorePanel
+              setup={setup}
+              onDone={setSetup}
+              onClose={() => setRestoring(false)}
+            />
+          ) : (
+            <button
+              type="button"
+              className="w-full text-center text-sm text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
+              onClick={() => setRestoring(true)}
+            >
+              Moving from another till? Put a backup back first
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -181,4 +221,101 @@ export function ChangePin({ user, onDone, onCancel }: {
       </form>
     </div>
   )
+}
+
+/**
+ * Putting a shop back before anyone signs in. The copy outside the installed folder is the one
+ * that survives a reinstall, so it is listed first and usually the only one worth picking; a
+ * machine being replaced outright has nothing on it, which is what the file picker is for.
+ *
+ * <p>Nothing changes until the till is restarted. That is not a limitation worth hiding: the
+ * database has to be closed before it can be swapped, so the swap happens on the next start.
+ */
+function RestorePanel({ setup, onDone, onClose }: {
+  setup: SetupView
+  onDone: (setup: SetupView) => void
+  onClose: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const fileBox = useRef<HTMLInputElement>(null)
+
+  const run = async (what: () => Promise<SetupView>) => {
+    setBusy(true)
+    setError(null)
+    try {
+      onDone(await what())
+    } catch (failure) {
+      setError(messageOfFailure(failure, 'Could not put that backup back'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const fromFile = async (file: File) => {
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    await run(() => postBinary<SetupView>(`/api/setup/upload?name=${encodeURIComponent(file.name)}`, bytes))
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-sm font-semibold text-slate-700">Put a backup back</h2>
+        <button type="button" className="text-xs text-slate-400 hover:text-slate-600" onClick={onClose}>
+          Not now
+        </button>
+      </div>
+      <p className="text-xs text-slate-500">
+        The shop comes back as it was - products, bills, settings, and the staff with their own
+        PINs - so you sign in with the PIN from the old till, not this one.
+      </p>
+      {error && <Banner tone="bad" onDismiss={() => setError(null)}>{error}</Banner>}
+
+      {setup.candidates.length > 0 ? (
+        <ul className="max-h-48 space-y-1 overflow-y-auto">
+          {setup.candidates.map((copy) => (
+            <li key={copy.folder + copy.name}>
+              <button
+                type="button"
+                disabled={busy}
+                className="w-full rounded-md border border-slate-200 px-3 py-2 text-left text-sm hover:bg-slate-50 disabled:opacity-50"
+                onClick={() => void run(() => api.post<SetupView>('/api/setup/restore',
+                  { file: copy.name, folder: copy.folder }))}
+              >
+                <span className="font-medium text-slate-700">{copy.name}</span>
+                <span className="block text-xs text-slate-400">{describe(copy)}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-xs text-slate-400">
+          No copies found in {setup.lookedIn}. Choose the file from your pen drive instead.
+        </p>
+      )}
+
+      <input
+        ref={fileBox}
+        type="file"
+        accept=".db"
+        className="hidden"
+        onChange={(event) => {
+          const chosen = event.target.files?.[0]
+          event.target.value = ''
+          if (chosen) {
+            void fromFile(chosen)
+          }
+        }}
+      />
+      <Button disabled={busy} className="w-full justify-center" onClick={() => fileBox.current?.click()}>
+        {busy ? 'Reading…' : 'Choose a backup file (pos.db)'}
+      </Button>
+    </div>
+  )
+}
+
+function describe(copy: BackupCandidate): string {
+  const megabytes = (copy.sizeBytes / 1_000_000).toFixed(1)
+  const taken = copy.takenAt ? new Date(copy.takenAt).toLocaleString() : 'date unknown'
+  return `${taken} · ${megabytes} MB · ${copy.folder}`
 }

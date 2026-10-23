@@ -36,6 +36,39 @@ public final class InvoiceNumbers {
         return checked("%s-%s-R%04d".formatted(terminalCode, financialYear, sequenceNo));
     }
 
+    /**
+     * The counter a document was issued on, taken back out of its number: the {@code T1} of
+     * {@code T1-2627-00001}. Empty for anything not in that shape, such as a number brought in
+     * from another system.
+     */
+    public static String counterOf(String number) {
+        String[] parts = split(number);
+        return parts == null ? "" : parts[0];
+    }
+
+    /**
+     * The running number on its own: the {@code 00001} of {@code T1-2627-00001}, or {@code R0001}
+     * of a credit note. What a person is shown and what they say out loud - the counter and the
+     * financial year are beside it on the screen and on the paper, where they do not have to be
+     * read past to find the one thing that identifies the bill on the till it was taken on.
+     *
+     * <p>Rule 46(b) allows a serial in multiple series, which is what one series per counter is;
+     * the number of record, filed and stored, is still the whole {@code T1-2627-00001}.
+     */
+    public static String serialOf(String number) {
+        String[] parts = split(number);
+        return parts == null ? number : parts[2];
+    }
+
+    /** Null unless the number is this till's own three-part shape. */
+    private static String[] split(String number) {
+        if (number == null) {
+            return null;
+        }
+        String[] parts = number.split("-");
+        return parts.length == 3 ? parts : null;
+    }
+
     private static String checked(String number) {
         if (number.length() > MAX_LENGTH) {
             throw new IllegalStateException("Document number exceeds GST's 16-character limit: " + number);

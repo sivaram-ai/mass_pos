@@ -36,8 +36,10 @@ java -jar target\mass-pos.jar
 
 Then open **http://127.0.0.1:8765**.
 
-1. The first start creates an `admin` account and writes its PIN into `<data-dir>\logs\pos.log`.
-   Sign in with it; the app makes you choose your own PIN straight away.
+1. The first start creates an `admin` account with PIN `0000`, and says so in the log. Sign in with
+   it; the app makes you choose your own PIN straight away. Set `pos.auth.initial-admin-pin` to use
+   a different one. A till replacing another can put that one's backup back from the sign-in screen
+   instead, which brings its staff and their PINs with it.
 2. Go to **Settings** and fill in the shop's legal name and address. Billing stays blocked until
    both are set. Add the GSTIN if the shop is registered for GST: bills are then tax invoices.
    Without a GSTIN the shop bills without GST: no tax is charged whatever rate an item carries,

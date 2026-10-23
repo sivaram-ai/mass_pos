@@ -25,7 +25,13 @@ import java.util.Set;
 public class AuthFilter extends OncePerRequestFilter {
 
     private static final String PREFIX = "Bearer ";
-    private static final Set<String> PUBLIC_PATHS = Set.of("/api/auth/login");
+    /**
+     * Sign-in, and the setup screen that offers to put a backup back before anyone has signed in.
+     * The setup endpoints refuse once the till has issued a bill or the admin has picked a PIN;
+     * see SetupController for why they cannot sit behind a token.
+     */
+    private static final Set<String> PUBLIC_PATHS = Set.of("/api/auth/login",
+            "/api/setup", "/api/setup/restore", "/api/setup/upload");
     /** All a user may do while their account still carries a forced PIN change. */
     private static final Set<String> PIN_CHANGE_PATHS =
             Set.of("/api/auth/change-pin", "/api/auth/logout", "/api/auth/me");

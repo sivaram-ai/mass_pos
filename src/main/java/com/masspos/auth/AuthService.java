@@ -4,6 +4,7 @@ import com.masspos.config.PosProperties;
 import com.masspos.user.User;
 import com.masspos.user.UserRepository;
 import com.masspos.user.UserRole;
+import com.masspos.web.FieldRejectedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -100,13 +101,7 @@ public class AuthService {
 
     @Transactional
     public User createUser(String username, String displayName, UserRole role, String pin) {
-        String name = username == null ? "" : username.trim();
-        if (!name.matches("[A-Za-z0-9._-]{3,50}")) {
-            throw new IllegalArgumentException("Username must be 3-50 letters, digits, dot, dash or underscore");
-        }
-        if (users.findByUsernameIgnoreCase(name).isPresent()) {
-            throw new IllegalArgumentException("A user named " + name + " already exists");
-        }
+        String name = checkUsername(username, null);
         Pins.check(pin);
         User user = new User(name, displayName, encoder.encode(pin), role);
         user.requirePinChange();
@@ -114,17 +109,38 @@ public class AuthService {
     }
 
     /**
-     * Renaming, changing a role, deactivating. Deactivating signs the person out of every till at
-     * once, which is the point when someone leaves mid-shift.
+     * The administrator the first start creates. Its PIN is deliberately one the rules would
+     * refuse - it is printed in the setup guide, typed once, and changed before anything else can
+     * be done - so the rules are applied to the replacement rather than to this.
      */
     @Transactional
-    public User updateUser(UUID userId, String displayName, UserRole role, boolean active) {
+    public User createFirstAdmin(String username, String displayName, String pin) {
+        User admin = new User(username, displayName, encoder.encode(pin), UserRole.ADMIN);
+        admin.requirePinChange();
+        return users.save(admin);
+    }
+
+    /**
+     * Renaming, changing the sign-in name, changing a role, deactivating. Deactivating signs the
+     * person out of every till at once, which is the point when someone leaves mid-shift.
+     *
+     * <p>A shop must never be left unable to get in. The last active administrator cannot be given
+     * another role or switched off; give somebody else the role first, and then it can.
+     *
+     * @param username null leaves the sign-in name alone
+     */
+    @Transactional
+    public User updateUser(UUID userId, String username, String displayName, UserRole role, boolean active) {
         User user = users.findById(userId).orElseThrow(() -> new IllegalArgumentException("No such user"));
         boolean wouldLoseAdmin = user.getRole() == UserRole.ADMIN && user.isActive()
                 && (role != UserRole.ADMIN || !active);
         if (wouldLoseAdmin && users.countByRoleAndActiveTrue(UserRole.ADMIN) <= 1) {
             throw new IllegalArgumentException(
                     "This is the only administrator; give someone else the admin role first");
+        }
+        if (username != null && !username.trim().equalsIgnoreCase(user.getUsername())) {
+            user.changeUsername(checkUsername(username, userId));
+            revokeAllFor(userId, "USERNAME_CHANGED");
         }
         user.rename(displayName);
         user.changeRole(role);
@@ -135,6 +151,24 @@ public class AuthService {
             revokeAllFor(userId, "DEACTIVATED");
         }
         return user;
+    }
+
+    /**
+     * One sign-in name belongs to one person, and the person being saved never clashes with
+     * themselves. Rejected as a field error so the Staff screen can point at the box.
+     */
+    private String checkUsername(String username, UUID isMine) {
+        String name = username == null ? "" : username.trim();
+        if (!name.matches("[A-Za-z0-9._-]{3,50}")) {
+            throw new FieldRejectedException("username",
+                    "must be 3-50 letters, digits, dot, dash or underscore");
+        }
+        users.findByUsernameIgnoreCase(name)
+                .filter(existing -> !existing.getId().equals(isMine))
+                .ifPresent(existing -> {
+                    throw new FieldRejectedException("username", "is already used by " + existing.getDisplayName());
+                });
+        return name;
     }
 
     /** Admin reset: the user picks their own PIN at the next sign-in. */

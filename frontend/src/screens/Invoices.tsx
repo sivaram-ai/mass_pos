@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { api, ApiError, messageOfFailure, percent, quantity, rupees } from '../api'
+import { api, ApiError, billNo, messageOfFailure, percent, quantity, rupees } from '../api'
 import type { CreditNote, Invoice, Role } from '../types'
 import { Button, Empty, Field, inputClass, KeyBox, Modal, Panel, smallInputClass } from '../components/ui'
 import { useScreenKeys } from '../shortcuts'
@@ -162,7 +162,7 @@ export default function Invoices({ role, onToast, onOpenInBilling }: {
       const path = entry.kind === 'bill' ? `/api/invoices/${entry.id}/receipt` : `/api/returns/${entry.id}/receipt`
       try {
         await api.post(path, { copy: 'DUPLICATE', openDrawer: false })
-        onToast({ tone: 'good', text: `Reprinted ${entry.number}` })
+        onToast({ tone: 'good', text: `Reprinted ${billNo(entry.number)}` })
       } catch (failure) {
         onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not reprint') })
       }
@@ -333,15 +333,18 @@ export default function Invoices({ role, onToast, onOpenInBilling }: {
         onKeyDown={onListKeyDown}
         onFocus={() => setListFocused(true)}
         onBlur={() => setListFocused(false)}
-        className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+        className="overflow-x-auto rounded-md outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
       >
         {shown.length === 0 ? (
           <Empty>{text ? `Nothing on ${date} matches "${search.trim()}". Press Enter to look further.` : `No bills on ${date}`}</Empty>
         ) : (
-          <table className="w-full text-sm">
+          // A minimum width: the counter column made this tight, and a narrow window should
+          // scroll rather than run the headings into each other.
+          <table className="w-full min-w-[46rem] text-sm">
             <thead className="text-xs uppercase tracking-wide text-slate-400">
               <tr>
-                <th className="py-1 pl-2 text-left">Number</th>
+                <th className="py-1 pl-2 pr-4 text-left">Bill no</th>
+                <th className="py-1 pr-4 text-left">Counter</th>
                 <th className="py-1 text-left">Time</th>
                 <th className="py-1 text-left">Cashier</th>
                 <th className="py-1 text-left">Customer</th>
@@ -369,23 +372,26 @@ export default function Invoices({ role, onToast, onOpenInBilling }: {
                       isSelected ? 'bg-sky-50 shadow-[inset_3px_0_0_0_var(--color-sky-500)]'
                         : entry.kind === 'return' ? 'bg-rose-50/40 hover:bg-slate-50' : 'hover:bg-slate-50'}`}
                   >
-                    <td className="num py-2 pl-2">
+                    <td className="num py-2 pl-2 pr-4">
                       <span className={`font-medium ${entry.kind === 'return' ? 'text-rose-700' : 'text-sky-700'}`}>
-                        {entry.number}
+                        {billNo(entry.number)}
                       </span>
                       {entry.kind === 'bill' && entry.bill.status === 'CANCELLED' && (
                         <span className="ml-2 rounded bg-rose-100 px-1.5 py-0.5 text-xs text-rose-700">cancelled</span>
                       )}
                       {entry.kind === 'bill' && entry.bill.replacesInvoiceNumber && (
                         <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">
-                          replaces {entry.bill.replacesInvoiceNumber}
+                          replaces {billNo(entry.bill.replacesInvoiceNumber)}
                         </span>
                       )}
                       {entry.kind === 'return' && (
                         <span className="ml-2 rounded bg-rose-100 px-1.5 py-0.5 text-xs text-rose-700">
-                          return{entry.note.originalInvoiceNumber ? ` on ${entry.note.originalInvoiceNumber}` : ''}
+                          return{entry.note.originalInvoiceNumber ? ` on ${billNo(entry.note.originalInvoiceNumber)}` : ''}
                         </span>
                       )}
+                    </td>
+                    <td className="num py-2 pr-4 text-slate-400">
+                      {entry.kind === 'bill' ? entry.bill.terminalCode : entry.note.terminalCode}
                     </td>
                     <td className="num py-2 text-slate-500">{timeOf(entry.at)}</td>
                     <td className="py-2 text-slate-600">{entry.kind === 'bill' ? entry.bill.cashier : entry.note.cashier}</td>
@@ -504,7 +510,7 @@ function BillDialog({ opened, onClose, onToast }: { opened: Invoice; onClose: ()
 
   const chain = versions ?? [opened]
   return (
-    <Modal title={`Bill ${opened.invoiceNumber}`} onClose={onClose} wide>
+    <Modal title={`Bill ${billNo(opened.invoiceNumber)}`} onClose={onClose} wide>
       <div ref={body} tabIndex={-1} className="max-h-[70vh] space-y-4 overflow-auto outline-none">
         {chain.length > 1 && (
           <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -521,7 +527,7 @@ function BillDialog({ opened, onClose, onToast }: { opened: Invoice; onClose: ()
             >
               {chain.length > 1 && (
                 <h3 className="mb-2 flex flex-wrap items-baseline gap-2 font-semibold text-slate-800">
-                  Bill {invoice.invoiceNumber}
+                  Bill {billNo(invoice.invoiceNumber)}
                   {isOpened && <span className="text-sky-700">(Opened)</span>}
                   {invoice.status === 'CANCELLED' && (
                     <span className="rounded bg-rose-100 px-1.5 py-0.5 text-xs font-medium text-rose-700">cancelled</span>
@@ -543,7 +549,11 @@ function BillDetails({ invoice }: { invoice: Invoice }) {
       <div className="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-500">
         <span>{new Date(invoice.issuedAt).toLocaleString()}</span>
         <span>Cashier {invoice.cashier}</span>
-        <span>Till {invoice.terminalCode}</span>
+        <span>Counter {invoice.terminalCode}</span>
+        {/* The number of record: what the shop files, and what a sync or an officer asks for. */}
+        <span className="num text-slate-400" title="The full number this bill is stored and filed under">
+          {invoice.invoiceNumber}
+        </span>
         {invoice.taxInvoice
           ? <span>Place of supply {invoice.placeOfSupply}</span>
           : <span className="rounded bg-slate-100 px-1.5 text-slate-600">Bill without GST</span>}
@@ -576,12 +586,15 @@ function CreditNoteDialog({ note, onClose }: { note: CreditNote; onClose: () => 
   const body = useRef<HTMLDivElement>(null)
   useEffect(() => body.current?.focus(), [])
   return (
-    <Modal title={`Return ${note.creditNoteNumber}`} onClose={onClose} wide>
+    <Modal title={`Return ${billNo(note.creditNoteNumber)}`} onClose={onClose} wide>
       <div ref={body} tabIndex={-1} className="outline-none">
         <div className="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-500">
           <span>{new Date(note.issuedAt).toLocaleString()}</span>
           <span>By {note.cashier}</span>
-          <span>Till {note.terminalCode}</span>
+          <span>Counter {note.terminalCode}</span>
+          <span className="num text-slate-400" title="The full number this return is stored and filed under">
+            {note.creditNoteNumber}
+          </span>
           <span>{note.originalInvoiceNumber ? `Against bill ${note.originalInvoiceNumber}` : 'Without a bill'}</span>
           {note.reason && <span>Reason: {note.reason}</span>}
         </div>
@@ -678,7 +691,7 @@ function CancelDialog({ invoice, onClose, onDone, onToast }: {
     }
     try {
       await api.post(`/api/invoices/${invoice.id}/cancel`, { reason })
-      onToast({ tone: 'good', text: `${invoice.invoiceNumber} cancelled and stock returned` })
+      onToast({ tone: 'good', text: `Bill ${billNo(invoice.invoiceNumber)} cancelled and stock returned` })
       onDone()
     } catch (failure) {
       onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not cancel') })
@@ -686,7 +699,7 @@ function CancelDialog({ invoice, onClose, onDone, onToast }: {
   }
 
   return (
-    <Modal title={`Cancel ${invoice.invoiceNumber}`} onClose={onClose}>
+    <Modal title={`Cancel bill ${billNo(invoice.invoiceNumber)}`} onClose={onClose}>
       <form
         className="space-y-3"
         onSubmit={(event) => {
