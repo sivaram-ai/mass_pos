@@ -26,6 +26,33 @@ public final class CounterApp {
     /** Where FILE-type jobs land, for a counter set up before its printer has arrived. */
     private static final String SPOOL = "printer-out";
 
+    /**
+     * Naming the three things that are ever actually wrong, in the order worth checking.
+     *
+     * <p>"Nothing answered" was true and useless: a counter cannot tell a server that is switched
+     * off from one that is running but keeping to itself, or from a network that will not carry
+     * the question. Two of the three are on the <em>server's</em> machine, which is the part
+     * nobody guesses, so the message says so rather than sending somebody to look at the cable.
+     */
+    private static final String CANNOT_REACH = """
+            This counter could not find the shop's server.
+
+            On the server's computer, in order:
+
+            1. Is GO RockIt running, and set to serve counters? Open its data folder, open
+               pos.properties, and check pos.clients.max is the number of counters the shop
+               has. 0 means the server keeps to itself. Restart it after changing this.
+
+            2. Did Windows Firewall ask about GO RockIt, and was it allowed? Refused once,
+               Windows remembers, and no counter will ever reach it.
+
+            3. Is the network set to Private in Windows rather than Public? Windows stops
+               machines reaching each other on a Public network whatever the firewall says.
+               Both computers need this.
+
+            If all three are right, type the server's address here instead of looking for it:
+            some networks do not pass the question on.""";
+
     private CounterApp() {
     }
 
@@ -69,10 +96,7 @@ public final class CounterApp {
             found = ServerFinder.reachable(config.lastServer());
         }
         if (found.isEmpty()) {
-            CounterSettings.say("GO RockIt counter",
-                    "This counter could not reach the shop's server.\n\n"
-                            + "Check that the server computer is on and that this machine is on the same\n"
-                            + "network - a cable or Wi-Fi, either is fine - then try again.");
+            CounterSettings.say("GO RockIt counter", CANNOT_REACH);
         }
         return found;
     }

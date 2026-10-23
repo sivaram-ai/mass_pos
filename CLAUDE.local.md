@@ -205,6 +205,12 @@ folder and everything under it, so that is the only copy that survives one.
   - a record component
   - an empty or default entry in `application.properties`
   - a commented, explained entry in `pos-template.properties`
+
+  Skipping the third is not cosmetic. `pos.clients.max` shipped without it, so the shop's own
+  `pos.properties` never mentioned the setting that turns the whole multi-till feature on; the
+  install guide told the owner to go and edit a line that was not there, the server stayed on
+  loopback, and the counter said only that nothing had answered. The template is how a shop finds
+  out a setting exists.
 - **Validation policy:**
   - Anything that is set must be valid; `@Validated` fails startup and names the property.
   - Anything the till needs only for some operations may be missing at startup. Check it when it

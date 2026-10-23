@@ -160,7 +160,9 @@ final class CounterSettings {
         if (config.find() == CounterConfig.Find.AUTOMATIC) {
             List<ServerFinder.Found> servers = ServerFinder.discover();
             if (servers.isEmpty()) {
-                return "No shop server answered. Check the cable or Wi-Fi, or type the address instead.";
+                return "<html>No shop server answered.<br>On the server: is pos.clients.max above 0,"
+                        + " did Windows Firewall allow GO RockIt, and is the network set to Private?"
+                        + "<br>Or type the server's address above instead.</html>";
             }
             if (servers.size() > 1) {
                 return servers.size() + " servers answered. Type the address of the right one: "

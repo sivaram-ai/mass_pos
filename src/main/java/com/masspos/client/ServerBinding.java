@@ -33,12 +33,20 @@ public class ServerBinding implements WebServerFactoryCustomizer<ConfigurableWeb
     @Override
     public void customize(ConfigurableWebServerFactory factory) {
         if (!clients.serving()) {
+            // Said out loud, because the silence was the bug: a shop that set a counter up and
+            // watched it fail to find anything had no way to tell that the server was never
+            // listening. This is the first line to look for when that happens.
+            log.info("This till keeps to itself: pos.clients.max is 0, so it listens on loopback only and"
+                    + " no other machine can find it or bill against it. Set pos.clients.max in"
+                    + " <data-dir>/pos.properties to the number of counters this shop has, and restart.");
             return;
         }
         try {
             factory.setAddress(InetAddress.getByName("0.0.0.0"));
-            log.info("Serving up to {} client machine(s): the billing screen is open to the LAN on this port,"
-                    + " and {} is still the only thing that decides it", clients.max(), "pos.clients.max");
+            log.info("Serving up to {} client machine(s): the billing screen is open to the network on this"
+                    + " port. If a counter still cannot find this server, the next two things to check are"
+                    + " Windows Firewall and whether the network is set to Private rather than Public.",
+                    clients.max());
         } catch (UnknownHostException impossible) {
             throw new IllegalStateException("0.0.0.0 is not a resolvable address on this machine", impossible);
         }
