@@ -1,3 +1,5 @@
+import { counterCode } from './counter'
+
 const TOKEN_KEY = 'masspos.token'
 
 /** Window event fired when the server refuses something because of the licence. */
@@ -51,6 +53,12 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const headers: Record<string, string> = {
     // Required by the server on every state-changing call: a cross-site page cannot send it.
     'X-POS-Client': 'mass-pos-ui',
+  }
+  // Which machine is asking. The server acts on it once, at sign-in, and ignores it afterwards -
+  // a session's counter lives on its token, where a request cannot reach it.
+  const counter = counterCode()
+  if (counter) {
+    headers['X-POS-Counter'] = counter
   }
   const token = savedToken()
   if (token) {
@@ -118,6 +126,10 @@ export const api = {
 
 function authHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'X-POS-Client': 'mass-pos-ui' }
+  const counter = counterCode()
+  if (counter) {
+    headers['X-POS-Counter'] = counter
+  }
   const token = savedToken()
   if (token) {
     headers.Authorization = `Bearer ${token}`

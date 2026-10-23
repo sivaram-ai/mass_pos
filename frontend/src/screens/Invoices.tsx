@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { api, ApiError, billNo, messageOfFailure, percent, quantity, rupees } from '../api'
+import { printDocument } from '../counter'
 import type { CreditNote, Invoice, Role } from '../types'
 import { Button, Empty, Field, inputClass, KeyBox, Modal, Panel, smallInputClass } from '../components/ui'
 import { useScreenKeys } from '../shortcuts'
@@ -159,9 +160,8 @@ export default function Invoices({ role, onToast, onOpenInBilling }: {
         setOpenNote(entry.note)
       }
     } else if (chosen === 'reprint') {
-      const path = entry.kind === 'bill' ? `/api/invoices/${entry.id}/receipt` : `/api/returns/${entry.id}/receipt`
       try {
-        await api.post(path, { copy: 'DUPLICATE', openDrawer: false })
+        await printDocument(entry.kind === 'bill' ? 'bill' : 'return', entry.id, 'DUPLICATE', false)
         onToast({ tone: 'good', text: `Reprinted ${billNo(entry.number)}` })
       } catch (failure) {
         onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not reprint') })

@@ -43,14 +43,6 @@ public final class DesktopLauncher {
      */
     private static final String STARTED_BY_SHELL = "GOROCKIT_STARTED_BY_SHELL";
 
-    private static final List<String> APP_BROWSERS = List.of(
-            "%ProgramFiles(x86)%/Microsoft/Edge/Application/msedge.exe",
-            "%ProgramFiles%/Microsoft/Edge/Application/msedge.exe",
-            "%LOCALAPPDATA%/Microsoft/Edge/Application/msedge.exe",
-            "%ProgramFiles%/Google/Chrome/Application/chrome.exe",
-            "%ProgramFiles(x86)%/Google/Chrome/Application/chrome.exe",
-            "%LOCALAPPDATA%/Google/Chrome/Application/chrome.exe");
-
     private DesktopLauncher() {
     }
 
@@ -143,27 +135,7 @@ public final class DesktopLauncher {
 
     /** Opens the till's screen in a window with no browser furniture around it. */
     private static void open(String url) throws IOException {
-        for (String candidate : APP_BROWSERS) {
-            Path browser = expand(candidate);
-            if (browser != null && Files.isExecutable(browser)) {
-                new ProcessBuilder(browser.toString(), "--app=" + url)
-                        .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-                        .redirectError(ProcessBuilder.Redirect.DISCARD)
-                        .start();
-                return;
-            }
-        }
-        Desktop.getDesktop().browse(URI.create(url));
-    }
-
-    /** Resolves one {@code %VARIABLE%} at the front of a path, the way cmd would. */
-    static Path expand(String path) {
-        if (!path.startsWith("%")) {
-            return Path.of(path);
-        }
-        int end = path.indexOf('%', 1);
-        String value = System.getenv(path.substring(1, end));
-        return value == null || value.isBlank() ? null : Path.of(value + path.substring(end + 1));
+        Browser.openApp(url);
     }
 
     private static Path appDir() {

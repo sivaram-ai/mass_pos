@@ -280,6 +280,27 @@ public final class EscPos {
         return out.toByteArray();
     }
 
+    /**
+     * A job that was laid out somewhere else and only has to be sent.
+     *
+     * <p>A counter's print agent is handed a bill the server has already composed. It must reach
+     * every transport the till has always supported, and the two kinds need different things from
+     * a job: a thermal printer executes {@link #toBytes()}, while a driver printer is given
+     * {@link #printedLines()} to render. Both travel, so neither transport is the poor relation -
+     * and nothing is laid out twice, which is what would let a counter's bill drift from the
+     * server's.
+     */
+    public static EscPos rendered(byte[] bytes, List<Line> lines) {
+        EscPos job = new EscPos(CodePage.PC437, 48);
+        job.out.reset();
+        job.out.writeBytes(bytes);
+        job.printedLines.clear();
+        job.printedLines.addAll(lines);
+        job.preview.setLength(0);
+        lines.forEach(line -> job.preview.append(line.text()).append(System.lineSeparator()));
+        return job;
+    }
+
     public String plainText() {
         return hasPendingLine() ? preview + renderedPendingLine() : preview.toString();
     }

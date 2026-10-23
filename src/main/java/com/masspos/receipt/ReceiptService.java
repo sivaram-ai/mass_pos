@@ -3,6 +3,7 @@ package com.masspos.receipt;
 import com.masspos.billing.CreditNote;
 import com.masspos.billing.Invoice;
 import com.masspos.hardware.EscPos;
+import com.masspos.hardware.PrinterProperties;
 import com.masspos.hardware.ThermalPrinter;
 import com.masspos.settings.ShopSettingsService;
 import jakarta.persistence.EntityManager;
@@ -49,6 +50,41 @@ public class ReceiptService {
                     openDrawer && copy == ReceiptCopy.ORIGINAL);
         });
         return printer.print(receipt);
+    }
+
+    /**
+     * The same bill, rendered for a counter's own printer instead of the server's.
+     *
+     * <p>A counter has no server, so the machine holding the database cannot reach the printer
+     * standing on that counter. The bill is laid out here - once, by the code that lays out every
+     * other bill - and the bytes go back to the counter, whose print agent writes them to the
+     * printer beside it. The paper is described by the counter, because only the counter knows
+     * how wide its own roll is; everything else about the bill is the shop's and comes from here.
+     */
+    public EscPos render(UUID invoiceId, ReceiptCopy copy, boolean openDrawer, PrinterProperties paper) {
+        EscPos receipt = readOnlyTx.execute(status -> {
+            Invoice invoice = em.find(Invoice.class, invoiceId);
+            if (invoice == null) {
+                throw new EntityNotFoundException("No invoice " + invoiceId);
+            }
+            return formatter.format(invoice, settings.currentOrEmpty(), paper, copy,
+                    openDrawer && copy == ReceiptCopy.ORIGINAL);
+        });
+        return receipt;
+    }
+
+    /** A return, rendered for a counter's own printer. */
+    public EscPos renderCreditNote(UUID creditNoteId, ReceiptCopy copy, boolean openDrawer,
+                                   PrinterProperties paper) {
+        EscPos receipt = readOnlyTx.execute(status -> {
+            CreditNote note = em.find(CreditNote.class, creditNoteId);
+            if (note == null) {
+                throw new EntityNotFoundException("No return " + creditNoteId);
+            }
+            return formatter.format(note, settings.currentOrEmpty(), paper, copy,
+                    openDrawer && copy == ReceiptCopy.ORIGINAL);
+        });
+        return receipt;
     }
 
     /** A credit note, laid out like a bill; the drawer opens for the ORIGINAL copy only, to pay the refund out. */

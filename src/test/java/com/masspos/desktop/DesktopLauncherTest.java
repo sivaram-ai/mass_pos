@@ -36,13 +36,13 @@ class DesktopLauncherTest {
 
     @Test
     void aPlainPathIsLeftAlone() {
-        assertThat(DesktopLauncher.expand("C:/Program Files/Microsoft/msedge.exe"))
+        assertThat(Browser.expand("C:/Program Files/Microsoft/msedge.exe"))
                 .isEqualTo(Path.of("C:/Program Files/Microsoft/msedge.exe"));
     }
 
     @Test
     void aBrowserUnderAFolderThisMachineDoesNotHaveIsSkipped() {
-        assertThat(DesktopLauncher.expand("%NO_SUCH_FOLDER_ON_ANY_TILL%/msedge.exe")).isNull();
+        assertThat(Browser.expand("%NO_SUCH_FOLDER_ON_ANY_TILL%/msedge.exe")).isNull();
     }
 
     @Test

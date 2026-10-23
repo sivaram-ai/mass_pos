@@ -105,6 +105,18 @@ public class ClientRegistry {
                 terminal.describe(terminal.getName(), terminal.getSection(), terminal.getType(), Instant.now()));
     }
 
+    /**
+     * Gives a counter's place back now rather than when it goes quiet, for a shop swapping a
+     * machine over. The row stays: its code is on bills and in the audit trail and has to keep
+     * reading. Only the "last seen" is wound back, which is what the count looks at.
+     */
+    @Transactional
+    public void release(String code) {
+        terminals.findByCode(code).ifPresent(terminal -> terminal.describe(terminal.getName(),
+                terminal.getSection(), terminal.getType(),
+                Instant.now().minus(clients.idleMinutes() + 1L, ChronoUnit.MINUTES)));
+    }
+
     /** The counters billing against this server now, newest contact first. The server itself is not one. */
     @Transactional(readOnly = true)
     public List<Terminal> connected() {

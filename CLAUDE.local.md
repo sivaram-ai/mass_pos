@@ -329,6 +329,27 @@ folder and everything under it, so that is the only copy that survives one.
   - The counter is fixed **at sign-in** and kept on the `AuthToken`. Not read from a header per
     request (a signed-in browser could then renumber its own bills) and not from the client's IP
     (DHCP changes it).
+- **A counter is a different program, not a till with the database removed.**
+  `com.masspos.counter` is the client application: no Spring, no JPA, no licence, one properties
+  file in `%LOCALAPPDATA%\GoRockitPOS-Counter`. It builds as `mass-pos-counter.jar` (its own
+  `maven-jar-plugin` execution, an explicit include list) with its libraries in `target/counter-lib`,
+  and `tools/build-installer.ps1` makes a second, smaller jpackage image from them. Keep
+  `com.masspos.client` (the server's view of its clients) and `com.masspos.counter` (the client
+  itself) apart: a wildcard include across them would pull Spring into the counter.
+  - **The counter reuses the hardware classes rather than owning a copy of ESC/POS.** The include
+    list names only the Spring-free ones. `CounterAppTest` and a classpath probe in the build
+    guard it; if the counter jar ever passes 5 MB the installer script fails, because that means
+    the include list has stopped working.
+  - **The print agent is why a counter is more than a browser window.** It listens on the
+    counter's own loopback, takes a bill the server has already laid out, and writes it to the
+    printer and drawer standing there. The server renders once - `/api/invoices/{id}/receipt-job`
+    returns both the bytes a thermal printer executes and the lines a driver printer renders, via
+    `EscPos.rendered` - so a counter's bill can never drift from the server's.
+  - **A counter sends `print: false` when it bills.** Otherwise the bill comes out in the back
+    office, where nobody is standing to take it.
+  - **The counter number travels on the address** (`?counter=T2&agent=8767`), is kept per machine
+    in `localStorage`, and goes out as `X-POS-Counter` on every request. The server acts on it
+    once, at sign-in.
 - **`pos.clients.max` is the one switch for a shop server.** 0 (the default, and every till shipped
   so far) = loopback only, nothing on the network can reach it. Above 0, `ServerBinding` binds
   0.0.0.0 and `LocalApiGuard` widens its Host check from loopback to this machine's own addresses

@@ -5,6 +5,7 @@ import {
   api, billNo, clockTime, messageOfFailure, milliFromUnits, paiseFromRupees, percent, quantity, rupees,
   rupeesForInput,
 } from '../api'
+import { hasPrintAgent, printDocument } from '../counter'
 import type {
   CartLine, Customer, EditResponse, HeldBill, Invoice, PaymentMode, Product, QuotedCart, Refund, Returnable,
   ReturnResponse, Role, SaleResponse, SettingsView, Supplier, Tender,
@@ -749,14 +750,17 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
   }
 
   const sell = async (cart: Row[], tenders: Tender[], parcel: boolean) => {
+    const cash = tenders.some((tender) => tender.mode === 'CASH')
     const sale = await api.post<SaleResponse>('/api/sales', {
       lines: cartBody(cart),
       payments: tenders,
       buyerGstin: gst ? customer.gstin || null : null,
       buyerName: customer.name || null,
       placeOfSupply: gst ? customer.placeOfSupply || null : null,
-      print: true,
-      openDrawer: tenders.some((tender) => tender.mode === 'CASH'),
+      // A counter prints for itself: the server must not send this bill to its own printer in
+      // the back office, where nobody is standing to take it off.
+      print: !hasPrintAgent(),
+      openDrawer: cash,
       parcel,
       tableNo: billInfo.tableNo || null,
       supplierId: billInfo.supplierId || null,
@@ -764,9 +768,28 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     setLastBill(lastBillOf(sale.invoice))
     clearBill()
     setError(null)
-    onToast(sale.printed
+    const printed = await printedHere(sale, () => printDocument('bill', sale.invoice.id, 'ORIGINAL', cash))
+    onToast(printed.ok
       ? { tone: 'good', text: `Bill ${billNo(sale.invoice.invoiceNumber)} taken and printed` }
-      : { tone: 'warn', text: `Bill ${billNo(sale.invoice.invoiceNumber)} taken, but printing failed: ${sale.printError ?? ''}` })
+      : { tone: 'warn', text: `Bill ${billNo(sale.invoice.invoiceNumber)} taken, but printing failed: ${printed.why}` })
+  }
+
+  /**
+   * The bill is issued either way: printing is what might fail, and it never unmakes a sale. On
+   * the server that is already true - the server prints after the commit and reports it - and
+   * this keeps it true at a counter, where the printing happens a moment later and over here.
+   */
+  const printedHere = async (sale: { printed: boolean; printError: string | null },
+                             atThisCounter: () => Promise<void>): Promise<{ ok: boolean; why: string }> => {
+    if (!hasPrintAgent()) {
+      return { ok: sale.printed, why: sale.printError ?? '' }
+    }
+    try {
+      await atThisCounter()
+      return { ok: true, why: '' }
+    } catch (failure) {
+      return { ok: false, why: messageOfFailure(failure, 'the printer on this counter did not take it') }
+    }
   }
 
   /**
@@ -823,14 +846,15 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
       return
     }
     const refundsCash = current.invoice.payments.some((paid) => paid.mode === 'CASH')
+    const opensDrawer = tenders.some((tender) => tender.mode === 'CASH') || refundsCash
     const edited = await api.post<EditResponse>(`/api/invoices/${current.invoice.id}/replace`, {
       lines: cartBody(cart),
       payments: tenders,
       buyerGstin: gst ? customer.gstin || null : null,
       buyerName: customer.name || null,
       placeOfSupply: gst ? customer.placeOfSupply || null : null,
-      print: true,
-      openDrawer: tenders.some((tender) => tender.mode === 'CASH') || refundsCash,
+      print: !hasPrintAgent(),
+      openDrawer: opensDrawer,
       parcel,
       tableNo: billInfo.tableNo || null,
       supplierId: billInfo.supplierId || null,
@@ -841,10 +865,13 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     const money = edited.refundPaise > 0
       ? `Give back ${rupees(edited.refundPaise)}.`
       : edited.collectedPaise > 0 ? `Collected ${rupees(edited.collectedPaise)} more.` : 'Nothing more to pay.'
+    const printed = await printedHere(edited,
+      () => printDocument('bill', edited.invoice.id, 'ORIGINAL', opensDrawer))
     onToast({
-      tone: edited.printed ? 'good' : 'warn',
-      text: `Bill ${edited.replacedInvoiceNumber} cancelled and replaced by ${edited.invoice.invoiceNumber}. ${money}`
-        + (edited.printed ? '' : ` Printing failed: ${edited.printError ?? ''}`),
+      tone: printed.ok ? 'good' : 'warn',
+      text: `Bill ${billNo(edited.replacedInvoiceNumber)} cancelled and replaced by `
+        + `${billNo(edited.invoice.invoiceNumber)}. ${money}`
+        + (printed.ok ? '' : ` Printing failed: ${printed.why}`),
     })
   }
 
@@ -859,15 +886,17 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
       lines: cartBody(cart),
       refunds: [refund],
       reason: reason.trim() || null,
-      print: true,
+      print: !hasPrintAgent(),
       openDrawer: refund.mode === 'CASH',
     })
     clearBill()
     setError(null)
+    const printed = await printedHere(done,
+      () => printDocument('return', done.creditNote.id, 'ORIGINAL', refund.mode === 'CASH'))
     onToast({
-      tone: done.printed ? 'good' : 'warn',
+      tone: printed.ok ? 'good' : 'warn',
       text: `Return ${billNo(done.creditNote.creditNoteNumber)}: give back ${rupees(done.creditNote.grandTotalPaise)} by ${refund.mode}.`
-        + (done.printed ? ' Stock is back on the shelf.' : ` Printing failed: ${done.printError ?? ''}`),
+        + (printed.ok ? ' Stock is back on the shelf.' : ` Printing failed: ${printed.why}`),
     })
   }
 
@@ -1052,7 +1081,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
       return
     }
     try {
-      await api.post(`/api/invoices/${lastBill.id}/receipt`, { copy: 'DUPLICATE', openDrawer: false })
+      await printDocument('bill', lastBill.id, 'DUPLICATE', false)
       onToast({ tone: 'good', text: `Reprinted ${billNo(lastBill.invoiceNumber)} as a duplicate` })
     } catch (failure) {
       onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not reprint') })

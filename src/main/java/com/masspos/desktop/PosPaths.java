@@ -23,6 +23,9 @@ public final class PosPaths {
 
     public static final int DEFAULT_PORT = 8765;
 
+    /** Where a counter shouts to find its shop's server; must match pos.clients.discovery-port. */
+    public static final int DISCOVERY_PORT = 8764;
+
     private PosPaths() {
     }
 

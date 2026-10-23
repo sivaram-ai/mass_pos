@@ -42,21 +42,33 @@ $other = Get-CimInstance Win32_Process -Filter "Name='cmd.exe'" |
     Where-Object { $_.CommandLine -like "*$pwd\mvnw.cmd*" }
 if ($other) { throw "Another build is already running (PID $($other.ProcessId -join ',')): wait for it to finish" }
 
-Step "1/4 Building the jar (UI + backend)"
+Step "1/5 Building the jars (UI + backend, and the counter app)"
 $mvnArgs = @("-B", "clean", "package")
 if ($SkipTests) { $mvnArgs += "-DskipTests" }
 & .\mvnw.cmd @mvnArgs
 Check "Maven build"
 if ((Get-Item target\mass-pos.jar).Length -lt 20MB) { throw "target\mass-pos.jar is too small: not repackaged" }
 if (-not (Test-Path target\mass-pos-launcher.jar)) { throw "target\mass-pos-launcher.jar is missing: the desktop-launcher jar did not build" }
+if (-not (Test-Path target\mass-pos-counter.jar)) { throw "target\mass-pos-counter.jar is missing: the counter jar did not build" }
+# A counter carries no Spring and no database. If this jar has grown towards the server's size,
+# the include list in the pom has stopped doing its job and a shop would be installing both.
+if ((Get-Item target\mass-pos-counter.jar).Length -gt 5MB) { throw "target\mass-pos-counter.jar is suspiciously large: it should hold the counter app and the printer classes, nothing else" }
 
-Step "2/4 Building the trimmed Java runtime"
+Step "2/5 Building the trimmed Java runtimes"
 jlink --add-modules java.base,java.compiler,java.desktop,java.instrument,java.management,java.net.http,java.prefs,java.rmi,java.scripting,java.security.jgss,java.sql.rowset,jdk.jfr,jdk.unsupported,jdk.crypto.ec,jdk.localedata,jdk.charsets `
       --include-locales=en,hi --strip-debug --no-man-pages --no-header-files --compress=zip-6 `
       --output target\runtime
 Check "jlink"
+# A counter runs no server and no database, so it needs far less: a window, a socket, a printer.
+# jdk.httpserver is the print agent's listener; java.desktop covers Swing, AWT printing and the
+# settings window.
+Remove-Item -Recurse -Force target\counter-runtime -ErrorAction SilentlyContinue
+jlink --add-modules java.base,java.desktop,java.net.http,java.prefs,jdk.httpserver,jdk.crypto.ec,jdk.localedata,jdk.charsets `
+      --include-locales=en,hi --strip-debug --no-man-pages --no-header-files --compress=zip-6 `
+      --output target\counter-runtime
+Check "jlink (counter)"
 
-Step "3/4 Building the installer"
+Step "3/5 Building the server installer"
 New-Item -ItemType Directory -Force target\jpackage-input | Out-Null
 Copy-Item target\mass-pos.jar target\jpackage-input\ -Force
 Copy-Item target\mass-pos-launcher.jar target\jpackage-input\ -Force
@@ -92,11 +104,35 @@ jpackage --type exe --name GoRockitPOS --app-version $Version --vendor "GoGo Dig
   --dest target\installer
 Check "jpackage"
 
-Step "4/4 Copying to dist\"
+Step "4/5 Building the counter installer"
+# The other half of a shop with more than one till. Its own folder and its own upgrade uuid, so a
+# counter and a server can sit on one machine without either uninstalling the other - which is
+# what the back-office PC of a shop that also bills from the counter needs.
+Remove-Item -Recurse -Force target\counter-input, target\counter-installer -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force target\counter-input\lib | Out-Null
+Copy-Item target\mass-pos-counter.jar target\counter-input\ -Force
+Copy-Item target\counter-lib\*.jar target\counter-input\lib\ -Force
+jpackage --type exe --name "GoRockitPOS-Counter" --app-version $Version --vendor "GoGo Digital Services" `
+  --input target\counter-input --main-jar mass-pos-counter.jar `
+  --runtime-image target\counter-runtime --icon tools\gorockit.ico `
+  --install-dir GoRockitPOS-Counter `
+  --win-per-user-install --win-menu --win-menu-group "GO RockIt" --win-shortcut `
+  --win-upgrade-uuid 2a7e4f61-8d3b-4c05-9a2e-5f1d7c930b48 `
+  --dest target\counter-installer
+Check "jpackage (counter)"
+
+Step "5/5 Copying to dist\"
 New-Item -ItemType Directory -Force dist | Out-Null
 $exe = Get-ChildItem target\installer -Filter *.exe | Select-Object -First 1
 Copy-Item $exe.FullName dist\ -Force
+$counterExe = Get-ChildItem target\counter-installer -Filter *.exe | Select-Object -First 1
+Copy-Item $counterExe.FullName dist\ -Force
 
 $out = Get-Item "dist\$($exe.Name)"
-Write-Host "`nDone: $($out.FullName)  ($([math]::Round($out.Length / 1MB, 1)) MB)" -ForegroundColor Green
-Write-Host "Give this one file to the client. Steps for the shop: docs\client-install.md"
+$counterOut = Get-Item "dist\$($counterExe.Name)"
+Write-Host "`nDone." -ForegroundColor Green
+Write-Host "  Server : $($out.Name)  ($([math]::Round($out.Length / 1MB, 1)) MB)"
+Write-Host "           The shop's one database, its licence, and a till of its own."
+Write-Host "  Counter: $($counterOut.Name)  ($([math]::Round($counterOut.Length / 1MB, 1)) MB)"
+Write-Host "           Every other machine. No database, no licence."
+Write-Host "`nA shop with one till needs only the server. Steps: docs\client-install.md"
