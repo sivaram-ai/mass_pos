@@ -1,5 +1,6 @@
 package com.masspos.web;
 
+import com.masspos.client.ClientProperties;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -9,17 +10,22 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.Locale;
 import java.util.Set;
 
 /**
- * The server only listens on loopback, but the browser on the till can still be turned against it:
+ * Who may talk to this till at all, decided before any token is read. The browser on the till can
+ * be turned against it:
  * <ul>
- *   <li>DNS rebinding: a page on evil.example re-resolves its own name to 127.0.0.1 and becomes
- *       "same-origin" with this server. Rejecting any Host other than a loopback name stops it.</li>
+ *   <li>DNS rebinding: a page on evil.example re-resolves its own name to this machine's address
+ *       and becomes "same-origin" with the server. The Host header still says evil.example, and
+ *       that is not a name this machine answers to, so it is refused.</li>
  *   <li>Cross-site POSTs, e.g. a hidden form that opens the cash drawer. A browser cannot send a
  *       custom header cross-origin without a CORS preflight, and this server approves none.</li>
  * </ul>
+ *
+ * <p>A till on its own accepts loopback and nothing else. A shop server - {@code pos.clients.max}
+ * above 0 - also accepts the addresses and names it holds on the LAN, because that is what its
+ * counters connect to. What widens is the set of names, never the check itself.
  *
  * <p>Runs before {@link com.masspos.auth.AuthFilter}: a request from the wrong origin is refused
  * before any token is looked at.
@@ -31,13 +37,21 @@ public class LocalApiGuard extends OncePerRequestFilter {
     /** Required, with any value, on every state-changing /api request. */
     public static final String CLIENT_HEADER = "X-POS-Client";
 
-    private static final Set<String> LOOPBACK_HOSTS = Set.of("localhost", "127.0.0.1", "[::1]", "::1");
+    /** Which counter the machine making the request is. Absent from the server's own browser. */
+    public static final String COUNTER_HEADER = "X-POS-Counter";
+
     private static final Set<String> SAFE_METHODS = Set.of("GET", "HEAD", "OPTIONS");
+
+    private final AllowedHosts hosts;
+
+    public LocalApiGuard(ClientProperties clients) {
+        this.hosts = clients.serving() ? AllowedHosts.thisMachineOnTheLan() : AllowedHosts.loopbackOnly();
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        if (!LOOPBACK_HOSTS.contains(request.getServerName().toLowerCase(Locale.ROOT))) {
+        if (!hosts.accepts(request.getServerName())) {
             response.sendError(HttpServletResponse.SC_FORBIDDEN, "Host not allowed");
             return;
         }

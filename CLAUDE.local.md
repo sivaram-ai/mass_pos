@@ -216,6 +216,12 @@ folder and everything under it, so that is the only copy that survives one.
   - a record component
   - an empty or default entry in `application.properties`
   - a commented, explained entry in `pos-template.properties`
+
+  Skipping the third is not cosmetic. `pos.clients.max` shipped without it, so the shop's own
+  `pos.properties` never mentioned the setting that turns the whole multi-till feature on; the
+  install guide told the owner to go and edit a line that was not there, the server stayed on
+  loopback, and the counter said only that nothing had answered. The template is how a shop finds
+  out a setting exists.
 - **`pos.version` is the one exception, deliberately**: it is build metadata, not a shop setting, so it
   is *not* in `pos-template.properties` - a shop that could edit it could make the Settings screen
   claim a version the till does not have. It comes from the pom through resource filtering
@@ -346,6 +352,42 @@ folder and everything under it, so that is the only copy that survives one.
     counter issued it is part of the identity. `/api/invoices/lookup` already takes either.
 - **Dates.** Business dates and times use `IndiaTime.ZONE`, never the JVM default.
 - **Sync bookkeeping stays off audited entities.** Use an unaudited outbox table.
+- **"Which till" is `CurrentCounter.code()`, never `pos.terminal().code()`.** With counters billing
+  against a server, the machine holding the database is not the machine ringing up the bill. Bill
+  and credit-note numbering, held bills, stock ledger origin, "last bill on this till" and audit
+  revisions all go through `CurrentCounter`, which answers from the signed-in session and falls
+  back to this machine's own code when nobody is signed in. `pos.terminal().code()` now means only
+  "this physical machine" - its printer, its drawer, its folder.
+  - The counter is fixed **at sign-in** and kept on the `AuthToken`. Not read from a header per
+    request (a signed-in browser could then renumber its own bills) and not from the client's IP
+    (DHCP changes it).
+- **A counter is a different program, not a till with the database removed.**
+  `com.masspos.counter` is the client application: no Spring, no JPA, no licence, one properties
+  file in `%LOCALAPPDATA%\GoRockitPOS-Counter`. It builds as `mass-pos-counter.jar` (its own
+  `maven-jar-plugin` execution, an explicit include list) with its libraries in `target/counter-lib`,
+  and `tools/build-installer.ps1` makes a second, smaller jpackage image from them. Keep
+  `com.masspos.client` (the server's view of its clients) and `com.masspos.counter` (the client
+  itself) apart: a wildcard include across them would pull Spring into the counter.
+  - **The counter reuses the hardware classes rather than owning a copy of ESC/POS.** The include
+    list names only the Spring-free ones. `CounterAppTest` and a classpath probe in the build
+    guard it; if the counter jar ever passes 5 MB the installer script fails, because that means
+    the include list has stopped working.
+  - **The print agent is why a counter is more than a browser window.** It listens on the
+    counter's own loopback, takes a bill the server has already laid out, and writes it to the
+    printer and drawer standing there. The server renders once - `/api/invoices/{id}/receipt-job`
+    returns both the bytes a thermal printer executes and the lines a driver printer renders, via
+    `EscPos.rendered` - so a counter's bill can never drift from the server's.
+  - **A counter sends `print: false` when it bills.** Otherwise the bill comes out in the back
+    office, where nobody is standing to take it.
+  - **The counter number travels on the address** (`?counter=T2&agent=8767`), is kept per machine
+    in `localStorage`, and goes out as `X-POS-Counter` on every request. The server acts on it
+    once, at sign-in.
+- **`pos.clients.max` is the one switch for a shop server.** 0 (the default, and every till shipped
+  so far) = loopback only, nothing on the network can reach it. Above 0, `ServerBinding` binds
+  0.0.0.0 and `LocalApiGuard` widens its Host check from loopback to this machine's own addresses
+  and names - never to anything else, so DNS rebinding is still refused. `ClientRegistry.admit`
+  caps the count at sign-in and refuses a counter that claims the server's own code, which would
+  reuse bill numbers.
 
 ### Licensing
 

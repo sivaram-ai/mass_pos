@@ -62,6 +62,40 @@ the same physical shape:
 - **Invoice numbering stays gapless per till** because each till has its own prefix and its own
   counter. Do not share one number series across counters.
 
+### Changed 2026-10-23: one server, several clients
+
+The shop asked for the **thin client** row of the table above instead, and that is what is being
+built. A counter now has no database, no licence and no server of its own: it is a machine running
+the client app, which finds the shop's server and opens the billing screen against it. One server
+holds everything.
+
+What that buys: a counter is set up in a minute with nothing to restore, back up or licence, and
+every till in the shop sees the same stock and the same bills the instant they are made, with no
+sync to go wrong.
+
+**What it costs, written down so nobody is surprised by it later: when the server is down, or the
+switch, or the cable, no counter can bill.** Local-first was chosen originally to avoid exactly
+that. A shop on this arrangement should treat the server and its switch as the things that must
+not fail - and the server's own till still bills, because it reaches itself over loopback.
+
+The parts of this document above still describe the wiring, the fixed address and the per-till
+invoice series, all of which are unchanged: a counter still has its own number series, because the
+server numbers a bill by the counter that rang it up, not by the machine the database is on.
+
+| Was | Is |
+|---|---|
+| Each till a full install with its own SQLite | One server install; counters run the client app |
+| `pos.terminal.type=MASTER` / `COUNTER` | Unchanged values, read as server / client. **Not renamed**: the column is a CHECK constraint SQLite cannot alter, so a new enum value would break every database already out there. |
+| Sync port 8766, pairing token | Not needed: counters talk to the ordinary API on 8765 |
+| A licence per till | One licence, on the server |
+| Counters discover the master by typed address | Typed address, or auto-discovery over UDP |
+
+**How many counters** is `pos.clients.max` on the server, and it is the only switch: left at 0 the
+till listens on loopback exactly as a single-machine shop always has. Above 0 the server binds the
+LAN, answers discovery, and admits that many counters. A counter is admitted when somebody signs
+in on it, and holds its place for `pos.clients.idle-minutes` after it was last heard from, so a
+machine taken away frees its place by itself.
+
 ### Connecting them in practice (Slice D)
 
 1. Wire each till to the switch; give the master a fixed IP.

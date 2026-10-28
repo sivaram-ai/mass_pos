@@ -123,6 +123,100 @@
                             </archive>
                         </configuration>
                     </execution>
+                    <!--
+                        The counter application: a till with no database, no licence and no Spring.
+                        It finds the shop's server, opens the billing screen against it, and runs
+                        the print agent that drives the printer and drawer on that counter.
+
+                        It takes the hardware classes rather than owning a second copy of ESC/POS -
+                        the trickiest code in the product, and the one place a second copy would
+                        quietly drift. Only the classes that carry no Spring are listed: the rest
+                        of that package is the server's and would never be loaded here anyway.
+                    -->
+                    <execution>
+                        <id>counter-app</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                        <configuration>
+                            <classifier>counter</classifier>
+                            <includes>
+                                <include>com/masspos/counter/**</include>
+                                <include>com/masspos/desktop/Browser*</include>
+                                <include>com/masspos/desktop/PosPaths*</include>
+                                <include>com/masspos/client/Discovery.class</include>
+                                <include>com/masspos/hardware/CodePage*</include>
+                                <include>com/masspos/hardware/EscPos*</include>
+                                <include>com/masspos/hardware/FilePrinterConnection*</include>
+                                <include>com/masspos/hardware/ParcelQr*</include>
+                                <include>com/masspos/hardware/PrinterConnection*</include>
+                                <include>com/masspos/hardware/PrinterException*</include>
+                                <include>com/masspos/hardware/PrinterProperties*</include>
+                                <include>com/masspos/hardware/PrinterStatus*</include>
+                                <include>com/masspos/hardware/ReceiptLayout*</include>
+                                <include>com/masspos/hardware/SerialPrinterConnection*</include>
+                                <include>com/masspos/hardware/TcpPrinterConnection*</include>
+                                <include>com/masspos/hardware/WindowsPrinterConnection*</include>
+                            </includes>
+                            <archive>
+                                <manifest>
+                                    <mainClass>com.masspos.counter.CounterApp</mainClass>
+                                    <addClasspath>true</addClasspath>
+                                    <classpathPrefix>lib/</classpathPrefix>
+                                </manifest>
+                            </archive>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- The handful of jars the counter needs beside its own, for jpackage to bundle. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>counter-libraries</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/counter-lib</outputDirectory>
+                            <stripVersion>false</stripVersion>
+                            <artifactItems>
+                                <artifactItem>
+                                    <groupId>com.fazecast</groupId>
+                                    <artifactId>jSerialComm</artifactId>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>com.google.zxing</groupId>
+                                    <artifactId>core</artifactId>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>com.fasterxml.jackson.core</groupId>
+                                    <artifactId>jackson-databind</artifactId>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>com.fasterxml.jackson.core</groupId>
+                                    <artifactId>jackson-core</artifactId>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>com.fasterxml.jackson.core</groupId>
+                                    <artifactId>jackson-annotations</artifactId>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.slf4j</groupId>
+                                    <artifactId>slf4j-api</artifactId>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.slf4j</groupId>
+                                    <artifactId>slf4j-simple</artifactId>
+                                    <version>2.0.17</version>
+                                </artifactItem>
+                            </artifactItems>
+                        </configuration>
+                    </execution>
                 </executions>
             </plugin>
         </plugins>

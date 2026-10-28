@@ -1,10 +1,10 @@
 package com.masspos.billing;
 
+import com.masspos.client.CurrentCounter;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.masspos.auth.AuthContext;
 import com.masspos.auth.RequiresRole;
-import com.masspos.config.PosProperties;
 import com.masspos.user.UserRepository;
 import com.masspos.user.UserRole;
 import jakarta.persistence.EntityNotFoundException;
@@ -41,13 +41,13 @@ public class HoldController {
 
     private final HeldBillRepository holds;
     private final UserRepository users;
-    private final PosProperties pos;
+    private final CurrentCounter counter;
     private final ObjectMapper json;
 
-    public HoldController(HeldBillRepository holds, UserRepository users, PosProperties pos, ObjectMapper json) {
+    public HoldController(HeldBillRepository holds, UserRepository users, CurrentCounter counter, ObjectMapper json) {
         this.holds = holds;
         this.users = users;
-        this.pos = pos;
+        this.counter = counter;
         this.json = json;
     }
 
@@ -63,14 +63,14 @@ public class HoldController {
     @GetMapping
     @Transactional(readOnly = true)
     public List<HoldView> list() {
-        return holds.findByTerminalCodeOrderByCreatedAtDesc(pos.terminal().code()).stream().map(this::viewOf).toList();
+        return holds.findByTerminalCodeOrderByCreatedAtDesc(counter.code()).stream().map(this::viewOf).toList();
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     @Transactional
     public HoldView hold(@Valid @RequestBody HoldRequest request) {
-        HeldBill held = new HeldBill(request.label(), pos.terminal().code(),
+        HeldBill held = new HeldBill(request.label(), counter.code(),
                 users.getReferenceById(AuthContext.require().userId()), request.cart().toString(),
                 request.estimatedTotalPaise());
         return viewOf(holds.save(held));

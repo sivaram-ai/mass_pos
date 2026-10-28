@@ -1,5 +1,6 @@
 package com.masspos.auth;
 
+import com.masspos.client.ClientRegistry;
 import com.masspos.config.PosProperties;
 import com.masspos.user.User;
 import com.masspos.user.UserRepository;
@@ -35,31 +36,52 @@ public class AuthService {
     private final UserRepository users;
     private final AuthTokenRepository tokens;
     private final PosProperties pos;
+    private final ClientRegistry clients;
     private final PasswordEncoder encoder = new BCryptPasswordEncoder();
     private final SecureRandom random = new SecureRandom();
 
-    public AuthService(UserRepository users, AuthTokenRepository tokens, PosProperties pos) {
+    public AuthService(UserRepository users, AuthTokenRepository tokens, PosProperties pos,
+                       ClientRegistry clients) {
         this.users = users;
         this.tokens = tokens;
         this.pos = pos;
+        this.clients = clients;
     }
 
     public record LoginResult(String token, Principal principal) {
     }
 
+    /** Signing in on this machine itself, which is what a shop with one till always does. */
     @Transactional
     public LoginResult signIn(String username, String pin) {
+        return signIn(username, pin, null, false);
+    }
+
+    /**
+     * Signing in is also where a machine is let in. The counter is decided here, once, and kept on
+     * the token: everything that machine goes on to do - its bill numbers, its held bills, its
+     * stock movements - hangs off this one answer.
+     *
+     * <p>The machine is admitted before the PIN is checked against nothing, but after the user is
+     * found, so a counter with no place left says so plainly rather than "wrong username or PIN".
+     *
+     * @param counterCode     what the machine calls itself; blank from the browser on the server
+     * @param overTheNetwork  false when the request came in over loopback, i.e. the server's own till
+     */
+    @Transactional
+    public LoginResult signIn(String username, String pin, String counterCode, boolean overTheNetwork) {
         User user = users.findByUsernameIgnoreCase(username == null ? "" : username.trim())
                 .filter(User::isActive)
                 .orElseThrow(() -> new AuthException("Wrong username or PIN"));
         if (!encoder.matches(pin == null ? "" : pin, user.getPinHash())) {
-            log.warn("Failed sign-in for {} on {}", user.getUsername(), pos.terminal().code());
+            log.warn("Failed sign-in for {} on {}", user.getUsername(), counterCode);
             throw new AuthException("Wrong username or PIN");
         }
+        String counter = clients.admit(counterCode, null, overTheNetwork);
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes());
-        AuthToken saved = tokens.save(new AuthToken(user, hash(token), pos.terminal().code()));
-        log.info("{} signed in on {}", user.getUsername(), pos.terminal().code());
-        return new LoginResult(token, principal(user, saved.getId()));
+        AuthToken saved = tokens.save(new AuthToken(user, hash(token), counter));
+        log.info("{} signed in on {}", user.getUsername(), counter);
+        return new LoginResult(token, principal(user, saved.getId(), counter));
     }
 
     @Transactional(readOnly = true)
@@ -69,7 +91,7 @@ public class AuthService {
         }
         return tokens.findByTokenHashAndRevokedAtIsNull(hash(token))
                 .filter(authToken -> authToken.getUser().isActive())
-                .map(authToken -> principal(authToken.getUser(), authToken.getId()));
+                .map(authToken -> principal(authToken.getUser(), authToken.getId(), authToken.getTerminalCode()));
     }
 
     @Transactional
@@ -191,9 +213,9 @@ public class AuthService {
         return encoder.encode(pin);
     }
 
-    private Principal principal(User user, UUID tokenId) {
+    private Principal principal(User user, UUID tokenId, String counter) {
         return new Principal(user.getId(), user.getUsername(), user.getDisplayName(), user.getRole(), tokenId,
-                user.isMustChangePin());
+                user.isMustChangePin(), counter);
     }
 
     private byte[] randomBytes() {
