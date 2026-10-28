@@ -147,7 +147,7 @@ class OffsiteBackupsTest {
                     new DriverManagerDataSource("jdbc:sqlite:" + dataDir.resolve("pos.db")));
             jdbc.execute("CREATE TABLE IF NOT EXISTS invoice (id TEXT)");
             PosProperties pos = new PosProperties(dataDir,
-                    new PosProperties.Terminal("T1", "Counter 1", "", TerminalType.COUNTER));
+                    new PosProperties.Terminal("T1", "Counter 1", "", TerminalType.COUNTER), "0.0.0-test");
             ProductRepository catalogue = mock(ProductRepository.class);
             when(catalogue.findAllByActiveTrueOrderByNameAsc()).thenReturn(List.of(
                     new Product("SUG-1KG", "Sugar loose", "1701", UnitOfMeasure.KGS, 5_200, 5_500, true, 500)));

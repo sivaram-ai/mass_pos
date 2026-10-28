@@ -86,6 +86,23 @@ class SettingsAndReportsApiIntegrationTest {
                 .andExpect(jsonPath("$.thisTerminal.section").value("Ground floor"));
     }
 
+    /**
+     * The Settings screen prints this at the top, so a shop on the phone can say which build it has.
+     * It is filtered in from the pom's own version, which is the thing that can silently break: an
+     * unfiltered build would otherwise put the literal "@project.version@" on the screen. An
+     * installed till is told its own number by build-installer.ps1, as a plain property override.
+     */
+    @Test
+    @Order(1)
+    void theSettingsScreenIsToldWhichBuildTheTillIsRunning() throws Exception {
+        String version = json.readTree(mvc.perform(as(get("/api/settings"), cashierToken))
+                        .andExpect(status().isOk())
+                        .andReturn().getResponse().getContentAsString())
+                .get("version").asText();
+
+        assertThat(version).matches("\\d+\\.\\d+\\.\\d+.*");
+    }
+
     @Test
     @Order(2)
     void billingIsRefusedUntilTheGstDetailsAreFilledIn() throws Exception {

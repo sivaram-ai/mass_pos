@@ -85,7 +85,10 @@ export interface StockRow {
   unit: Unit
   stockMilli: number
   sellingPricePaise: number
+  mrpPaise: number
   stockValuePaise: number
+  /** False for a stopped item, which the screen still shows, marked and dimmed. */
+  active: boolean
 }
 
 export interface CartLine {
@@ -306,6 +309,8 @@ export interface SettingsView {
   gstRegistered: boolean
   thisTerminal: TerminalView
   terminals: TerminalView[]
+  /** The build this till is running, e.g. "0.4.6", or "dev" when run from source. */
+  version: string
 }
 
 export interface UserRow {

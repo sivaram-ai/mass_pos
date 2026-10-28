@@ -103,6 +103,10 @@ export default function Settings({ role, settings, onSaved, onToast }: {
 
   return (
     <div className="grid gap-4 xl:grid-cols-2">
+      {/* Which build this till is running, so a shop reporting a problem can read it out. */}
+      <p className="-mb-1 text-xs text-slate-400 xl:col-span-2">
+        GO RockIt <span className="num font-medium text-slate-600">{settings.version}</span>
+      </p>
       <Panel
         title="Shop details"
         className="xl:col-span-2"

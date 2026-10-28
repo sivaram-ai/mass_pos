@@ -8,7 +8,10 @@
   The result is copied to dist\ because `mvnw clean` deletes target\.
 #>
 param(
-    [string]$Version = "0.1.0",
+    # Defaults to the pom's version, which is also what the app reports on its Settings screen.
+    # Passing a different one here stamps the installer AND the till with that number instead, so
+    # the screen never claims a version the build does not have.
+    [string]$Version = "",
     [string]$JavaHome = "C:\Program Files\Java\jdk-21.0.12",
     [string]$WixBin = "C:\Program Files (x86)\WiX Toolset v3.14\bin",
     [switch]$SkipTests
@@ -16,6 +19,14 @@ param(
 
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)
+
+if (-not $Version) {
+    # The pom is the one place the version is written. Read it from the project's own <version>,
+    # which is the first one after </parent>, not Spring Boot's.
+    $pom = Get-Content pom.xml -Raw
+    $Version = [regex]::Match($pom, '(?s)</parent>.*?<version>([^<]+)</version>').Groups[1].Value
+    if (-not $Version) { throw "No <version> found in pom.xml (pass -Version)" }
+}
 
 function Step($text) { Write-Host "`n=== $text" -ForegroundColor Cyan }
 function Check($what) { if ($LASTEXITCODE -ne 0) { throw "$what failed (exit $LASTEXITCODE)" } }
@@ -70,9 +81,15 @@ $manifest = $reader.ReadToEnd(); $reader.Dispose(); $jar.Dispose()
 $serverMain = [regex]::Match($manifest, 'Main-Class:\s*(\S+)').Groups[1].Value
 if (-not $serverMain) { throw "No Main-Class in target\mass-pos.jar: Spring Boot did not repackage it" }
 $serverProps = "target\server-launcher.properties"
-(Get-Content tools\server-launcher.properties) -replace '^main-class=.*', "main-class=$serverMain" |
+# -Dpos.version goes on with the main class: the server is what answers /api/settings, and the
+# Settings screen shows this number. Without it an installer built with -Version would ship a till
+# that names the pom's version instead of its own.
+(Get-Content tools\server-launcher.properties) `
+    -replace '^main-class=.*', "main-class=$serverMain" `
+    -replace '^java-options=(.*)$', "java-options=`$1 -Dpos.version=$Version" |
     Set-Content $serverProps -Encoding ascii
 Write-Host "    server launcher runs $serverMain"
+Write-Host "    the till will report version $Version"
 # Never change --win-upgrade-uuid: it is how a new version upgrades an old install in place.
 # One folder per till, %LOCALAPPDATA%\GoRockitPOS, holding two: the program in program\ and the
 # shop's database, licence and logs in data\. The program goes a level down because uninstalling

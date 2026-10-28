@@ -34,8 +34,15 @@ public class InventoryController {
         this.products = products;
     }
 
+    /** @param active false for a stopped item, which the screen still shows, marked and dimmed */
     public record StockRow(UUID productId, String sku, String name, UnitOfMeasure unit, long stockMilli,
-                           long sellingPricePaise, long stockValuePaise) {
+                           long sellingPricePaise, long mrpPaise, long stockValuePaise, boolean active) {
+
+        static StockRow of(Product product, long stockMilli) {
+            return new StockRow(product.getId(), product.getSku(), product.getName(), product.getUnit(), stockMilli,
+                    product.getSellingPricePaise(), product.getMrpPaise(),
+                    Math.round(stockMilli * product.getSellingPricePaise() / 1000.0), product.isActive());
+        }
     }
 
     public record MovementRequest(@NotNull UUID productId, @Positive long quantityMilli,
@@ -45,19 +52,19 @@ public class InventoryController {
     public record AdjustmentRequest(@NotNull UUID productId, long deltaMilli, @Size(max = 200) String note) {
     }
 
-    /** Stock on hand for every product, valued at the current selling price. */
+    /**
+     * Stock on hand for every product the shop still has, valued at the current selling price.
+     * Stopped items are in the list: the goods are on the shelf whether or not they are being sold,
+     * and leaving them out would make the value wrong and hide them from whoever has to count them.
+     * Deleted items are gone. The screen sorts this itself, so code order is only the starting point.
+     */
     @GetMapping
     public List<StockRow> stock() {
         Map<UUID, Long> onHand = inventory.onHandForAll();
         return products.findAll().stream()
-                .filter(Product::isActive)
-                .map(product -> {
-                    long quantity = onHand.getOrDefault(product.getId(), 0L);
-                    return new StockRow(product.getId(), product.getSku(), product.getName(), product.getUnit(),
-                            quantity, product.getSellingPricePaise(),
-                            Math.round(quantity * product.getSellingPricePaise() / 1000.0));
-                })
-                .sorted(Comparator.comparing(StockRow::name))
+                .filter(product -> !product.isDeleted())
+                .map(product -> StockRow.of(product, onHand.getOrDefault(product.getId(), 0L)))
+                .sorted(Comparator.comparing(StockRow::sku))
                 .toList();
     }
 
@@ -87,8 +94,6 @@ public class InventoryController {
 
     private StockRow rowFor(UUID productId) {
         Product product = products.findById(productId).orElseThrow();
-        long quantity = inventory.onHand(productId);
-        return new StockRow(productId, product.getSku(), product.getName(), product.getUnit(), quantity,
-                product.getSellingPricePaise(), Math.round(quantity * product.getSellingPricePaise() / 1000.0));
+        return StockRow.of(product, inventory.onHand(productId));
     }
 }

@@ -33,6 +33,12 @@ public class Product extends BaseEntity {
     public static final String HSN_PATTERN = "|\\d{4}|\\d{6}|\\d{8}";
     public static final String HSN_MESSAGE = "must be 4, 6 or 8 digits";
 
+    /**
+     * What a deleted item's own code becomes, so the code it was sold under is free again. A tilde
+     * cannot be typed as an item code by accident and sorts after every digit and letter.
+     */
+    public static final String TOMBSTONE_PREFIX = "~";
+
     @NotBlank
     @Size(max = 40)
     @Column(nullable = false, length = 40)
@@ -89,6 +95,14 @@ public class Product extends BaseEntity {
     private boolean billWithoutStock;
 
     private boolean active = true;
+
+    /**
+     * Removed by a manager. The row stays behind: bills, credit notes and stock movements point at
+     * it and are frozen by the append-only triggers, so it can never be deleted for real. Needs a
+     * column default, as SQLite will not add a NOT NULL column to a table that already has rows.
+     */
+    @Column(nullable = false, columnDefinition = "boolean default 0")
+    private boolean deleted;
 
     protected Product() {
     }
@@ -148,6 +162,23 @@ public class Product extends BaseEntity {
         this.active = false;
     }
 
+    public void activate() {
+        this.active = true;
+    }
+
+    /**
+     * Takes the item off every screen and gives up its code and barcode, so both can be used again.
+     * The row itself is kept, because the bills and stock movements that reference it cannot be
+     * touched; they carry their own copies of the code, name and rate, so an old bill still reads
+     * exactly as it was issued. The code before this is still in {@code product_aud}.
+     */
+    public void delete() {
+        this.deleted = true;
+        this.active = false;
+        this.sku = TOMBSTONE_PREFIX + getId();
+        this.barcode = null;
+    }
+
     public String getSku() {
         return sku;
     }
@@ -194,5 +225,9 @@ public class Product extends BaseEntity {
 
     public boolean isActive() {
         return active;
+    }
+
+    public boolean isDeleted() {
+        return deleted;
     }
 }

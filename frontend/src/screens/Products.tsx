@@ -9,6 +9,9 @@ import {
   Banner, Button, Empty, errorFor, Field, inputClass, KeyBox, Modal, Panel, smallInputClass,
 } from '../components/ui'
 import { useScreenKeys } from '../shortcuts'
+import { SortMenu } from '../components/SortMenu'
+import { loadSort, PRODUCT_SORT_KEY, saveSort, SORT_LABELS, sorted } from '../sorting'
+import type { Sort } from '../sorting'
 import type { Toast } from '../App'
 
 const UNITS: Unit[] = ['NOS', 'PCS', 'BOX', 'PAC', 'DOZ', 'KGS', 'GMS', 'LTR', 'MLT', 'MTR']
@@ -16,10 +19,24 @@ const GST_SLABS = [0, 500, 1200, 1800, 2800]
 
 const SEARCH_KEY = 'F2'
 const ADD_KEY = 'F3'
+const SORT_KEY = 'F4'
 
-type Action = 'edit' | 'stop'
+type Action = 'edit' | 'status' | 'delete'
 
-const ACTION_LABELS: Record<Action, string> = { edit: 'Edit', stop: 'Stop' }
+const ACTIONS: Action[] = ['edit', 'status', 'delete']
+
+/** The middle action reads Stop for an item being sold and Start for one that was stopped. */
+function labelOf(action: Action, product: Product): string {
+  return action === 'edit' ? 'Edit' : action === 'delete' ? 'Delete' : product.active ? 'Stop' : 'Start'
+}
+
+const TITLES: Record<Action, (product: Product) => string> = {
+  edit: () => 'Change this item',
+  status: (product) => product.active
+    ? 'Stop selling it. It stays on this screen and in Stock, marked inactive.'
+    : 'Sell it again',
+  delete: () => 'Remove it from the system for good and free its code',
+}
 
 type Draft = {
   sku: string
@@ -58,33 +75,43 @@ function draftOf(product: Product): Draft {
 
 /**
  * The catalogue, worked from the keyboard like the bills screen: the cursor starts in the list, up and
- * down choose an item, left and right choose Edit or Stop, and Enter does it. F2 searches, F3 adds.
+ * down choose an item, left and right choose Edit, Stop or Delete, and Enter does it. F2 searches,
+ * F3 adds, F4 sorts.
+ *
+ * The whole catalogue is loaded once, stopped items included, and filtered and sorted here. The
+ * server's ranked search is capped at twenty-five rows for the billing grid, and sorting by price or
+ * stock has to cover every item rather than whichever twenty-five arrived first.
  */
 export default function Products({ onToast }: { onToast: Toast }) {
   const [search, setSearch] = useState('')
   const [products, setProducts] = useState<Product[]>([])
+  const [sort, setSort] = useState<Sort>(() => loadSort(PRODUCT_SORT_KEY))
+  const [sortOpen, setSortOpen] = useState(false)
   const [selected, setSelected] = useState(0)
   const [action, setAction] = useState<Action>('edit')
   const [listFocused, setListFocused] = useState(false)
   const [editing, setEditing] = useState<{ id: string | null; draft: Draft } | null>(null)
-  const [stopping, setStopping] = useState<Product | null>(null)
+  const [confirming, setConfirming] = useState<{ product: Product; kind: 'status' | 'delete' } | null>(null)
   const [saveErrors, setSaveErrors] = useState<{ message: string; fields: Record<string, string> } | null>(null)
   const fileBox = useRef<HTMLInputElement>(null)
   const list = useRef<HTMLDivElement>(null)
   const searchBox = useRef<HTMLInputElement>(null)
   const rows = useRef(new Map<string, HTMLTableRowElement>())
-  const dialogOpen = editing !== null || stopping !== null
+  const dialogOpen = editing !== null || confirming !== null
 
   const load = useCallback(() => {
-    api.get<Product[]>(`/api/products?q=${encodeURIComponent(search)}`)
+    api.get<Product[]>('/api/products?all=true')
       .then(setProducts)
       .catch((failure) => onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not load the products') }))
-  }, [search, onToast])
+  }, [onToast])
 
-  useEffect(() => {
-    const timer = setTimeout(load, 150)
-    return () => clearTimeout(timer)
-  }, [load])
+  useEffect(load, [load])
+
+  const chooseSort = (next: Sort) => {
+    setSort(next)
+    saveSort(PRODUCT_SORT_KEY, next)
+    setSelected(0)
+  }
 
   /** A sheet of items: codes already in the catalogue are repriced, new codes are added. */
   const loadFromFile = async (file: File) => {
@@ -113,8 +140,16 @@ export default function Products({ onToast }: { onToast: Toast }) {
     list.current?.focus()
   }, [])
 
-  const at = Math.min(selected, Math.max(products.length - 1, 0))
-  const current = products[at]
+  // The same fields the server matches, minus its closest-match ranking: an explicit sort is the
+  // point of this screen, and a ranking would fight it.
+  const needle = search.trim().toLowerCase()
+  const shown = sorted(products.filter((product) => !needle
+    || `${product.name} ${product.sku} ${product.barcode ?? ''} ${product.hsnCode}`.toLowerCase().includes(needle)),
+  sort)
+  const stopped = products.filter((product) => !product.active).length
+
+  const at = Math.min(selected, Math.max(shown.length - 1, 0))
+  const current = shown[at]
 
   useEffect(() => {
     if (current) {
@@ -133,7 +168,8 @@ export default function Products({ onToast }: { onToast: Toast }) {
       searchBox.current?.select()
     },
     [ADD_KEY]: () => openEditor(null, EMPTY),
-  }, !dialogOpen)
+    [SORT_KEY]: () => setSortOpen(true),
+  }, !dialogOpen && !sortOpen)
 
   const save = async (id: string | null, draft: Draft) => {
     const body = {
@@ -163,19 +199,36 @@ export default function Products({ onToast }: { onToast: Toast }) {
     }
   }
 
-  const deactivate = async (product: Product) => {
+  /** Stopping asks first; starting again is harmless, so it just happens. */
+  const setActive = async (product: Product, active: boolean) => {
     try {
-      await api.post(`/api/products/${product.id}/deactivate`)
+      await api.post(`/api/products/${product.id}/${active ? 'activate' : 'deactivate'}`)
       closeDialog(true)
-      onToast({ tone: 'good', text: `${product.name} is no longer sold` })
+      onToast({
+        tone: 'good',
+        text: active ? `${product.name} is on sale again` : `${product.name} is no longer sold`,
+      })
     } catch (failure) {
-      onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not stop selling it') })
+      onToast({
+        tone: 'bad',
+        text: messageOfFailure(failure, active ? 'Could not start selling it' : 'Could not stop selling it'),
+      })
+    }
+  }
+
+  const remove = async (product: Product) => {
+    try {
+      await api.delete(`/api/products/${product.id}`)
+      closeDialog(true)
+      onToast({ tone: 'good', text: `${product.name} is deleted. The code ${product.sku} is free again.` })
+    } catch (failure) {
+      onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not delete it') })
     }
   }
 
   function closeDialog(reload = false) {
     setEditing(null)
-    setStopping(null)
+    setConfirming(null)
     setSaveErrors(null)
     if (reload) {
       load()
@@ -187,8 +240,10 @@ export default function Products({ onToast }: { onToast: Toast }) {
   const run = (product: Product, chosen: Action) => {
     if (chosen === 'edit') {
       openEditor(product.id, draftOf(product))
+    } else if (chosen === 'delete' || product.active) {
+      setConfirming({ product, kind: chosen })
     } else {
-      setStopping(product)
+      void setActive(product, true)
     }
   }
 
@@ -198,18 +253,19 @@ export default function Products({ onToast }: { onToast: Toast }) {
   }
 
   const onListKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (dialogOpen || !current) {
+    if (dialogOpen || sortOpen || !current) {
       return
     }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
-      choose(Math.max(0, Math.min(products.length - 1, at + (event.key === 'ArrowDown' ? 1 : -1))))
+      choose(Math.max(0, Math.min(shown.length - 1, at + (event.key === 'ArrowDown' ? 1 : -1))))
     } else if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
       event.preventDefault()
-      setAction(event.key === 'ArrowRight' ? 'stop' : 'edit')
+      const step = event.key === 'ArrowRight' ? 1 : -1
+      setAction(ACTIONS[Math.max(0, Math.min(ACTIONS.length - 1, ACTIONS.indexOf(action) + step))])
     } else if (event.key === 'Home' || event.key === 'End') {
       event.preventDefault()
-      choose(event.key === 'Home' ? 0 : products.length - 1)
+      choose(event.key === 'Home' ? 0 : shown.length - 1)
     } else if (event.key === 'Enter') {
       event.preventDefault()
       if (!event.repeat) {
@@ -234,6 +290,28 @@ export default function Products({ onToast }: { onToast: Toast }) {
       title="Products"
       actions={
         <div className="flex items-center gap-2">
+          <span className="whitespace-nowrap text-xs text-slate-500">
+            {products.length} items
+            {stopped > 0 && <span className="ml-2 text-amber-700">{stopped} stopped</span>}
+          </span>
+          {/* Relative, so the sort popover hangs off this button rather than the page. */}
+          <div className="relative">
+            <Button className="whitespace-nowrap px-2 py-1" hint={SORT_KEY}
+                    onClick={() => setSortOpen((open) => !open)}
+                    title="Choose what the list is ordered by">
+              {SORT_LABELS[sort.field]} {sort.dir === 'asc' ? '↑' : '↓'}
+            </Button>
+            {sortOpen && (
+              <SortMenu
+                sort={sort}
+                onChange={chooseSort}
+                onClose={() => {
+                  setSortOpen(false)
+                  requestAnimationFrame(() => list.current?.focus())
+                }}
+              />
+            )}
+          </div>
           <KeyBox hint={SEARCH_KEY}>
             <input
               ref={searchBox}
@@ -278,9 +356,9 @@ export default function Products({ onToast }: { onToast: Toast }) {
     >
       <p className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
         <span><kbd>↑</kbd> <kbd>↓</kbd> choose an item</span>
-        <span><kbd>←</kbd> <kbd>→</kbd> Edit or Stop</span>
+        <span><kbd>←</kbd> <kbd>→</kbd> Edit, Stop or Delete</span>
         <span><kbd>Enter</kbd> do it</span>
-        <span><kbd>{SEARCH_KEY}</kbd> search · <kbd>{ADD_KEY}</kbd> add, then <kbd>Enter</kbd> or <kbd>Esc</kbd> back to the list</span>
+        <span><kbd>{SEARCH_KEY}</kbd> search · <kbd>{SORT_KEY}</kbd> sort · <kbd>{ADD_KEY}</kbd> add, then <kbd>Enter</kbd> or <kbd>Esc</kbd> back to the list</span>
         <span><kbd>F9</kbd> menu · <kbd>Esc</kbd> <kbd>Esc</kbd> billing</span>
       </p>
 
@@ -294,26 +372,34 @@ export default function Products({ onToast }: { onToast: Toast }) {
         onBlur={() => setListFocused(false)}
         className="overflow-x-auto rounded-md outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
       >
-        {products.length === 0 ? (
+        {shown.length === 0 ? (
           <Empty>
             {search
               ? `No product matches "${search}"`
               : 'No products yet. Add the first one to start billing.'}
           </Empty>
         ) : (
-          <table className="w-full min-w-[56rem] table-fixed text-sm">
+          /*
+           * Code has its own column, so the list can be read and sorted by it. The table stays
+           * table-fixed and Item carries no width, so Item takes whatever the fixed columns leave
+           * and a 150-character name is truncated instead of pushing the columns off screen.
+           */
+          <table className="w-full min-w-[60rem] table-fixed text-sm">
             <colgroup>
+              <col className="w-28" />
               <col />
-              <col className="w-24" />
+              <col className="w-20" />
               <col className="w-20" />
               <col className="w-28" />
               <col className="w-24" />
               <col className="w-28" />
-              <col className="w-32" />
+              {/* Three buttons: Edit, Stop or Start, Delete. */}
+              <col className="w-44" />
             </colgroup>
             <thead className="text-xs uppercase tracking-wide text-slate-400">
               <tr>
-                <th className="py-1 pl-2 text-left">Item</th>
+                <th className="py-1 pl-2 text-left">Code</th>
+                <th className="py-1 text-left">Item</th>
                 <th className="py-1 text-left">HSN</th>
                 <th className="py-1 text-right">GST</th>
                 <th className="py-1 text-right">Price</th>
@@ -323,7 +409,7 @@ export default function Products({ onToast }: { onToast: Toast }) {
               </tr>
             </thead>
             <tbody>
-              {products.map((product, index) => {
+              {shown.map((product, index) => {
                 const isSelected = index === at
                 return (
                   <tr
@@ -339,13 +425,34 @@ export default function Products({ onToast }: { onToast: Toast }) {
                     onClick={() => run(product, 'edit')}
                     aria-selected={isSelected}
                     className={`cursor-pointer border-t border-slate-100 ${
-                      isSelected ? 'bg-sky-50 shadow-[inset_3px_0_0_0_var(--color-sky-500)]' : 'hover:bg-slate-50'}`}
+                      isSelected
+                        ? 'bg-sky-50 shadow-[inset_3px_0_0_0_var(--color-sky-500)]'
+                        : product.active ? 'hover:bg-slate-50' : 'bg-slate-50/80 hover:bg-slate-100'}`}
                   >
                     <td className="py-2 pl-2 pr-3">
+                      {/* The barcode sits under the code: it is the other code that bills the item. */}
+                      <div className={`num truncate font-medium ${product.active ? 'text-slate-800' : 'text-slate-400'}`}
+                           title={product.sku}>
+                        {product.sku}
+                      </div>
+                      {product.barcode && (
+                        <div className="num truncate text-xs text-slate-400" title={product.barcode}>
+                          {product.barcode}
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-2 pr-3">
                       {/* Long names are cut with the full name on hover, so the columns never move. */}
-                      <div className="truncate font-medium text-slate-800" title={product.name}>{product.name}</div>
-                      <div className="num truncate text-xs text-slate-400">
-                        {product.sku}{product.barcode ? ` · ${product.barcode}` : ''}
+                      <div className={`flex items-center gap-2 ${product.active ? '' : 'text-slate-400'}`}>
+                        <span className={`truncate ${product.active ? 'text-slate-800' : ''}`} title={product.name}>
+                          {product.name}
+                        </span>
+                        {!product.active && (
+                          <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800"
+                                title="Stopped: still counted and still here, but not sold">
+                            Inactive
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="num truncate py-2 pr-2 text-slate-600" title={product.hsnCode}>
@@ -374,14 +481,15 @@ export default function Products({ onToast }: { onToast: Toast }) {
                     </td>
                     <td className="whitespace-nowrap py-1.5 pr-2 text-right">
                       <div className="inline-flex gap-1">
-                        {(['edit', 'stop'] as Action[]).map((name) => {
+                        {ACTIONS.map((name) => {
                           const focused = isSelected && action === name
+                          const warns = name === 'delete' || (name === 'status' && product.active)
                           return (
                             <button
                               key={name}
                               type="button"
                               tabIndex={-1}
-                              title={name === 'stop' ? 'Stop selling this item' : 'Change this item'}
+                              title={TITLES[name](product)}
                               onMouseDown={(event) => event.stopPropagation()}
                               onClick={(event) => {
                                 event.stopPropagation()
@@ -392,9 +500,9 @@ export default function Products({ onToast }: { onToast: Toast }) {
                               className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
                                 focused
                                   ? `bg-sky-600 text-white ${listFocused ? 'ring-2 ring-sky-300' : ''}`
-                                  : name === 'stop' ? 'text-rose-600 hover:bg-rose-50' : 'text-slate-600 hover:bg-slate-100'}`}
+                                  : warns ? 'text-rose-600 hover:bg-rose-50' : 'text-slate-600 hover:bg-slate-100'}`}
                             >
-                              {ACTION_LABELS[name]}
+                              {labelOf(name, product)}
                             </button>
                           )
                         })}
@@ -418,15 +526,32 @@ export default function Products({ onToast }: { onToast: Toast }) {
         />
       )}
 
-      {stopping && (
-        <Modal title={`Stop selling ${stopping.name}?`} onClose={() => closeDialog()}>
+      {confirming?.kind === 'status' && (
+        <Modal title={`Stop selling ${confirming.product.name}?`} onClose={() => closeDialog()}>
           <p className="text-sm text-slate-600">
-            It disappears from billing and its stock stops counting. Bills already taken keep it, and
+            It disappears from billing. It stays on this screen and in Stock, marked inactive, so its
+            count is still there and it can be started again. Bills already taken keep it, and
             nothing is deleted.
           </p>
           <div className="mt-4 flex justify-end gap-2">
             <Button onClick={() => closeDialog()} hint="Esc">Keep selling it</Button>
-            <ConfirmButton onClick={() => void deactivate(stopping)}>Stop selling it</ConfirmButton>
+            <ConfirmButton onClick={() => void setActive(confirming.product, false)}>Stop selling it</ConfirmButton>
+          </div>
+        </Modal>
+      )}
+
+      {confirming?.kind === 'delete' && (
+        <Modal title="Are you sure you want to delete this product?" onClose={() => closeDialog()}>
+          <p className="text-sm font-medium text-slate-800">This action cannot be undone.</p>
+          <p className="mt-2 text-sm text-slate-600">
+            {confirming.product.name} goes from the Products and Stock screens for good. Bills already
+            taken keep it and still read it, and the code{' '}
+            <span className="num font-medium text-slate-800">{confirming.product.sku}</span> becomes
+            free to use again.
+          </p>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button onClick={() => closeDialog()} hint="Esc">Cancel</Button>
+            <ConfirmButton onClick={() => void remove(confirming.product)}>Delete</ConfirmButton>
           </div>
         </Modal>
       )}

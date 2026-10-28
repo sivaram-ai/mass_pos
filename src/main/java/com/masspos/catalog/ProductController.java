@@ -23,6 +23,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -94,12 +95,23 @@ public class ProductController {
         }
     }
 
-    /** Empty text lists the catalogue; anything else searches barcode, SKU, name and HSN. */
+    /**
+     * Empty text lists the catalogue; anything else searches barcode, SKU, name and HSN.
+     *
+     * @param all true on the Products screen, which shows stopped items too and sorts the whole
+     *            catalogue itself. Billing leaves it off and gets the ranked, capped, sellable list.
+     */
     @GetMapping
-    public List<ProductView> search(@RequestParam(name = "q", required = false) String text) {
-        List<Product> found = text == null || text.isBlank()
-                ? products.findByActiveTrueOrderByNameAsc(Limit.of(MAX_RESULTS))
-                : products.search(text.trim(), Limit.of(MAX_RESULTS));
+    public List<ProductView> search(@RequestParam(name = "q", required = false) String text,
+                                    @RequestParam(defaultValue = "false") boolean all) {
+        List<Product> found;
+        if (all) {
+            found = products.findByDeletedFalseOrderBySkuAsc();
+        } else if (text == null || text.isBlank()) {
+            found = products.findByActiveTrueOrderByNameAsc(Limit.of(MAX_RESULTS));
+        } else {
+            found = products.search(text.trim(), Limit.of(MAX_RESULTS));
+        }
         Map<UUID, Long> stock = inventory.onHandFor(found.stream().map(Product::getId).toList());
         return found.stream().map(product -> ProductView.of(product, stock.getOrDefault(product.getId(), 0L))).toList();
     }
@@ -234,6 +246,7 @@ public class ProductController {
         }
     }
 
+    /** Stopped, not removed: it stays on the Products and Stock screens, just out of billing. */
     @PostMapping("/{id}/deactivate")
     @RequiresRole({UserRole.MANAGER})
     @Transactional
@@ -241,5 +254,28 @@ public class ProductController {
         Product product = products.findById(id).orElseThrow(() -> new EntityNotFoundException("No such product"));
         product.deactivate();
         return ProductView.of(product, inventory.onHand(id));
+    }
+
+    @PostMapping("/{id}/activate")
+    @RequiresRole({UserRole.MANAGER})
+    @Transactional
+    public ProductView activate(@PathVariable UUID id) {
+        Product product = products.findById(id).orElseThrow(() -> new EntityNotFoundException("No such product"));
+        product.activate();
+        return ProductView.of(product, inventory.onHand(id));
+    }
+
+    /**
+     * Takes the item off every screen for good and frees its code. The row is kept because the
+     * bills, credit notes and stock movements that point at it are frozen by the append-only
+     * triggers; they hold their own copies, so an old bill still reads the code it was sold under.
+     */
+    @DeleteMapping("/{id}")
+    @RequiresRole({UserRole.MANAGER})
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @Transactional
+    public void delete(@PathVariable UUID id) {
+        Product product = products.findById(id).orElseThrow(() -> new EntityNotFoundException("No such product"));
+        product.delete();
     }
 }

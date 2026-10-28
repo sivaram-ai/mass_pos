@@ -6,9 +6,13 @@ import {
   Banner, Button, Empty, errorFor, Field, inputClass, KeyBox, Modal, Panel, smallInputClass,
 } from '../components/ui'
 import { useScreenKeys } from '../shortcuts'
+import { SortMenu } from '../components/SortMenu'
+import { loadSort, saveSort, SORT_LABELS, sorted, STOCK_SORT_KEY } from '../sorting'
+import type { Sort } from '../sorting'
 import type { Toast } from '../App'
 
 const SEARCH_KEY = 'F2'
+const SORT_KEY = 'F4'
 
 type Action = 'receipts' | 'adjustments' | 'damages'
 
@@ -24,11 +28,18 @@ type Movement = { kind: Action; row: StockRow }
 
 /**
  * What is on the shelf, worked from the keyboard like the catalogue: the cursor starts in the list,
- * up and down choose an item, left and right choose what to do with it, Enter does it.
+ * up and down choose an item, left and right choose what to do with it, Enter does it. F2 filters,
+ * F4 sorts.
+ *
+ * Stopped items are in this list, marked and dimmed: the goods are on the shelf whether or not they
+ * are being sold, and whoever counts them needs to see them. They are started and stopped on the
+ * Products screen, not here.
  */
 export default function Stock({ onToast }: { onToast: Toast }) {
   const [rows, setRows] = useState<StockRow[]>([])
   const [filter, setFilter] = useState('')
+  const [sort, setSort] = useState<Sort>(() => loadSort(STOCK_SORT_KEY))
+  const [sortOpen, setSortOpen] = useState(false)
   const [selected, setSelected] = useState(0)
   const [action, setAction] = useState<Action>('receipts')
   const [listFocused, setListFocused] = useState(false)
@@ -50,10 +61,12 @@ export default function Stock({ onToast }: { onToast: Toast }) {
     list.current?.focus()
   }, [])
 
-  const shown = rows.filter((row) =>
-    `${row.name} ${row.sku}`.toLowerCase().includes(filter.trim().toLowerCase()))
+  const shown = sorted(rows.filter((row) =>
+    `${row.name} ${row.sku}`.toLowerCase().includes(filter.trim().toLowerCase())), sort)
+  // Stopped items count towards the value: the stock is still on the shelf.
   const totalValue = rows.reduce((sum, row) => sum + row.stockValuePaise, 0)
   const outOfStock = rows.filter((row) => row.stockMilli <= 0).length
+  const stopped = rows.filter((row) => !row.active).length
 
   const at = Math.min(selected, Math.max(shown.length - 1, 0))
   const current = shown[at]
@@ -69,11 +82,18 @@ export default function Stock({ onToast }: { onToast: Toast }) {
       searchBox.current?.focus()
       searchBox.current?.select()
     },
-  }, movement === null)
+    [SORT_KEY]: () => setSortOpen(true),
+  }, movement === null && !sortOpen)
 
   const choose = (index: number) => {
     setSelected(index)
     setAction('receipts')
+  }
+
+  const chooseSort = (next: Sort) => {
+    setSort(next)
+    saveSort(STOCK_SORT_KEY, next)
+    setSelected(0)
   }
 
   const closeDialog = (reload = false) => {
@@ -86,7 +106,7 @@ export default function Stock({ onToast }: { onToast: Toast }) {
   }
 
   const onListKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (movement || !current) {
+    if (movement || sortOpen || !current) {
       return
     }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -126,7 +146,26 @@ export default function Stock({ onToast }: { onToast: Toast }) {
           <span className="whitespace-nowrap text-xs text-slate-500">
             {rows.length} items · <span className="num">{rupees(totalValue)}</span>
             {outOfStock > 0 && <span className="ml-2 text-rose-600">{outOfStock} out of stock</span>}
+            {stopped > 0 && <span className="ml-2 text-amber-700">{stopped} stopped</span>}
           </span>
+          {/* Relative, so the sort popover hangs off this button rather than the page. */}
+          <div className="relative">
+            <Button className="whitespace-nowrap px-2 py-1" hint={SORT_KEY}
+                    onClick={() => setSortOpen((open) => !open)}
+                    title="Choose what the list is ordered by">
+              {SORT_LABELS[sort.field]} {sort.dir === 'asc' ? '↑' : '↓'}
+            </Button>
+            {sortOpen && (
+              <SortMenu
+                sort={sort}
+                onChange={chooseSort}
+                onClose={() => {
+                  setSortOpen(false)
+                  requestAnimationFrame(() => list.current?.focus())
+                }}
+              />
+            )}
+          </div>
           <KeyBox hint={SEARCH_KEY}>
             <input
               ref={searchBox}
@@ -148,7 +187,7 @@ export default function Stock({ onToast }: { onToast: Toast }) {
         <span><kbd>↑</kbd> <kbd>↓</kbd> choose an item</span>
         <span><kbd>←</kbd> <kbd>→</kbd> Received, Correct or Damage</span>
         <span><kbd>Enter</kbd> do it</span>
-        <span><kbd>{SEARCH_KEY}</kbd> search</span>
+        <span><kbd>{SEARCH_KEY}</kbd> search · <kbd>{SORT_KEY}</kbd> sort</span>
         <span><kbd>F9</kbd> menu · <kbd>Esc</kbd> <kbd>Esc</kbd> billing</span>
       </p>
 
@@ -169,8 +208,10 @@ export default function Stock({ onToast }: { onToast: Toast }) {
               : 'Nothing to show. Add products first, then record what arrived.'}
           </Empty>
         ) : (
-          <table className="w-full min-w-[52rem] table-fixed text-sm">
+          /* Code first and its own column, as on Products; Item has no width, so it takes the rest. */
+          <table className="w-full min-w-[58rem] table-fixed text-sm">
             <colgroup>
+              <col className="w-32" />
               <col />
               <col className="w-32" />
               <col className="w-24" />
@@ -179,7 +220,8 @@ export default function Stock({ onToast }: { onToast: Toast }) {
             </colgroup>
             <thead className="text-xs uppercase tracking-wide text-slate-400">
               <tr>
-                <th className="py-1 pl-2 text-left">Item</th>
+                <th className="py-1 pl-2 text-left">Code</th>
+                <th className="py-1 text-left">Item</th>
                 <th className="py-1 text-right">On hand</th>
                 <th className="py-1 text-right">Price</th>
                 <th className="py-1 text-right">Value</th>
@@ -203,12 +245,29 @@ export default function Stock({ onToast }: { onToast: Toast }) {
                     onClick={() => setMovement({ kind: 'receipts', row })}
                     aria-selected={isSelected}
                     className={`cursor-pointer border-t border-slate-100 ${
-                      isSelected ? 'bg-sky-50 shadow-[inset_3px_0_0_0_var(--color-sky-500)]' : 'hover:bg-slate-50'}`}
+                      isSelected
+                        ? 'bg-sky-50 shadow-[inset_3px_0_0_0_var(--color-sky-500)]'
+                        : row.active ? 'hover:bg-slate-50' : 'bg-slate-50/80 hover:bg-slate-100'}`}
                   >
-                    <td className="py-2 pl-2 pr-3">
+                    <td className="num py-2 pl-2 pr-3">
+                      <div className={`truncate font-medium ${row.active ? 'text-slate-800' : 'text-slate-400'}`}
+                           title={row.sku}>
+                        {row.sku}
+                      </div>
+                    </td>
+                    <td className="py-2 pr-3">
                       {/* Long names are cut with the full name on hover, so the columns never move. */}
-                      <div className="truncate font-medium text-slate-800" title={row.name}>{row.name}</div>
-                      <div className="num truncate text-xs text-slate-400">{row.sku}</div>
+                      <div className={`flex items-center gap-2 ${row.active ? '' : 'text-slate-400'}`}>
+                        <span className={`truncate ${row.active ? 'text-slate-800' : ''}`} title={row.name}>
+                          {row.name}
+                        </span>
+                        {!row.active && (
+                          <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800"
+                                title="Stopped on the Products screen: still counted, not sold">
+                            Inactive
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className={`num py-2 text-right ${row.stockMilli <= 0 ? 'text-rose-600' : ''}`}>
                       {quantity(row.stockMilli)} <span className="text-xs text-slate-400">{row.unit}</span>

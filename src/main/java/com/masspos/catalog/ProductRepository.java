@@ -11,9 +11,16 @@ import java.util.UUID;
 
 public interface ProductRepository extends JpaRepository<Product, UUID> {
 
-    Optional<Product> findBySkuIgnoreCase(String sku);
+    /**
+     * A deleted item is invisible here, which is what frees its code: the clash check stops seeing
+     * it, so a new item can take the code, and a sheet loaded back adds one rather than reviving it.
+     * A deleted row's own sku is a tombstone anyway, so it could never match a typed code.
+     */
+    @Query("select p from Product p where lower(p.sku) = lower(:sku) and p.deleted = false")
+    Optional<Product> findBySkuIgnoreCase(@Param("sku") String sku);
 
-    Optional<Product> findByBarcode(String barcode);
+    @Query("select p from Product p where p.barcode = :barcode and p.deleted = false")
+    Optional<Product> findByBarcode(@Param("barcode") String barcode);
 
     /**
      * What the billing screen calls on every keystroke. A scanned barcode wins outright; otherwise
@@ -22,7 +29,7 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
      */
     @Query("""
             select p from Product p
-            where p.active = true and (
+            where p.active = true and p.deleted = false and (
                   p.barcode = :text
                or lower(p.sku) like lower(concat('%', :text, '%'))
                or lower(p.name) like lower(concat('%', :text, '%'))
@@ -41,4 +48,11 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
 
     /** The whole catalogue, for the sheet the shop edits in Excel. */
     List<Product> findAllByActiveTrueOrderByNameAsc();
+
+    /**
+     * What the Products screen lists: everything the shop still has, stopped items included, in
+     * code order and with no cap. The screen sorts and filters this itself, so sorting by price or
+     * stock covers the whole catalogue rather than whichever twenty-five the server sent.
+     */
+    List<Product> findByDeletedFalseOrderBySkuAsc();
 }

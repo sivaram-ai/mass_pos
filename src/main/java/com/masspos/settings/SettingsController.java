@@ -43,9 +43,11 @@ public class SettingsController {
      * @param readyToInvoice false while the shop's name or address is missing; the billing screen shows why
      * @param gstRegistered  false without a GSTIN: bills then charge no tax and are not tax invoices
      * @param thisTerminal   identity of the machine being used, which lives in its own pos.properties
+     * @param version        the build this till is running, so a shop reporting a problem can name it
      */
     public record SettingsView(ShopSettingsForm shop, boolean readyToInvoice, List<String> missingForInvoicing,
-                               boolean gstRegistered, TerminalView thisTerminal, List<TerminalView> terminals) {
+                               boolean gstRegistered, TerminalView thisTerminal, List<TerminalView> terminals,
+                               String version) {
     }
 
     public record TerminalView(String code, String name, String section, TerminalType type, boolean active,
@@ -100,6 +102,7 @@ public class SettingsController {
                         .map(terminal -> new TerminalView(terminal.getCode(), terminal.getName(),
                                 terminal.getSection(), terminal.getType(), terminal.isActive(),
                                 terminal.getLastSeenAt()))
-                        .toList());
+                        .toList(),
+                pos.version());
     }
 }

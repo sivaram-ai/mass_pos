@@ -19,6 +19,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3G | Edit today's bill (cancel + reissue), returns as credit notes with refunds, reports net of returns, held bills newest first, Esc Esc back to billing | Done: 139 tests green, driven in the browser |
 | 3H | `WINDOWS` printer type: tills with no thermal printer bill through any installed driver printer, receipt-width on the sheet, QR drawn by the till | Done: 199 tests green, printed on a real Canon G3080 |
 | 3I | Printer chosen on screen (Settings > Printer): per-till `printer_settings` row seeded from `pos.properties`, device lists from the machine, connection swapped on the next job | Done |
+| 3J | A stopped item stays on Products and Stock, marked; Delete tombstones it and frees its code; both lists sort by code, name, stock, price, MRP or status, remembered per machine | Done: 270 tests green, driven in the browser |
 | L1 | Offline subscription licence per till: Ed25519-signed key bound to a hardware machine ID, warn/grace days, billing lock, Licence screen + banner, vendor `tools/license/LicenseTool.java` | Done: 172 tests green, real key verified on this PC |
 | 5A | Windows installer: jpackage + WiX 3.14, trimmed JDK 21 runtime, one file, `tools/build-installer.ps1` | Done: installed and run from the exe on this PC |
 | 5B | One folder per till, `%LOCALAPPDATA%\GoRockitPOS`, data in `data\`, with an automatic move from the old `MassPOS` folder | Done: 235 tests green, this PC's own till migrated |
@@ -91,6 +92,16 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
   only because `useShortcuts` is passed `inFront && !modalOpen` - keep that guard.
 - **F9 opens the menu everywhere** (`MENU_KEY`, handled in `App`), so it is deliberately absent from
   `ASSIGNABLE_KEYS`; `isModalOpen()` (a counter kept by `Modal`) stops it opening behind a dialog.
+- **Sorting is one module for both lists** (`sorting.ts`: the six fields, the comparator, and the
+  per-machine `masspos.productSort` / `masspos.stockSort`), with `SortMenu` as a popover that *takes
+  focus* - a grid cell that kept focus behind it would still receive the arrows. F4 opens it on both
+  screens; ↑↓ pick the field, ←→ the direction, Enter and Esc both close and hand focus back, because
+  every key applies at once and there is no pending state to discard. Its Esc calls `stopPropagation`,
+  so it never counts toward Esc Esc back to billing. Code and name compare through an `Intl.Collator`
+  with `numeric: true`, or "10" sorts before "2" in a shop whose codes are numbers.
+- **The Products list is the whole catalogue, filtered and sorted on screen** (`?all=true`), stopped
+  items included. `?q=` stays as it was for the billing grid - ranked by closeness, capped at 25,
+  sellable only - because sorting a server-capped 25 rows would sort the wrong 25.
 - **Products and Stock share one list pattern** (and Bills a close cousin): a focused `div role=grid`, arrows for row and action,
   Enter to run, dialogs returning focus to the list. Products' table is `table-fixed` with a colgroup
   and `truncate` + `title` on the name, so a 150-character name cannot push the columns off screen.
@@ -205,6 +216,12 @@ folder and everything under it, so that is the only copy that survives one.
   - a record component
   - an empty or default entry in `application.properties`
   - a commented, explained entry in `pos-template.properties`
+- **`pos.version` is the one exception, deliberately**: it is build metadata, not a shop setting, so it
+  is *not* in `pos-template.properties` - a shop that could edit it could make the Settings screen
+  claim a version the till does not have. It comes from the pom through resource filtering
+  (`@project.version@`), and `build-installer.ps1` passes the installer's version as
+  `-Dpos.version` on the server launcher, which outranks it, so an installed till names its own build.
+  The installer's `-Version` now defaults to the pom's, so the two cannot drift.
 - **Validation policy:**
   - Anything that is set must be valid; `@Validated` fails startup and names the property.
   - Anything the till needs only for some operations may be missing at startup. Check it when it
@@ -268,6 +285,15 @@ folder and everything under it, so that is the only copy that survives one.
   - A new immutable table, or a new fiscal or seller column on `Invoice`, must also be added to
     `AuditTrailGuard.FROZEN_INVOICE_COLUMNS`.
 - **Stock** is `SUM(quantity_delta_milli)` from the ledger. Never add a stock column.
+- **A product is never deleted for real** (`Product.delete`). `invoice_item`, `credit_note_item` and
+  `inventory_ledger_event` all hold a foreign key to `product` and are append-only, so the row cannot
+  go and the references cannot be rewritten. Delete therefore sets `deleted`, clears `active`, rewrites
+  the item's own `sku` to `~<uuid>` and drops its barcode: gone from every screen and from billing,
+  with the code and barcode free to use again, while the bills that sold it still read the code they
+  were taken under from their own copies. **Every product query must exclude `deleted`** -
+  `findBySkuIgnoreCase` and `findByBarcode` are what free the code, so they filter it in JPQL rather
+  than by method name. A stopped item (`active = false`) is a different thing: it stays on Products and
+  Stock, marked, and only leaves billing.
 - **`Product.billWithoutStock`** exempts one item from the shop-wide `blockNegativeStock` rule
   (`SaleService` checks both). The sale still records its SALE ledger event, so the count goes
   negative: the exemption is about refusing the sale, never about skipping the movement.

@@ -17,10 +17,19 @@ import java.nio.file.Path;
  *
  * @param dataDir  writable directory holding pos.db (+ WAL files), pos.properties, logs and printer output
  * @param terminal identity of this physical till
+ * @param version  what this build is called, shown at the top of the Settings screen. Comes from the
+ *                 pom through resource filtering; an installed till is told its own by
+ *                 build-installer.ps1, which passes the installer's version as a JVM option, so a
+ *                 shop reporting a problem names the build it actually has.
  */
 @Validated
 @ConfigurationProperties(prefix = "pos")
-public record PosProperties(@NotNull Path dataDir, @Valid @NotNull Terminal terminal) {
+public record PosProperties(@NotNull Path dataDir, @Valid @NotNull Terminal terminal, String version) {
+
+    /** Unfiltered (`@project.version@`) when run straight from an IDE, which is not a version. */
+    public PosProperties {
+        version = version == null || version.isBlank() || version.startsWith("@") ? "dev" : version.trim();
+    }
 
     /**
      * @param code    invoice-number prefix and origin tag on audit revisions and ledger events. At
