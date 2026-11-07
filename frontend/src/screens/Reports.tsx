@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, percent, quantity, rupees } from '../api'
-import type { AuditEntry, DayReport, GstReport } from '../types'
-import { Button, Empty, inputClass, Panel } from '../components/ui'
+import { api, downloadCsv, messageOfFailure, percent, quantity, rupees } from '../api'
+import type { AuditEntry, DayReport, GstReport, SoldItem } from '../types'
+import { Button, Empty, inputClass, Modal, Panel } from '../components/ui'
 import type { Toast } from '../App'
 
 type Tab = 'day' | 'gst' | 'audit'
+
+const AUDIT_ROWS = 300
+/** How many of the sold items the panel calls the best sellers; View All shows the rest. */
+const BEST_SELLERS = 10
 
 function today(): string {
   return new Date().toISOString().slice(0, 10)
@@ -41,22 +45,61 @@ export default function Reports({ onToast }: { onToast: Toast }) {
   const [day, setDay] = useState<DayReport | null>(null)
   const [gst, setGst] = useState<GstReport | null>(null)
   const [audit, setAudit] = useState<AuditEntry[]>([])
+  const [showAllSold, setShowAllSold] = useState(false)
+  const [printing, setPrinting] = useState<'asking' | 'busy' | null>(null)
 
   const fail = useCallback((failure: unknown) => {
     onToast({ tone: 'bad', text: failure instanceof Error ? failure.message : 'Could not load the report' })
   }, [onToast])
 
+  /** The window the open tab is showing, which is also the window its sheet is exported for. */
+  const period = tab === 'day'
+    ? (dayRange ? `from=${date}&to=${dayTo}` : `from=${date}`)
+    : `from=${from}&to=${to}`
+
   useEffect(() => {
     if (tab === 'day') {
       // Without a range the end is left off, and the server runs to the end of that day.
-      const window = dayRange ? `from=${date}&to=${dayTo}` : `from=${date}`
-      api.get<DayReport>(`/api/reports/day?${window}`).then(setDay).catch(fail)
+      api.get<DayReport>(`/api/reports/day?${period}`).then(setDay).catch(fail)
     } else if (tab === 'gst') {
-      api.get<GstReport>(`/api/reports/gst?from=${from}&to=${to}`).then(setGst).catch(fail)
+      api.get<GstReport>(`/api/reports/gst?${period}`).then(setGst).catch(fail)
     } else {
-      api.get<AuditEntry[]>(`/api/reports/audit?from=${from}&to=${to}&limit=300`).then(setAudit).catch(fail)
+      api.get<AuditEntry[]>(`/api/reports/audit?${period}&limit=${AUDIT_ROWS}`).then(setAudit).catch(fail)
     }
-  }, [tab, date, dayRange, dayTo, from, to, fail])
+  }, [tab, period, fail])
+
+  /**
+   * The open tab as a sheet, for the window on screen. The server builds it with the same method
+   * that answered the screen, so the figures cannot differ; the name carries the window and the
+   * moment it was taken, because a file in a folder has nothing else to say which report it is.
+   */
+  const exportSheet = async () => {
+    const stamp = (moment: string) => moment.replace(/:/g, '-')
+    const range = tab === 'day'
+      ? (dayRange ? `${stamp(date)}_to_${stamp(dayTo)}` : stamp(date))
+      : `${from}_to_${to}`
+    const now = new Date()
+    const exportedAt = `${localDay()}_${pad(now.getHours())}-${pad(now.getMinutes())}`
+    try {
+      await downloadCsv(`/api/reports/export?report=${tab}&${period}&limit=${AUDIT_ROWS}`,
+        `billing_reports_${tab}_${range}_exported_${exportedAt}.csv`)
+    } catch (failure) {
+      onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not make the file') })
+    }
+  }
+
+  /** The day's takings on the till's printer, with as much of what sold as was asked for. */
+  const printReport = async (items: 'ALL' | 'BEST_SELLERS') => {
+    setPrinting('busy')
+    try {
+      await api.post(`/api/reports/print?${period}&items=${items}`)
+      onToast({ tone: 'good', text: 'Report sent to the printer' })
+    } catch (failure) {
+      onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not print the report') })
+    } finally {
+      setPrinting(null)
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -107,6 +150,19 @@ export default function Reports({ onToast }: { onToast: Toast }) {
                    onChange={(event) => setTo(event.target.value)} />
           </div>
         )}
+        <div className="ml-auto flex items-center gap-2">
+          {tab === 'day' && (
+            <Button className="whitespace-nowrap" onClick={() => setPrinting('asking')}
+                    disabled={printing === 'busy'}
+                    title="Print the day's takings on this till's printer">
+              {printing === 'busy' ? 'Printing…' : 'Print report'}
+            </Button>
+          )}
+          <Button className="whitespace-nowrap" onClick={() => void exportSheet()}
+                  title="Save what is on screen as a sheet you can open in Excel">
+            Export
+          </Button>
+        </div>
       </div>
 
       {tab === 'day' && day && (
@@ -153,14 +209,27 @@ export default function Reports({ onToast }: { onToast: Toast }) {
             )}
           </Panel>
 
-          <Panel title="Best sellers">
-            {day.bestSellers.length === 0 ? <Empty>Nothing yet today</Empty> : (
-              <dl className="space-y-1 text-sm">
-                {day.bestSellers.map((row) => (
-                  <Line key={row.name} label={`${row.name} · ${quantity(row.quantityMilli)}`}
-                        value={rupees(row.amountPaise)} />
-                ))}
-              </dl>
+          {/* The best sellers are the head of the sold list, so the two can never disagree. */}
+          <Panel title="Best sellers"
+                 actions={day.soldItems.length > 0
+                   ? <span className="text-xs text-slate-500">most sold first</span>
+                   : undefined}>
+            {day.soldItems.length === 0 ? <Empty>Nothing yet today</Empty> : (
+              <>
+                <dl className="space-y-1 text-sm">
+                  {day.soldItems.slice(0, BEST_SELLERS).map((row) => (
+                    <Line key={row.name} label={`${row.name} · ${quantity(row.quantityMilli)}`}
+                          value={rupees(row.amountPaise)} />
+                  ))}
+                </dl>
+                <div className="mt-3 border-t border-slate-100 pt-2">
+                  <Button className="px-2 py-1" onClick={() => setShowAllSold(true)}
+                          title="Every item that sold in this window, not just the top ten">
+                    View all
+                    <span className="text-xs font-normal text-slate-400">{day.soldItems.length} items</span>
+                  </Button>
+                </div>
+              </>
             )}
           </Panel>
 
@@ -270,7 +339,79 @@ export default function Reports({ onToast }: { onToast: Toast }) {
           )}
         </Panel>
       )}
+
+      {showAllSold && day && (
+        <AllSoldDialog items={day.soldItems} onClose={() => setShowAllSold(false)} />
+      )}
+
+      {printing === 'asking' && (
+        <Modal title="Print the day's takings?" onClose={() => setPrinting(null)}>
+          <p className="text-sm text-slate-600">
+            The figures go on the paper either way. Choose how much of what sold goes with them.
+          </p>
+          <div className="mt-4 flex flex-col gap-2">
+            <Button tone="primary" onClick={() => void printReport('ALL')}>
+              Print all sold items{day && ` (${day.soldItems.length})`}
+            </Button>
+            <Button onClick={() => void printReport('BEST_SELLERS')}>
+              Print best sellers only{day && ` (top ${Math.min(BEST_SELLERS, day.soldItems.length)})`}
+            </Button>
+            <Button tone="ghost" onClick={() => setPrinting(null)} hint="Esc">Cancel</Button>
+          </div>
+        </Modal>
+      )}
     </div>
+  )
+}
+
+/** Everything that sold in the window, in the order the best sellers panel starts with. */
+function AllSoldDialog({ items, onClose }: { items: SoldItem[]; onClose: () => void }) {
+  const totalQuantity = items.reduce((sum, row) => sum + row.quantityMilli, 0)
+  const totalAmount = items.reduce((sum, row) => sum + row.amountPaise, 0)
+
+  return (
+    <Modal title={`All sold items (${items.length})`} onClose={onClose} size="3xl">
+      <div className="max-h-[60vh] overflow-y-auto">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 bg-white text-xs uppercase tracking-wide text-slate-400">
+            <tr>
+              <th className="py-1 text-left">#</th>
+              <th className="py-1 text-left">Item</th>
+              <th className="py-1 text-right">Quantity</th>
+              <th className="py-1 text-right">Bill lines</th>
+              <th className="py-1 text-right">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((row, index) => (
+              <tr key={row.name} className={`border-t border-slate-100 ${
+                index < BEST_SELLERS ? 'bg-sky-50/50' : ''}`}>
+                <td className="num py-1.5 text-slate-400">{index + 1}</td>
+                <td className="py-1.5 text-slate-800">{row.name}</td>
+                <td className="num py-1.5 text-right">{quantity(row.quantityMilli)}</td>
+                <td className="num py-1.5 text-right text-slate-500">{row.lines}</td>
+                <td className="num py-1.5 text-right">{rupees(row.amountPaise)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="border-t-2 border-slate-200 font-medium">
+              <td></td>
+              <td className="py-1.5 text-slate-600">Total</td>
+              <td className="num py-1.5 text-right">{quantity(totalQuantity)}</td>
+              <td></td>
+              <td className="num py-1.5 text-right">{rupees(totalAmount)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <p className="mt-2 text-xs text-slate-400">
+        The shaded rows are the ones the Best sellers panel shows.
+      </p>
+      <div className="mt-4 flex justify-end">
+        <Button onClick={onClose} hint="Esc">Close</Button>
+      </div>
+    </Modal>
   )
 }
 

@@ -341,15 +341,34 @@ folder and everything under it, so that is the only copy that survives one.
 - **Controllers that modify a loaded entity need `@Transactional`**: open-in-view is off, so an
   entity from `findById` is detached and edits to it are silently dropped (product edit and
   deactivate were broken this way).
-- **Invoice numbers** follow `{terminal}-{FY}-{seq:05d}` and are ≤16 chars, so the terminal code is
-  ≤3 chars.
+- **Invoice numbers** follow `{terminal}-{ddMMyy}-{daily:04d}` (`T1-071126-0001`) and are ≤16 chars,
+  so the terminal code is ≤3 chars. Returns are `{terminal}-{ddMMyy}-R{daily:03d}`.
+  - **The running number starts again at 1 every morning, which is why the day is in the number.**
+    Rule 46(b) wants a serial unique for the financial year; without the date, the first bill of
+    every day of the year would be numbered the same. The rule allows the serial to run "in one or
+    multiple series", and a series a till a day is one. Judged in `IndiaTime.ZONE`.
+  - **There are two counters, and they are not interchangeable.** `invoice_daily_sequence` /
+    `credit_note_daily_sequence` (one row a till a day) give the number the shop reads.
+    `invoice_sequence` / `credit_note_sequence` (one row a till a financial year) keep counting
+    across the year and never restart: that is what `Invoice.sequenceNo` holds, what the gapless
+    audit trail is kept on, and what `uk_invoice_terminal_fy_seq` is on. Both are reserved together
+    in `SaleService.reserveNumber`, inside the transaction that persists the document.
+  - **The day's count went into new tables on purpose.** Re-keying the existing unique constraint to
+    the date would have been the obvious move and is the one thing SQLite cannot do to a populated
+    table - the same trap as a CHECK constraint, and it would have broken every till that restored
+    a backup. A new table is something SQLite takes on upgrade;
+    `RestartOnExistingDatabaseTest.aTillNumberingByTheYearUpgradesToNumberingByTheDay` drops both
+    day tables from a populated database, restarts, and proves the old bills survive untouched.
+  - **Tills shipped before this numbered by the financial year** (`T1-2627-00123`). Both shapes are
+    three parts, so `serialOf` / `counterOf` read either and an upgraded till shows its old bills
+    exactly as it always did. Never write code that assumes the middle part is a financial year.
   - **That is the number of record, not what a person is shown.** Screens and the receipt show the
-    running number alone (`00004`) with the counter beside it as its own labelled field -
-    `InvoiceNumbers.serialOf` / `counterOf`, `billNo()` / `counterOf()` in `api.ts`. Rule 46(b)
-    allows a serial in multiple series, which one series per counter is. The whole string is still
-    what is stored, filed and synced, so it stays on the bill detail dialog, in the audit trail,
-    and in any reference to *another* document ("Replaces bill", "Against bill") where which
-    counter issued it is part of the identity. `/api/invoices/lookup` already takes either.
+    running number alone (`0004`) with the counter beside it as its own labelled field -
+    `InvoiceNumbers.serialOf` / `counterOf`, `billNo()` / `counterOf()` in `api.ts`. The whole
+    string is still what is stored, filed and synced, so it stays on the bill detail dialog, in the
+    audit trail, and in any reference to *another* document ("Replaces bill", "Against bill") where
+    which counter issued it is part of the identity. `/api/invoices/lookup` takes either, and a
+    bare number means **today's** bill, because that is the one being asked about at a counter.
 - **Dates.** Business dates and times use `IndiaTime.ZONE`, never the JVM default.
 - **Sync bookkeeping stays off audited entities.** Use an unaudited outbox table.
 - **"Which till" is `CurrentCounter.code()`, never `pos.terminal().code()`.** With counters billing

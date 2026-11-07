@@ -171,7 +171,7 @@ class PersistenceIntegrationTest {
 
         tx.executeWithoutResult(s -> {
             Invoice invoice = em.find(Invoice.class, ids[0]);
-            assertThat(invoice.getInvoiceNumber()).isEqualTo("T1-2627-00001");
+            assertThat(invoice.getInvoiceNumber()).isEqualTo("T1-110926-0001");
             assertThat(invoice.getGrandTotalPaise()).isEqualTo(20_000);
             assertThat(invoice.getItems()).singleElement()
                     .satisfies(item -> assertThat(item.getLineTotalPaise()).isEqualTo(20_000));
@@ -250,7 +250,7 @@ class PersistenceIntegrationTest {
             User cashier = persist(newCashier());
             Product product = persist(newProduct(10_000));
             InvoiceSequence sequence = persist(new InvoiceSequence("T3", "2627"));
-            Invoice invoice = new Invoice("T3", sequence.next(), LocalDate.of(2026, 9, 11), Instant.now(),
+            Invoice invoice = new Invoice("T3", sequence.next(), 1, LocalDate.of(2026, 9, 11), Instant.now(),
                     TestFixtures.seller(), "27", null, null, cashier);
             invoice.addItem(new com.masspos.billing.InvoiceItem(product, 1_000, 10_000, 0, 8_475, 1_800, 0, 762, 763, 0, 0));
             return persist(invoice).getId();

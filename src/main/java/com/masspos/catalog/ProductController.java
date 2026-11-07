@@ -3,7 +3,9 @@ package com.masspos.catalog;
 import com.masspos.auth.RequiresRole;
 import com.masspos.common.Csv;
 import com.masspos.common.IndiaTime;
+import com.masspos.hardware.ThermalPrinter;
 import com.masspos.inventory.InventoryService;
+import com.masspos.settings.ShopSettingsService;
 import com.masspos.user.UserRole;
 import com.masspos.web.FieldRejectedException;
 import jakarta.persistence.EntityNotFoundException;
@@ -52,11 +54,16 @@ public class ProductController {
     private final ProductRepository products;
     private final InventoryService inventory;
     private final Validator validator;
+    private final ThermalPrinter printer;
+    private final ShopSettingsService shop;
 
-    public ProductController(ProductRepository products, InventoryService inventory, Validator validator) {
+    public ProductController(ProductRepository products, InventoryService inventory, Validator validator,
+                             ThermalPrinter printer, ShopSettingsService shop) {
         this.products = products;
         this.inventory = inventory;
         this.validator = validator;
+        this.printer = printer;
+        this.shop = shop;
     }
 
     /** @param added rows whose code was not already in the catalogue */
@@ -244,6 +251,22 @@ public class ProductController {
                         throw new FieldRejectedException("barcode", "is already used by " + existing.getName());
                     });
         }
+    }
+
+    /**
+     * The catalogue on paper: code, name and rate, one line an item, in code order, printed on
+     * whatever printer this till bills on. Stopped items are on it, marked, because a price list
+     * missing them would not match the screen it was printed from; deleted ones are not.
+     *
+     * <p>The list is read first and printed afterwards, so SQLite's write lock is never held while
+     * waiting on a printer.
+     */
+    @PostMapping("/print-list")
+    @RequiresRole({UserRole.CASHIER, UserRole.MANAGER})
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void printList() {
+        List<Product> catalogue = products.findByDeletedFalseOrderBySkuAsc();
+        printer.await(printer.print(PriceList.format(catalogue, shop.currentOrEmpty(), printer.settings())));
     }
 
     /** Stopped, not removed: it stays on the Products and Stock screens, just out of billing. */

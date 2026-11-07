@@ -39,7 +39,7 @@ public final class TestFixtures {
 
     /** Intra-state B2C sale on 2026-09-11 10:54 IST: 2 x Rs 100.00 tax-inclusive at 18%. */
     public static Invoice newInvoice(long sequenceNo, User cashier, Product product) {
-        Invoice invoice = new Invoice("T1", sequenceNo, LocalDate.of(2026, 9, 11), Instant.parse("2026-09-11T05:24:00Z"),
+        Invoice invoice = new Invoice("T1", sequenceNo, sequenceNo, LocalDate.of(2026, 9, 11), Instant.parse("2026-09-11T05:24:00Z"),
                 seller(), "27", null, null, cashier);
         // taxable 169.49 + CGST 15.25 + SGST 15.26 = 200.00
         invoice.addItem(new InvoiceItem(product, 2_000, 10_000, 0, 16_949, 1_800, 0, 1_525, 1_526, 0, 0));

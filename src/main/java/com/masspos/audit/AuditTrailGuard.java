@@ -93,6 +93,17 @@ public class AuditTrailGuard {
                                 + " OR NEW.financial_year IS NOT OLD.financial_year",
                         "%s: numbers can only move forward".formatted(sequence));
             }
+
+            // The day's counters. A new day gets a row of its own, so starting again at 1 is an
+            // insert and never a move backwards; within a day the same rule holds as for the year.
+            for (String sequence : List.of("invoice_daily_sequence", "credit_note_daily_sequence")) {
+                forbid(sequence, "DELETE");
+                createTrigger("trg_%s_forward_only".formatted(sequence),
+                        "BEFORE UPDATE ON %s WHEN NEW.last_issued < OLD.last_issued".formatted(sequence)
+                                + " OR NEW.terminal_code IS NOT OLD.terminal_code"
+                                + " OR NEW.business_date IS NOT OLD.business_date",
+                        "%s: numbers can only move forward".formatted(sequence));
+            }
         });
     }
 

@@ -47,13 +47,21 @@ public interface InvoiceItemRepository extends JpaRepository<InvoiceItem, UUID> 
     List<Object[]> bestSellers(@Param("from") LocalDate from, @Param("to") LocalDate to,
                                @Param("status") InvoiceStatus status, Limit limit);
 
+    /**
+     * Every item that sold in the window, most sold first, with no cap: the screen shows the head
+     * of this list as the best sellers and the whole of it under View All, so the two can never
+     * disagree about what sold.
+     *
+     * <p>Ordered by how many went out, not by what they brought in - a best seller is the thing
+     * the shop moves most of. Quantity is in milli-units, so ordering by it is exact.
+     */
     @Query("""
             select i.productName, sum(i.quantityMilli), sum(i.lineTotalPaise), count(i)
             from InvoiceItem i
             where i.invoice.issuedAt between :from and :to and i.invoice.status = :status
             group by i.productName
-            order by sum(i.lineTotalPaise) desc
+            order by sum(i.quantityMilli) desc, sum(i.lineTotalPaise) desc, i.productName asc
             """)
-    List<Object[]> bestSellersAt(@Param("from") Instant from, @Param("to") Instant to,
-                                 @Param("status") InvoiceStatus status, Limit limit);
+    List<Object[]> soldItemsAt(@Param("from") Instant from, @Param("to") Instant to,
+                               @Param("status") InvoiceStatus status);
 }

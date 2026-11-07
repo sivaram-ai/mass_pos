@@ -180,7 +180,7 @@ class SettingsAndReportsApiIntegrationTest {
         assertThat(day.get("totals").get("grandTotalPaise").asLong()).isEqualTo(10_000);
         assertThat(day.get("payments").get(0).get("mode").asText()).isEqualTo("CASH");
         assertThat(day.get("terminals").get(0).get("name").asText()).isEqualTo("T1");
-        assertThat(day.get("bestSellers").get(0).get("name").asText()).isEqualTo("Sugar 1kg");
+        assertThat(day.get("soldItems").get(0).get("name").asText()).isEqualTo("Sugar 1kg");
 
         JsonNode gst = json.readTree(mvc.perform(as(get("/api/reports/gst"), auditorToken))
                 .andExpect(status().isOk())
@@ -199,6 +199,49 @@ class SettingsAndReportsApiIntegrationTest {
 
         // A cashier has no business reading the day's takings.
         mvc.perform(as(get("/api/reports/day"), cashierToken)).andExpect(status().isForbidden());
+    }
+
+    /**
+     * The sheet behind the Export button. It is built by the same methods that answer the screen,
+     * so what is checked here is that each tab reaches its own layout and that money is written as
+     * a plain number: "Rs. 100.00" would be text in Excel, and the point of the file is adding up.
+     */
+    @Test
+    @Order(5)
+    void everyReportCanBeTakenAwayAsASheet() throws Exception {
+        String day = exported("day");
+        assertThat(day).contains("Billing report,Day's takings")
+                .contains("Grand total,100.00")
+                .contains("How it was paid", "CASH,1,100.00")
+                .contains("By cashier", "Items sold", "By till")
+                .doesNotContain("Rs.");
+
+        assertThat(exported("gst")).contains("Billing report,GST summary")
+                .contains("Rate-wise summary", "5%,95.24")
+                .contains("HSN summary", "17019100,KGS");
+
+        assertThat(exported("audit")).contains("Billing report,Audit trail")
+                .contains("When,Who,Till,What,Change")
+                .contains("set-cashier");
+
+        // The name carries the window and the moment, so one folder can hold a month of them.
+        String named = mvc.perform(
+                        as(get("/api/reports/export?report=day&from=2026-11-07T00:00&to=2026-11-07T23:59"), auditorToken))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getHeader(HttpHeaders.CONTENT_DISPOSITION);
+        assertThat(named).contains("billing_reports_day_2026-11-07T00-00_to_2026-11-07T23-59_exported_")
+                // A colon is not allowed in a Windows file name.
+                .doesNotContain(":");
+
+        mvc.perform(as(get("/api/reports/export?report=nonsense"), auditorToken))
+                .andExpect(status().isBadRequest());
+        mvc.perform(as(get("/api/reports/export?report=day"), cashierToken)).andExpect(status().isForbidden());
+    }
+
+    private String exported(String report) throws Exception {
+        return mvc.perform(as(get("/api/reports/export?report=" + report), auditorToken))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
     }
 
     @Test

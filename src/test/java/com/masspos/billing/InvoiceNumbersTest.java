@@ -9,6 +9,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class InvoiceNumbersTest {
 
+    private static final LocalDate DAY = LocalDate.of(2026, 11, 7);
+
     @Test
     void financialYearRunsAprilToMarch() {
         assertThat(InvoiceNumbers.financialYearCode(LocalDate.of(2026, 9, 11))).isEqualTo("2627");
@@ -18,15 +20,30 @@ class InvoiceNumbersTest {
     }
 
     @Test
-    void formatsTerminalPrefixedNumbers() {
-        assertThat(InvoiceNumbers.format("T1", "2627", 1)).isEqualTo("T1-2627-00001");
-        assertThat(InvoiceNumbers.format("T12", "2627", 99_999)).isEqualTo("T12-2627-99999");
+    void theDayIsInTheNumberAndTheRunningNumberStartsAtOne() {
+        assertThat(InvoiceNumbers.format("T1", DAY, 1)).isEqualTo("T1-071126-0001");
+        assertThat(InvoiceNumbers.format("T12", DAY, 9_999)).isEqualTo("T12-071126-9999");
+        assertThat(InvoiceNumbers.formatCreditNote("T1", DAY, 1)).isEqualTo("T1-071126-R001");
+    }
+
+    /**
+     * Why the date is in there at all: Rule 46(b) wants a serial unique for the financial year,
+     * and the running number starts again every morning. Without the day, the first bill of every
+     * day of the year would carry the same number.
+     */
+    @Test
+    void twoDaysBothStartAtOneAndStillHaveDifferentNumbers() {
+        String first = InvoiceNumbers.format("T1", DAY, 1);
+        String nextMorning = InvoiceNumbers.format("T1", DAY.plusDays(1), 1);
+
+        assertThat(first).isNotEqualTo(nextMorning);
+        assertThat(InvoiceNumbers.serialOf(first)).isEqualTo(InvoiceNumbers.serialOf(nextMorning)).isEqualTo("0001");
     }
 
     @Test
-    void widensInsteadOfWrappingOnBusyTills() {
-        assertThat(InvoiceNumbers.format("T1", "2627", 100_000)).isEqualTo("T1-2627-100000");
-        assertThat(InvoiceNumbers.format("T12", "2627", 1_000_000)).hasSize(InvoiceNumbers.MAX_LENGTH);
+    void widensInsteadOfWrappingOnABusyDay() {
+        assertThat(InvoiceNumbers.format("T1", DAY, 10_000)).isEqualTo("T1-071126-10000");
+        assertThat(InvoiceNumbers.format("T12", DAY, 99_999)).hasSize(InvoiceNumbers.MAX_LENGTH);
     }
 
     /**
@@ -35,11 +52,22 @@ class InvoiceNumbersTest {
      */
     @Test
     void takesTheCounterAndTheRunningNumberBackOutOfANumber() {
+        assertThat(InvoiceNumbers.serialOf("T1-071126-0001")).isEqualTo("0001");
+        assertThat(InvoiceNumbers.counterOf("T1-071126-0001")).isEqualTo("T1");
+        assertThat(InvoiceNumbers.serialOf("T12-071126-R004")).isEqualTo("R004");
+        assertThat(InvoiceNumbers.counterOf("T12-071126-R004")).isEqualTo("T12");
+    }
+
+    /**
+     * A till upgraded from the financial-year series has bills numbered the old way, and they
+     * have to keep reading on the screen and in the audit trail exactly as they did.
+     */
+    @Test
+    void aBillFromBeforeTheDaySeriesStillReads() {
         assertThat(InvoiceNumbers.serialOf("T1-2627-00001")).isEqualTo("00001");
         assertThat(InvoiceNumbers.counterOf("T1-2627-00001")).isEqualTo("T1");
         assertThat(InvoiceNumbers.serialOf("T12-2627-R0004")).isEqualTo("R0004");
         assertThat(InvoiceNumbers.counterOf("T12-2627-R0004")).isEqualTo("T12");
-        assertThat(InvoiceNumbers.serialOf(InvoiceNumbers.format("T1", "2627", 100_000))).isEqualTo("100000");
     }
 
     /** A number from somewhere else is shown as it is, rather than cut up on a guess. */
@@ -52,9 +80,9 @@ class InvoiceNumbersTest {
 
     @Test
     void neverExceedsTheGstLengthLimit() {
-        assertThatThrownBy(() -> InvoiceNumbers.format("T12", "2627", 10_000_000))
+        assertThatThrownBy(() -> InvoiceNumbers.format("T12", DAY, 1_000_000))
                 .isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> InvoiceNumbers.format("T1", "2627", 0))
+        assertThatThrownBy(() -> InvoiceNumbers.format("T1", DAY, 0))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 }

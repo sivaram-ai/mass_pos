@@ -38,6 +38,7 @@ public class ReturnService {
     private final CreditNoteRepository creditNotes;
     private final CreditNoteItemRepository creditNoteItems;
     private final CreditNoteSequenceRepository sequences;
+    private final CreditNoteDailySequenceRepository dailySequences;
     private final ProductRepository products;
     private final UserRepository users;
     private final InventoryService inventory;
@@ -46,12 +47,14 @@ public class ReturnService {
 
     public ReturnService(InvoiceRepository invoices, CreditNoteRepository creditNotes,
                          CreditNoteItemRepository creditNoteItems, CreditNoteSequenceRepository sequences,
+                         CreditNoteDailySequenceRepository dailySequences,
                          ProductRepository products, UserRepository users, InventoryService inventory,
                          ShopSettingsService settings, CurrentCounter counter) {
         this.invoices = invoices;
         this.creditNotes = creditNotes;
         this.creditNoteItems = creditNoteItems;
         this.sequences = sequences;
+        this.dailySequences = dailySequences;
         this.products = products;
         this.users = users;
         this.inventory = inventory;
@@ -110,11 +113,14 @@ public class ReturnService {
         String terminalCode = counter.code();
         LocalDate today = LocalDate.now(IndiaTime.ZONE);
         String financialYear = InvoiceNumbers.financialYearCode(today);
+        // Two counts, as for a bill: the year's for the books, the day's for the number on the paper.
         CreditNoteSequence sequence = sequences.findByTerminalCodeAndFinancialYear(terminalCode, financialYear)
                 .orElseGet(() -> sequences.save(new CreditNoteSequence(terminalCode, financialYear)));
+        CreditNoteDailySequence daily = dailySequences.findByTerminalCodeAndBusinessDate(terminalCode, today)
+                .orElseGet(() -> dailySequences.save(new CreditNoteDailySequence(terminalCode, today)));
         Invoice original = priced.original();
-        CreditNote note = new CreditNote(terminalCode, sequence.next(), today, Instant.now(), seller, original,
-                priced.placeOfSupply(), original == null ? null : original.getBuyerGstin(),
+        CreditNote note = new CreditNote(terminalCode, sequence.next(), daily.next(), today, Instant.now(), seller,
+                original, priced.placeOfSupply(), original == null ? null : original.getBuyerGstin(),
                 original == null ? null : original.getBuyerName(), SaleService.blankToNull(request.reason()), cashier);
 
         for (PricedLine line : priced.lines()) {
@@ -155,8 +161,7 @@ public class ReturnService {
     public CreditNoteView lookup(String number) {
         String text = number == null ? "" : number.trim().toUpperCase(java.util.Locale.ROOT);
         String full = text.matches("R?\\d{1,9}")
-                ? InvoiceNumbers.formatCreditNote(counter.code(),
-                        InvoiceNumbers.financialYearCode(LocalDate.now(IndiaTime.ZONE)),
+                ? InvoiceNumbers.formatCreditNote(counter.code(), LocalDate.now(IndiaTime.ZONE),
                         Long.parseLong(text.replace("R", "")))
                 : text;
         return creditNotes.findByCreditNoteNumber(full)

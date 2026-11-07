@@ -33,7 +33,7 @@ class ReceiptFormatterTest {
                 .contains("MASS MART", "Mass Retail Private Limited", "12 MG Road, Camp",
                         "Ph: 020-5550100", "accounts@massmart.example", "GSTIN: 27AAPFU0939F1ZV",
                         "CIN: U52100MH2020PTC123456", "FSSAI Lic. No: 11521999000123", "TAX INVOICE",
-                        "Invoice: 00001", "Counter: T1", "Date: 11-09-2026", "Time: 10:54", "Paracetamol 500mg",
+                        "Invoice: 0001", "Counter: T1", "Date: 11-09-2026", "Time: 10:54", "Paracetamol 500mg",
                         "100.00   2 200.00", "CGST", "15.25", "SGST", "15.26", "TOTAL Rs.", "200.00",
                         "Place of supply: 27-Maharashtra", "Reverse charge: No",
                         "Goods once sold are exchanged within 7 days", "Thank you! Visit again")
@@ -65,7 +65,7 @@ class ReceiptFormatterTest {
     void aShopWithoutGstinPrintsAPlainBillWithNoTax() {
         SellerDetails unregistered = new SellerDetails("Mass Tiffin Centre", "NEW MASS", "",
                 List.of("4 Bazaar Street", "Madurai"), "", "");
-        Invoice invoice = new Invoice("T1", 7, LocalDate.of(2026, 9, 11), Instant.parse("2026-09-11T05:24:00Z"),
+        Invoice invoice = new Invoice("T1", 7, 7, LocalDate.of(2026, 9, 11), Instant.parse("2026-09-11T05:24:00Z"),
                 unregistered, "", null, null, new User("asha", "Asha K", "hash", UserRole.CASHIER));
         Product parotta = new Product("1", "Parotta", "", UnitOfMeasure.NOS, 2_000, 0, true, 0);
         invoice.addItem(new InvoiceItem(parotta, 3_000, 2_000, 0, 6_000, 0, 0, 0, 0, 0, 0));
@@ -73,7 +73,7 @@ class ReceiptFormatterTest {
         String receipt = format(48, invoice, shop(), ReceiptCopy.ORIGINAL);
 
         assertThat(receipt)
-                .contains("NEW MASS", "4 Bazaar Street", "BILL", "Bill No: 00007", "Counter: T1", "Parotta",
+                .contains("NEW MASS", "4 Bazaar Street", "BILL", "Bill No: 0007", "Counter: T1", "Parotta",
                         "20.00   3  60.00", "TOTAL Rs.")
                 .doesNotContain("TAX INVOICE", "GSTIN", "HSN", "CGST", "SGST", "Taxable", "GST%",
                         "Place of supply", "Reverse charge", "CIN", "FSSAI");
@@ -161,7 +161,7 @@ class ReceiptFormatterTest {
     @Test
     void originalReceiptCarriesAUpiQrForTheBillAmount() {
         assertThat(format(48, intraStateSale(), shop(), ReceiptCopy.ORIGINAL))
-                .contains("upi://pay?pa=massmart@okicici&pn=MASS%20MART&am=200.00&cu=INR&tn=T1-2627-00001");
+                .contains("upi://pay?pa=massmart@okicici&pn=MASS%20MART&am=200.00&cu=INR&tn=T1-110926-0001");
     }
 
     @Test
@@ -208,7 +208,7 @@ class ReceiptFormatterTest {
 
     private static Invoice invoice(String placeOfSupply, String buyerGstin, String buyerName) {
         User cashier = new User("asha", "Asha K", "hash", UserRole.CASHIER);
-        return new Invoice("T1", 1, LocalDate.of(2026, 9, 11), Instant.parse("2026-09-11T05:24:00Z"),
+        return new Invoice("T1", 1, 1, LocalDate.of(2026, 9, 11), Instant.parse("2026-09-11T05:24:00Z"),
                 TestFixtures.seller(), placeOfSupply, buyerGstin, buyerName, cashier);
     }
 

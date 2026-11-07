@@ -158,7 +158,7 @@ class ReturnsAndEditsApiIntegrationTest {
 
         JsonNode note = call(post("/api/returns"), managerToken, returnOf(billId, productId, 2_000, 20_000),
                 status().isCreated()).get("creditNote");
-        assertThat(note.get("creditNoteNumber").asText()).matches("T1-\\d{4}-R\\d{4}");
+        assertThat(note.get("creditNoteNumber").asText()).matches("T1-\\d{6}-R\\d{3}");
         assertThat(note.get("originalInvoiceNumber").asText()).isEqualTo(bill.get("invoiceNumber").asText());
         assertThat(note.get("grandTotalPaise").asLong()).isEqualTo(20_000);
         assertThat(note.get("taxableValuePaise").asLong()).isEqualTo(16_949);
@@ -284,7 +284,7 @@ class ReturnsAndEditsApiIntegrationTest {
                 .get("id").asText()).isEqualTo(bill.get("id").asText());
         assertThat(call(get("/api/invoices/lookup?number=" + serial), cashierToken, null, status().isOk())
                 .get("id").asText()).isEqualTo(bill.get("id").asText());
-        call(get("/api/invoices/lookup?number=T1-2627-99999"), cashierToken, null, status().isNotFound());
+        call(get("/api/invoices/lookup?number=T1-071126-9999"), cashierToken, null, status().isNotFound());
     }
 
     // ---- Helpers ------------------------------------------------------------------------------------

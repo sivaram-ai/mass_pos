@@ -18,8 +18,12 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import org.springframework.util.FileSystemUtils;
 
 import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
@@ -151,6 +155,41 @@ class ProductLifecycleApiIntegrationTest {
         assertThat(stockOf(id)).isEqualTo(10_000);
         // A new item under the old code is a different item, and starts empty.
         assertThat(stockOf(newProduct("LIFE-6", "Rice 5kg new", null))).isZero();
+    }
+
+    /**
+     * The Print products button. The list goes to the printer this till bills on, so a stopped
+     * item has to be on it, marked, rather than quietly missing from the shop's own price list.
+     */
+    @Test
+    void thePrintedPriceListCarriesEveryItemWithTheStoppedOnesMarked() throws Exception {
+        String sold = newProduct("LIFE-7", "Rice 5kg print", null);
+        String stopped = newProduct("LIFE-8", "Wheat 5kg print", null);
+        stop(stopped);
+
+        call(post("/api/products/print-list"), managerToken, null, status().isNoContent());
+
+        String printed = Files.readString(latestPrinterJob());
+        assertThat(printed).contains("PRICE LIST")
+                .contains("LIFE-7")
+                .contains("Rice 5kg print")
+                .contains("Wheat 5kg print")
+                // One line an item: the mark sits after the rate, not on a line of its own.
+                .containsPattern("LIFE-8 +Wheat 5kg print +[\\d.]+ \\(N\\)");
+        assertThat(productOf(sold).get("active").asBoolean()).isTrue();
+
+        // A deleted item is off the shop's price list as surely as it is off the screen.
+        call(delete("/api/products/" + stopped), managerToken, null, status().isNoContent());
+        call(post("/api/products/print-list"), managerToken, null, status().isNoContent());
+        assertThat(Files.readString(latestPrinterJob())).doesNotContain("Wheat 5kg print");
+    }
+
+    private static Path latestPrinterJob() throws Exception {
+        try (Stream<Path> files = Files.list(Path.of(DATA_DIR, "printer-out"))) {
+            return files.filter(file -> file.getFileName().toString().endsWith(".txt"))
+                    .max(Comparator.naturalOrder())
+                    .orElseThrow();
+        }
     }
 
     private static String body(String sku, String name, String barcode) {

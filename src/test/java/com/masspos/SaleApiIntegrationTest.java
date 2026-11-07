@@ -81,7 +81,8 @@ class SaleApiIntegrationTest {
                 """.formatted(productId), status().isCreated());
 
         JsonNode invoice = sale.get("invoice");
-        assertThat(invoice.get("invoiceNumber").asText()).matches("T1-\\d{4}-\\d{5}");
+        // Counter, the day as ddMMyy, and the day's running number: T1-071126-0001.
+        assertThat(invoice.get("invoiceNumber").asText()).matches("T1-\\d{6}-\\d{4}");
         assertThat(invoice.get("taxableValuePaise").asLong()).isEqualTo(16_949);
         assertThat(invoice.get("cgstPaise").asLong()).isEqualTo(1_525);
         assertThat(invoice.get("sgstPaise").asLong()).isEqualTo(1_526);

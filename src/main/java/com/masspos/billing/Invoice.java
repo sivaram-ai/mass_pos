@@ -168,15 +168,19 @@ public class Invoice extends BaseEntity implements TaxDocument {
 
     /**
      * @param sequenceNo from {@link InvoiceSequence#next()} for this terminal and financial year,
-     *                   taken in the same transaction that persists this invoice
+     *                   taken in the same transaction that persists this invoice. It is the books'
+     *                   own count and never restarts, which is what keeps the trail gapless across
+     *                   the year and what {@code uk_invoice_terminal_fy_seq} is on.
+     * @param dailyNo    from {@link InvoiceDailySequence#next()}: the number the shop reads, which
+     *                   starts at 1 again every morning. It is what goes into the printed number.
      * @param seller     {@link SellerDetails#from} the current {@code pos.company} settings
      */
-    public Invoice(String terminalCode, long sequenceNo, LocalDate invoiceDate, Instant issuedAt, SellerDetails seller,
-                   String placeOfSupply, String buyerGstin, String buyerName, User cashier) {
+    public Invoice(String terminalCode, long sequenceNo, long dailyNo, LocalDate invoiceDate, Instant issuedAt,
+                   SellerDetails seller, String placeOfSupply, String buyerGstin, String buyerName, User cashier) {
         this.terminalCode = terminalCode;
         this.financialYear = InvoiceNumbers.financialYearCode(invoiceDate);
         this.sequenceNo = sequenceNo;
-        this.invoiceNumber = InvoiceNumbers.format(terminalCode, financialYear, sequenceNo);
+        this.invoiceNumber = InvoiceNumbers.format(terminalCode, invoiceDate, dailyNo);
         this.invoiceDate = invoiceDate;
         this.issuedAt = issuedAt;
         this.seller = seller;

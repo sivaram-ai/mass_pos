@@ -9,7 +9,6 @@ import com.masspos.billing.InvoiceRepository;
 import com.masspos.billing.InvoiceStatus;
 import com.masspos.billing.PaymentMode;
 import com.masspos.catalog.UnitOfMeasure;
-import org.springframework.data.domain.Limit;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,8 +25,6 @@ import static java.util.stream.Collectors.joining;
 
 @Service
 public class ReportService {
-
-    private static final int BEST_SELLERS = 10;
 
     private final InvoiceRepository invoices;
     private final InvoiceItemRepository items;
@@ -75,7 +72,7 @@ public class ReportService {
                         .toList(),
                 net(invoices.takingsByCashierAt(from, to, InvoiceStatus.ISSUED), creditNotes.refundsByCashierAt(from, to)),
                 net(invoices.takingsByTerminalAt(from, to, InvoiceStatus.ISSUED), creditNotes.refundsByTerminalAt(from, to)),
-                items.bestSellersAt(from, to, InvoiceStatus.ISSUED, Limit.of(BEST_SELLERS)).stream()
+                items.soldItemsAt(from, to, InvoiceStatus.ISSUED).stream()
                         .map(row -> new Reports.ProductRow((String) row[0], amount(row[1]), amount(row[2]),
                                 count(row[3])))
                         .toList());

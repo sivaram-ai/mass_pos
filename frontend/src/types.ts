@@ -396,7 +396,16 @@ export interface DayReport {
   payments: { mode: PaymentMode; bills: number; amountPaise: number }[]
   cashiers: { name: string; bills: number; amountPaise: number }[]
   terminals: { name: string; bills: number; amountPaise: number }[]
-  bestSellers: { name: string; quantityMilli: number; amountPaise: number; lines: number }[]
+  /** Every item that sold, most sold first. The best sellers are the first few of these. */
+  soldItems: SoldItem[]
+}
+
+export interface SoldItem {
+  name: string
+  quantityMilli: number
+  amountPaise: number
+  /** How many bill lines it appeared on. */
+  lines: number
 }
 
 export interface ReportTotals {

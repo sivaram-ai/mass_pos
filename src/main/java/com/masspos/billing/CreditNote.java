@@ -138,15 +138,17 @@ public class CreditNote extends BaseEntity implements TaxDocument {
     }
 
     /**
-     * @param original the bill being answered, or null; its buyer and place of supply carry over
+     * @param original   the bill being answered, or null; its buyer and place of supply carry over
+     * @param sequenceNo the books' own count for the financial year, which never restarts
+     * @param dailyNo    the number the shop reads, which starts at 1 again every morning
      */
-    public CreditNote(String terminalCode, long sequenceNo, LocalDate noteDate, Instant issuedAt, SellerDetails seller,
-                      Invoice original, String placeOfSupply, String buyerGstin, String buyerName, String reason,
-                      User cashier) {
+    public CreditNote(String terminalCode, long sequenceNo, long dailyNo, LocalDate noteDate, Instant issuedAt,
+                      SellerDetails seller, Invoice original, String placeOfSupply, String buyerGstin,
+                      String buyerName, String reason, User cashier) {
         this.terminalCode = terminalCode;
         this.financialYear = InvoiceNumbers.financialYearCode(noteDate);
         this.sequenceNo = sequenceNo;
-        this.creditNoteNumber = InvoiceNumbers.formatCreditNote(terminalCode, financialYear, sequenceNo);
+        this.creditNoteNumber = InvoiceNumbers.formatCreditNote(terminalCode, noteDate, dailyNo);
         this.noteDate = noteDate;
         this.issuedAt = issuedAt;
         this.seller = seller;

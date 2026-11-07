@@ -87,6 +87,7 @@ export default function Products({ onToast }: { onToast: Toast }) {
   const [products, setProducts] = useState<Product[]>([])
   const [sort, setSort] = useState<Sort>(() => loadSort(PRODUCT_SORT_KEY))
   const [sortOpen, setSortOpen] = useState(false)
+  const [printing, setPrinting] = useState(false)
   const [selected, setSelected] = useState(0)
   const [action, setAction] = useState<Action>('edit')
   const [listFocused, setListFocused] = useState(false)
@@ -132,6 +133,19 @@ export default function Products({ onToast }: { onToast: Toast }) {
       await downloadCsv('/api/products/export', `products-${new Date().toISOString().slice(0, 10)}.csv`)
     } catch (failure) {
       onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not make the file') })
+    }
+  }
+
+  /** The catalogue on paper, from the printer this till bills on. The server waits for the job. */
+  const printList = async () => {
+    setPrinting(true)
+    try {
+      await api.post('/api/products/print-list')
+      onToast({ tone: 'good', text: 'Price list sent to the printer' })
+    } catch (failure) {
+      onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not print the price list') })
+    } finally {
+      setPrinting(false)
     }
   }
 
@@ -346,6 +360,10 @@ export default function Products({ onToast }: { onToast: Toast }) {
           <Button className="whitespace-nowrap px-2 py-1" onClick={() => void extract()}
                   title="Save the whole catalogue as a sheet you can edit in Excel">
             Extract products
+          </Button>
+          <Button className="whitespace-nowrap px-2 py-1" onClick={() => void printList()} disabled={printing}
+                  title="Print every item in code order - code, name and rate - on this till's printer">
+            {printing ? 'Printing…' : 'Print products'}
           </Button>
           <Button tone="primary" className="whitespace-nowrap px-2 py-1" hint={ADD_KEY}
                   onClick={() => openEditor(null, EMPTY)}>

@@ -39,6 +39,7 @@ public class SaleService {
 
     private final InvoiceRepository invoices;
     private final InvoiceSequenceRepository sequences;
+    private final InvoiceDailySequenceRepository dailySequences;
     private final CreditNoteRepository creditNotes;
     private final ProductRepository products;
     private final UserRepository users;
@@ -46,11 +47,13 @@ public class SaleService {
     private final ShopSettingsService settings;
     private final CurrentCounter counter;
 
-    public SaleService(InvoiceRepository invoices, InvoiceSequenceRepository sequences, CreditNoteRepository creditNotes,
+    public SaleService(InvoiceRepository invoices, InvoiceSequenceRepository sequences,
+                       InvoiceDailySequenceRepository dailySequences, CreditNoteRepository creditNotes,
                        ProductRepository products, UserRepository users, InventoryService inventory,
                        ShopSettingsService settings, CurrentCounter counter) {
         this.invoices = invoices;
         this.sequences = sequences;
+        this.dailySequences = dailySequences;
         this.creditNotes = creditNotes;
         this.products = products;
         this.users = users;
@@ -118,13 +121,12 @@ public class SaleService {
 
         // The new number is reserved first so the old bill is cancelled once, with a reason naming its
         // replacement: a cancelled bill is frozen, so the reason cannot be filled in afterwards.
-        long sequenceNo = reserveNumber(today);
-        String replacementNumber = InvoiceNumbers.format(counter.code(),
-                InvoiceNumbers.financialYearCode(today), sequenceNo);
+        Numbers numbers = reserveNumber(today);
+        String replacementNumber = InvoiceNumbers.format(counter.code(), today, numbers.dailyNo());
         original.cancel(cashier, reasonFor(request.reason(), replacementNumber), Instant.now());
         // Its stock goes back before the new lines are checked against the shelf.
         restock(original);
-        Invoice replacement = build(cashier, shop, today, sequenceNo, request.lines(), request.buyerGstin(),
+        Invoice replacement = build(cashier, shop, today, numbers, request.lines(), request.buyerGstin(),
                 request.buyerName(), request.placeOfSupply(), request.parcel(),
                 request.tableNo(), request.supplierId());
         replacement.replaces(original.getInvoiceNumber());
@@ -197,28 +199,44 @@ public class SaleService {
     }
 
     /**
-     * A bill by its number, or by just its serial on this till in the current financial year, so a
-     * cashier can type "42" for T1-2627-00042.
+     * A bill by its number, or by just its serial on this till, so a cashier can type "42" for
+     * T1-071126-0042. A bare number means today's bill, because that is the one being asked
+     * about at a counter; anything older is found by the whole number, which is on the paper.
      */
     @Transactional(readOnly = true)
     public InvoiceView lookup(String number) {
         String text = number == null ? "" : number.trim().toUpperCase(java.util.Locale.ROOT);
         String full = text.matches("\\d{1,9}")
-                ? InvoiceNumbers.format(counter.code(),
-                        InvoiceNumbers.financialYearCode(LocalDate.now(IndiaTime.ZONE)), Long.parseLong(text))
+                ? InvoiceNumbers.format(counter.code(), LocalDate.now(IndiaTime.ZONE), Long.parseLong(text))
                 : text;
         return invoices.findByInvoiceNumber(full)
                 .map(InvoiceView::of)
                 .orElseThrow(() -> new EntityNotFoundException("No bill numbered " + full));
     }
 
-    /** The next bill number of this till. Only inside the transaction that issues the bill. */
-    private long reserveNumber(LocalDate today) {
+    /**
+     * The next bill number of this till: both counts, taken together so they can never disagree.
+     * Only inside the transaction that issues the bill.
+     *
+     * <p>{@code sequenceNo} is the books' count for the financial year and never restarts, which
+     * is what keeps the trail gapless and what the invoice table's own unique constraint is on.
+     * {@code dailyNo} is what the shop reads, and the first bill after midnight is 1 again: a new
+     * day simply has no row yet, so one is started.
+     */
+    private Numbers reserveNumber(LocalDate today) {
         String terminalCode = counter.code();
         String financialYear = InvoiceNumbers.financialYearCode(today);
-        return sequences.findByTerminalCodeAndFinancialYear(terminalCode, financialYear)
+        long sequenceNo = sequences.findByTerminalCodeAndFinancialYear(terminalCode, financialYear)
                 .orElseGet(() -> sequences.save(new InvoiceSequence(terminalCode, financialYear)))
                 .next();
+        long dailyNo = dailySequences.findByTerminalCodeAndBusinessDate(terminalCode, today)
+                .orElseGet(() -> dailySequences.save(new InvoiceDailySequence(terminalCode, today)))
+                .next();
+        return new Numbers(sequenceNo, dailyNo);
+    }
+
+    /** @param sequenceNo the year's count, for the books; @param dailyNo the day's, for the shop */
+    private record Numbers(long sequenceNo, long dailyNo) {
     }
 
     /**
@@ -249,7 +267,7 @@ public class SaleService {
     }
 
     /** Builds a complete, unpaid invoice under a reserved number: lines, tax and round-off. */
-    private Invoice build(User cashier, ShopSettings shop, LocalDate today, long sequenceNo,
+    private Invoice build(User cashier, ShopSettings shop, LocalDate today, Numbers numbers,
                           List<SaleRequest.Line> lines, String buyerGstin, String buyerName,
                           String requestedPlaceOfSupply, boolean parcel, String tableNo, String supplierId) {
         SellerDetails seller = SellerDetails.from(shop);
@@ -262,8 +280,8 @@ public class SaleService {
         String placeOfSupply = placeOfSupply(requestedPlaceOfSupply, seller.getStateCode());
         boolean interState = gst && !placeOfSupply.equals(seller.getStateCode());
 
-        Invoice invoice = new Invoice(terminalCode, sequenceNo, today, Instant.now(), seller, placeOfSupply,
-                blankToNull(buyerGstin), blankToNull(buyerName), cashier);
+        Invoice invoice = new Invoice(terminalCode, numbers.sequenceNo(), numbers.dailyNo(), today, Instant.now(),
+                seller, placeOfSupply, blankToNull(buyerGstin), blankToNull(buyerName), cashier);
         invoice.takeAway(parcel);
         invoice.serveAt(tableNo, supplierId);
 

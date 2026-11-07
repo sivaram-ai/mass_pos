@@ -3,6 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      The shortcut opens this page in an Edge --app window, and such a window takes its taskbar
+      icon from the page rather than from the launcher that started it. Without these the till
+      showed the browser's blank-page icon. The .ico carries every size Windows asks for; the
+      manifest's PNGs are what Edge prefers for the window itself. All three come out of
+      tools/make-icon.py, so they are the same rocket as the installer's.
+    -->
+    <link rel="icon" href="/gorockit.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/gorockit-192.png" />
+    <link rel="apple-touch-icon" href="/gorockit-192.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#1a59d3" />
     <title>GO RockIt</title>
   </head>
   <body>

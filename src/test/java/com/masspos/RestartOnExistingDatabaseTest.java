@@ -68,6 +68,77 @@ class RestartOnExistingDatabaseTest {
         }
     }
 
+    /**
+     * The upgrade this release puts a shop through: a till that numbered its bills by the financial
+     * year, {@code T1-2627-00123}, starts numbering them by the day, {@code T1-071126-0001}. The
+     * shop takes a backup, installs, puts the backup back, and has to carry on billing.
+     *
+     * <p>Two things could have broken it, and neither may. The day's counters live in tables that
+     * the old database has never seen, so they have to be created on an existing schema - SQLite
+     * takes a new table on upgrade, which is why the day's count went into tables of its own rather
+     * than into a changed unique constraint, which SQLite cannot alter on a populated table. And
+     * the bills already taken keep their old numbers, so they must not collide with the new ones
+     * nor stop reading.
+     */
+    @Test
+    void aTillNumberingByTheYearUpgradesToNumberingByTheDay() throws SQLException {
+        FileSystemUtils.deleteRecursively(new File(DATA_DIR));
+        try (ConfigurableApplicationContext released = start()) {
+            assertThat(released.isRunning()).isTrue();
+        }
+
+        // Back to the previous release: no day counters, and a bill numbered by the financial year.
+        String cashierId = UUID.randomUUID().toString();
+        try (Connection db = open(); Statement sql = db.createStatement()) {
+            sql.execute("DROP TABLE invoice_daily_sequence");
+            sql.execute("DROP TABLE credit_note_daily_sequence");
+            sql.execute("INSERT INTO app_user (id, version, created_at, updated_at, username, display_name,"
+                    + " pin_hash, role, active, must_change_pin)"
+                    + " VALUES ('" + cashierId + "', 0, 1, 1, 'upg-cashier', 'Asha K', 'hash', 'CASHIER', 1, 0)");
+            sql.execute("INSERT INTO invoice_sequence (id, version, created_at, updated_at, terminal_code,"
+                    + " financial_year, last_issued)"
+                    + " VALUES ('" + UUID.randomUUID() + "', 0, 1, 1, 'T1', '2627', 123)");
+            sql.execute("INSERT INTO invoice (id, version, created_at, updated_at, invoice_number, terminal_code,"
+                    + " financial_year, sequence_no, invoice_date, issued_at, status, place_of_supply,"
+                    + " seller_legal_name, seller_trade_name, seller_gstin, seller_state_code, seller_address,"
+                    + " taxable_value_paise, cgst_paise, sgst_paise, igst_paise, cess_paise, round_off_paise,"
+                    + " grand_total_paise, parcel, table_no, supplier_id, cashier_id)"
+                    + " VALUES ('" + UUID.randomUUID() + "', 0, 1, 1, 'T1-2627-00123', 'T1', '2627', 123,"
+                    + " '2026-11-06', 1, 'ISSUED', '27', 'Mass Retail Private Limited', 'MASS MART',"
+                    + " '27AAPFU0939F1ZV', '27', '12 MG Road', 10000, 0, 0, 0, 0, 0, 10000, 0, '', '',"
+                    + " '" + cashierId + "')");
+        }
+
+        try (ConfigurableApplicationContext upgraded = start()) {
+            assertThat(upgraded.isRunning()).isTrue();
+        }
+
+        try (Connection db = open(); Statement sql = db.createStatement()) {
+            // The day's counters are there, and empty: the next bill of the day is number 1.
+            try (ResultSet row = sql.executeQuery("SELECT count(*) FROM invoice_daily_sequence")) {
+                assertThat(row.next()).isTrue();
+                assertThat(row.getLong(1)).isZero();
+            }
+            try (ResultSet row = sql.executeQuery("SELECT count(*) FROM credit_note_daily_sequence")) {
+                assertThat(row.next()).isTrue();
+                assertThat(row.getLong(1)).isZero();
+            }
+            // The bill taken under the old series is untouched and still reads.
+            try (ResultSet row = sql.executeQuery(
+                    "SELECT invoice_number, sequence_no FROM invoice WHERE invoice_number = 'T1-2627-00123'")) {
+                assertThat(row.next()).isTrue();
+                assertThat(row.getString(1)).isEqualTo("T1-2627-00123");
+                assertThat(row.getLong(2)).isEqualTo(123);
+            }
+            // The year's counter carries on from where the shop left off, so the books stay gapless.
+            try (ResultSet row = sql.executeQuery(
+                    "SELECT last_issued FROM invoice_sequence WHERE terminal_code = 'T1'")) {
+                assertThat(row.next()).isTrue();
+                assertThat(row.getLong(1)).isEqualTo(123);
+            }
+        }
+    }
+
     private static Connection open() throws SQLException {
         return DriverManager.getConnection("jdbc:sqlite:" + DATA_DIR + "/pos.db");
     }

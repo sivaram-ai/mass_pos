@@ -33,10 +33,20 @@ public final class Reports {
      * @param returnTotals the credit notes alone
      * @param totals       sales less returns: what the shop actually kept
      * @param payments     taken in less paid back, per mode
+     * @param soldItems    every item that sold, most sold first. The best sellers are the head of
+     *                     this list rather than a list of their own, so the two cannot drift
+     *                     apart: what View All shows always contains what the panel shows.
      */
     public record DayReport(Instant from, Instant to, long bills, long cancelledBills, long returns, Totals salesTotals,
                             Totals returnTotals, Totals totals, List<ModeRow> payments, List<NameRow> cashiers,
-                            List<NameRow> terminals, List<ProductRow> bestSellers) {
+                            List<NameRow> terminals, List<ProductRow> soldItems) {
+
+        /** How many of the sold items the screen and a short printout call the best sellers. */
+        public static final int BEST_SELLERS = 10;
+
+        public List<ProductRow> bestSellers() {
+            return soldItems.subList(0, Math.min(BEST_SELLERS, soldItems.size()));
+        }
     }
 
     public record ModeRow(PaymentMode mode, long bills, long amountPaise) {
