@@ -1,9 +1,11 @@
 package com.masspos.settings;
 
 import com.masspos.auth.RequiresRole;
+import com.masspos.client.CurrentCounter;
 import com.masspos.common.Csv;
 import com.masspos.common.IndiaTime;
 import com.masspos.config.PosProperties;
+import com.masspos.terminal.Terminal;
 import com.masspos.terminal.TerminalRepository;
 import com.masspos.terminal.TerminalType;
 import com.masspos.user.UserRole;
@@ -31,18 +33,22 @@ public class SettingsController {
 
     private final ShopSettingsService settings;
     private final TerminalRepository terminals;
+    private final CurrentCounter counter;
     private final PosProperties pos;
 
-    public SettingsController(ShopSettingsService settings, TerminalRepository terminals, PosProperties pos) {
+    public SettingsController(ShopSettingsService settings, TerminalRepository terminals, CurrentCounter counter,
+                              PosProperties pos) {
         this.settings = settings;
         this.terminals = terminals;
+        this.counter = counter;
         this.pos = pos;
     }
 
     /**
      * @param readyToInvoice false while the shop's name or address is missing; the billing screen shows why
      * @param gstRegistered  false without a GSTIN: bills then charge no tax and are not tax invoices
-     * @param thisTerminal   identity of the machine being used, which lives in its own pos.properties
+     * @param thisTerminal   the till the browser asking is billing as: this machine on the server,
+     *                       the counter's own till when a counter is asking
      * @param version        the build this till is running, so a shop reporting a problem can name it
      */
     public record SettingsView(ShopSettingsForm shop, boolean readyToInvoice, List<String> missingForInvoicing,
@@ -95,14 +101,37 @@ public class SettingsController {
     }
     private SettingsView viewOf(ShopSettings shop) {
         ShopSettingsForm form = ShopSettingsForm.of(shop);
-        PosProperties.Terminal me = pos.terminal();
         return new SettingsView(form, shop.isReadyToInvoice(), shop.missingForInvoicing(), shop.isGstRegistered(),
-                new TerminalView(me.code(), me.name(), me.section(), me.type(), true, Instant.now()),
-                terminals.findAllByOrderBySectionAscCodeAsc().stream()
-                        .map(terminal -> new TerminalView(terminal.getCode(), terminal.getName(),
-                                terminal.getSection(), terminal.getType(), terminal.isActive(),
-                                terminal.getLastSeenAt()))
-                        .toList(),
+                thisTerminal(),
+                terminals.findAllByOrderBySectionAscCodeAsc().stream().map(SettingsController::viewOf).toList(),
                 pos.version());
+    }
+
+    /**
+     * The machine looking at the screen, which with counters in the shop is not the machine holding
+     * the database. This answered from {@code pos.properties} - the server's own identity - so every
+     * counter was shown the server's name in the header and had "this machine" marked against the
+     * server's row in the list of tills. It comes from the signed-in session instead, which is where
+     * a counter's number has lived since it was first let in.
+     *
+     * <p>The name is the counter's own, as typed in its settings window and refreshed on the
+     * {@code terminal} row at every sign-in. A counter that has somehow lost its row still gets its
+     * code rather than the server's, because showing the wrong till is worse than showing a bare
+     * code.
+     */
+    private TerminalView thisTerminal() {
+        PosProperties.Terminal me = pos.terminal();
+        String here = counter.code();
+        if (here.equals(me.code())) {
+            return new TerminalView(me.code(), me.name(), me.section(), me.type(), true, Instant.now());
+        }
+        return terminals.findByCode(here)
+                .map(SettingsController::viewOf)
+                .orElseGet(() -> new TerminalView(here, here, "", TerminalType.COUNTER, true, Instant.now()));
+    }
+
+    private static TerminalView viewOf(Terminal terminal) {
+        return new TerminalView(terminal.getCode(), terminal.getName(), terminal.getSection(), terminal.getType(),
+                terminal.isActive(), terminal.getLastSeenAt());
     }
 }

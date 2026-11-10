@@ -126,8 +126,10 @@ final class CounterSettings {
 
         save.addActionListener(event -> {
             collect.run();
-            if (config.code().isBlank()) {
-                told.setText("Give this counter a number first - it goes on every bill it takes.");
+            String badCode = CounterConfig.codeProblem(config.code());
+            if (badCode != null) {
+                told.setText(badCode);
+                code.requestFocusInWindow();
                 return;
             }
             if (!config.readyToConnect()) {

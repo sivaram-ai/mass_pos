@@ -54,7 +54,7 @@ public class AuthService {
     /** Signing in on this machine itself, which is what a shop with one till always does. */
     @Transactional
     public LoginResult signIn(String username, String pin) {
-        return signIn(username, pin, null, false);
+        return signIn(username, pin, null, null, false);
     }
 
     /**
@@ -66,10 +66,12 @@ public class AuthService {
      * found, so a counter with no place left says so plainly rather than "wrong username or PIN".
      *
      * @param counterCode     what the machine calls itself; blank from the browser on the server
+     * @param counterName     what staff call it, from its own settings window; blank is fine
      * @param overTheNetwork  false when the request came in over loopback, i.e. the server's own till
      */
     @Transactional
-    public LoginResult signIn(String username, String pin, String counterCode, boolean overTheNetwork) {
+    public LoginResult signIn(String username, String pin, String counterCode, String counterName,
+                              boolean overTheNetwork) {
         User user = users.findByUsernameIgnoreCase(username == null ? "" : username.trim())
                 .filter(User::isActive)
                 .orElseThrow(() -> new AuthException("Wrong username or PIN"));
@@ -77,7 +79,7 @@ public class AuthService {
             log.warn("Failed sign-in for {} on {}", user.getUsername(), counterCode);
             throw new AuthException("Wrong username or PIN");
         }
-        String counter = clients.admit(counterCode, null, overTheNetwork);
+        String counter = clients.admit(counterCode, counterName, overTheNetwork);
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes());
         AuthToken saved = tokens.save(new AuthToken(user, hash(token), counter));
         log.info("{} signed in on {}", user.getUsername(), counter);

@@ -8,7 +8,9 @@ import jakarta.validation.constraints.Positive;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
+import java.nio.file.Path;
 import java.time.Duration;
+import java.util.function.Supplier;
 
 /**
  * @param columns     characters per line in Font A: 48 for 80 mm paper, 32 for 58 mm
@@ -66,5 +68,37 @@ public record PrinterProperties(
      *                instead of stretching it across the page; 0 fills the printable width
      */
     public record Windows(String name, @Min(0) @Max(500) int widthMm) {
+    }
+
+    /**
+     * Where jobs sent to this printer are going, e.g. "Canon G3080 series" or "COM3" - for a log,
+     * and for the line on the settings screen. Opens nothing, so a printer that is switched off or
+     * unplugged still describes itself.
+     *
+     * <p>Lives here rather than beside one of the two printing paths because there are now two: the
+     * server's own printer and the one standing on a counter. One copy means a counter cannot start
+     * describing its printer differently from the way the server describes its own.
+     *
+     * @param fileDirectory where the FILE type writes, which is a different folder on each
+     */
+    public String describe(Path fileDirectory) {
+        return describe(fileDirectory, WindowsPrinterConnection::defaultPrinterName);
+    }
+
+    /** The same, with the Windows default named by the caller, which is how it is tested. */
+    public String describe(Path fileDirectory, Supplier<String> windowsDefault) {
+        return switch (type) {
+            case SERIAL -> serial.port().isBlank() ? "no COM port chosen" : serial.port();
+            case TCP -> tcp.host().isBlank() ? "no address set" : tcp.host() + ":" + tcp.port();
+            // Named, not just "the default": a till printing into the wrong queue looks like
+            // nothing at all is wrong until someone goes looking for the paper.
+            case WINDOWS -> windows.name().isBlank() ? windowsDefault.get() : windows.name();
+            case FILE -> fileDirectory.toAbsolutePath().toString();
+        };
+    }
+
+    /** What the screen shows: the kind of printer and which one, e.g. "WINDOWS Canon G3080 series". */
+    public String target(Path fileDirectory) {
+        return type + " " + describe(fileDirectory);
     }
 }

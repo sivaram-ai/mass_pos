@@ -4,6 +4,7 @@ import com.masspos.hardware.EscPos;
 import com.masspos.hardware.FilePrinterConnection;
 import com.masspos.hardware.PrinterConnection;
 import com.masspos.hardware.PrinterProperties;
+import com.masspos.hardware.PrinterStatus;
 import com.masspos.hardware.SerialPrinterConnection;
 import com.masspos.hardware.TcpPrinterConnection;
 import com.masspos.hardware.WindowsPrinterConnection;
@@ -16,9 +17,16 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * The reason a counter is more than a browser window.
@@ -32,14 +40,21 @@ import java.util.concurrent.TimeUnit;
  * handed bytes and a job either reaches the printer or it does not. Everything that decides what
  * those bytes say still happens on the server, once, in the code that has always laid bills out.
  *
+ * <p>It does own one thing, because only this machine can: <em>which</em> printer that is. The
+ * settings page on a counter reads and writes it here ({@code /settings}, {@code /status},
+ * {@code /test-page}) rather than on the server, where it would have been setting the server's
+ * printer and through it every other counter's.
+ *
  * <h2>Why it is safe to open a port</h2>
  * <ul>
  *   <li>It binds loopback only, so nothing on the network can reach it - not even the server.</li>
  *   <li>Browsers may only call it from the shop server's own page: the agent answers the preflight
  *       for that one origin and refuses any other, and checks the Origin itself rather than
  *       trusting the browser to have done so.</li>
- *   <li>It writes to a printer. The worst a caller can do is waste paper or open a drawer that
- *       somebody is standing at, which is the same thing the till's own drawer key does.</li>
+ *   <li>It writes to a printer. The worst a caller can do is waste paper, open a drawer that
+ *       somebody is standing at - the same thing the till's own drawer key does - or point this
+ *       one counter's bills at another printer installed on this same machine. All of it needs the
+ *       machine itself, which is to say the printer and the drawer are already in reach.</li>
  * </ul>
  *
  * <p>Jobs go through one queue on one thread, for the same reason the server's printer does: two
@@ -50,23 +65,55 @@ public final class PrintAgent implements AutoCloseable {
     private static final int BACKLOG = 4;
     /** A job is bytes; anything much larger than a long bill with a logo is not one. */
     private static final int MAX_JOB_BYTES = 2 * 1024 * 1024;
+    /** Settings and a shop name are a few hundred bytes; anything else is not one of those. */
+    private static final int MAX_SETTINGS_BYTES = 8 * 1024;
+    private static final Duration STATUS_TIMEOUT = Duration.ofMillis(500);
+    /** Room for a status round trip and a bill queued ahead of it, as the server allows. */
+    private static final Duration AWAIT_MARGIN = Duration.ofSeconds(3);
 
     private final CounterConfig config;
     private final Path spoolFolder;
-    private final BlockingQueue<Job> queue = new ArrayBlockingQueue<>(32);
+    private final BlockingQueue<Task> queue = new ArrayBlockingQueue<>(32);
+    /** Held by anything that reads or writes {@link #config}; the printer thread never takes it. */
+    private final Object settings = new Object();
     private volatile String allowedOrigin = "";
     private volatile String lastError = "";
+    /**
+     * The printer as one object, swapped whole when the settings screen changes it. The printer
+     * thread reads this rather than the settings themselves: a half-applied change - a new type
+     * with the old port still in it - would reach the paper.
+     */
+    private volatile PrinterProperties printer;
     private HttpServer http;
+    private ExecutorService requests;
     private Thread worker;
     private volatile boolean running;
+    /** Touched only by the printer thread, exactly as the server's connection is. */
+    private PrinterConnection connection;
+    private PrinterProperties openedFor;
 
     public PrintAgent(CounterConfig config, Path spoolFolder) {
         this.config = config;
         this.spoolFolder = spoolFolder;
+        this.printer = config.printer();
     }
 
     /** A bill in both shapes: bytes for a thermal printer, lines for a driver one. */
     record Job(byte[] bytes, java.util.List<EscPos.Line> lines) {
+    }
+
+    /**
+     * Work for the printer thread. Bills, a test page and a status query all queue here, for the
+     * same reason the server funnels them through one thread: two of them on one port at once is a
+     * bill nobody can read, and a settings change that closed a port mid-job would lose one.
+     */
+    private interface Task {
+        void run(PrinterConnection connection);
+
+        /** True when getting through means the printer is well again, so the last error can go. */
+        default boolean clearsLastError() {
+            return true;
+        }
     }
 
     /** Starts listening. The port is the counter's own setting, so two tills can share a machine. */
@@ -74,7 +121,17 @@ public final class PrintAgent implements AutoCloseable {
         http = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), config.agentPort()), BACKLOG);
         http.createContext("/print", this::onPrint);
         http.createContext("/hello", this::onHello);
-        http.setExecutor(null);
+        http.createContext("/settings", this::onSettings);
+        http.createContext("/status", this::onStatus);
+        http.createContext("/test-page", this::onTestPage);
+        // A handful of threads, not the listener's own: asking the printer how it is waits for the
+        // printer thread, and on the listener's thread that wait would hold up the next bill.
+        requests = Executors.newFixedThreadPool(3, runnable -> {
+            Thread thread = new Thread(runnable, "counter-agent-http");
+            thread.setDaemon(true);
+            return thread;
+        });
+        http.setExecutor(requests);
         running = true;
         worker = new Thread(this::printLoop, "counter-print-agent");
         worker.setDaemon(true);
@@ -102,6 +159,9 @@ public final class PrintAgent implements AutoCloseable {
         if (http != null) {
             http.stop(0);
         }
+        if (requests != null) {
+            requests.shutdownNow();
+        }
         if (worker != null) {
             worker.interrupt();
         }
@@ -114,7 +174,7 @@ public final class PrintAgent implements AutoCloseable {
         }
         // The paper, so the server can lay a bill out for this counter's roll. Only the counter
         // knows how wide its own is, and the page has to pass it on when it asks for a bill.
-        PrinterProperties printer = config.printer();
+        PrinterProperties printer = this.printer;
         respond(exchange, 200, "{"
                 + "\"counter\":\"" + config.code() + "\","
                 + "\"printer\":\"" + printer.type() + "\","
@@ -146,13 +206,125 @@ public final class PrintAgent implements AutoCloseable {
             respond(exchange, 400, "{\"error\":\"that is not a bill this counter can print\"}");
             return;
         }
-        if (!queue.offer(job)) {
+        if (!queue.offer(write(job))) {
             respond(exchange, 503, "{\"error\":\"the printer is behind; try again in a moment\"}");
             return;
         }
         // Answered as soon as the job is taken, not when the paper comes out: the screen must not
         // wait on a printer, and a failure is reported the same way the server's always has been.
         respond(exchange, 202, "{\"queued\":true}");
+    }
+
+    /**
+     * This counter's own printer, read and set from the settings screen.
+     *
+     * <p>The page is the server's, but the printer it is choosing is the one standing here, so the
+     * choice is saved here too - in this machine's {@code counter.properties}. Sending it to the
+     * server would set the <em>server's</em> printer, which is how one counter used to take the
+     * back office's bills with it.
+     */
+    private void onSettings(HttpExchange exchange) throws IOException {
+        if (cors(exchange)) {
+            return;
+        }
+        String method = exchange.getRequestMethod();
+        if ("GET".equalsIgnoreCase(method)) {
+            synchronized (settings) {
+                respond(exchange, 200, CounterPrinter.json(CounterPrinter.setupOf(config, spoolFolder)));
+            }
+            return;
+        }
+        if (!"PUT".equalsIgnoreCase(method)) {
+            respond(exchange, 405, "{\"error\":\"read the printer with GET, change it with PUT\"}");
+            return;
+        }
+        byte[] body = exchange.getRequestBody().readNBytes(MAX_SETTINGS_BYTES);
+        try {
+            CounterPrinter.Setup saved;
+            synchronized (settings) {
+                saved = CounterPrinter.save(config, spoolFolder, CounterPrinter.read(body));
+                printer = config.printer();
+            }
+            // The next job finds that the printer is no longer the one its connection was built
+            // from and opens the new one, on the printer thread, between two bills.
+            respond(exchange, 200, CounterPrinter.json(saved));
+        } catch (IllegalArgumentException refused) {
+            respond(exchange, 400, error(refused));
+        } catch (RuntimeException cannotSave) {
+            respond(exchange, 500, error(cannotSave));
+        }
+    }
+
+    /** Paper and cover on this counter's printer, for the lines under the settings page. */
+    private void onStatus(HttpExchange exchange) throws IOException {
+        if (cors(exchange)) {
+            return;
+        }
+        CompletableFuture<PrinterStatus> answer = new CompletableFuture<>();
+        Task ask = new Task() {
+            @Override
+            public void run(PrinterConnection connection) {
+                answer.complete(PrinterStatus.query(connection, STATUS_TIMEOUT));
+            }
+
+            @Override
+            public boolean clearsLastError() {
+                // A printer that answers a status query has not printed the bill that failed.
+                return false;
+            }
+        };
+        if (!queue.offer(ask)) {
+            respond(exchange, 503, "{\"error\":\"the printer is behind; try again in a moment\"}");
+            return;
+        }
+        try {
+            respond(exchange, 200, CounterPrinter.json(answer.get(waitLimit().toMillis(), TimeUnit.MILLISECONDS)));
+        } catch (ExecutionException | TimeoutException silent) {
+            // A port that cannot be opened at all is not a status, exactly as on the server.
+            respond(exchange, 200, CounterPrinter.json(PrinterStatus.NOT_RESPONDING));
+        } catch (InterruptedException stopping) {
+            Thread.currentThread().interrupt();
+            respond(exchange, 503, "{\"error\":\"the counter is shutting down\"}");
+        }
+    }
+
+    /** A page out of this counter's own printer, which is the only proof the setting took. */
+    private void onTestPage(HttpExchange exchange) throws IOException {
+        if (cors(exchange)) {
+            return;
+        }
+        if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+            respond(exchange, 405, "{\"error\":\"ask for a test page with POST\"}");
+            return;
+        }
+        String shop = PrintJobs.shopName(exchange.getRequestBody().readNBytes(MAX_SETTINGS_BYTES));
+        EscPos page;
+        synchronized (settings) {
+            page = CounterPrinter.testPage(config, spoolFolder, shop);
+        }
+        if (!queue.offer(write(page))) {
+            respond(exchange, 503, "{\"error\":\"the printer is behind; try again in a moment\"}");
+            return;
+        }
+        respond(exchange, 202, "{\"queued\":true}");
+    }
+
+    private Task write(Job job) {
+        return connection -> connection.write(EscPos.rendered(job.bytes(), job.lines()));
+    }
+
+    private Task write(EscPos document) {
+        return connection -> connection.write(document);
+    }
+
+    /** As long as this counter's printer is allowed for one job, plus room for one queued ahead. */
+    private Duration waitLimit() {
+        return printer.timeout().plus(AWAIT_MARGIN);
+    }
+
+    private static byte[] error(RuntimeException refused) {
+        String said = refused.getMessage() == null ? refused.toString() : refused.getMessage();
+        return CounterPrinter.json(Map.of("error", said));
     }
 
     /**
@@ -165,6 +337,9 @@ public final class PrintAgent implements AutoCloseable {
         if (allowed && origin != null && !origin.isBlank()) {
             exchange.getResponseHeaders().add("Access-Control-Allow-Origin", origin);
             exchange.getResponseHeaders().add("Access-Control-Allow-Headers", "content-type");
+            // PUT is not one of the methods a browser will send cross-origin unless it is named
+            // here, and saving the printer is a PUT: without this the settings page cannot save.
+            exchange.getResponseHeaders().add("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
             exchange.getResponseHeaders().add("Access-Control-Max-Age", "600");
         }
         if ("OPTIONS".equalsIgnoreCase(exchange.getRequestMethod())) {
@@ -180,7 +355,10 @@ public final class PrintAgent implements AutoCloseable {
     }
 
     private static void respond(HttpExchange exchange, int status, String body) throws IOException {
-        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        respond(exchange, status, body.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void respond(HttpExchange exchange, int status, byte[] bytes) throws IOException {
         exchange.getResponseHeaders().add("Content-Type", "application/json");
         exchange.sendResponseHeaders(status, bytes.length);
         try (OutputStream out = exchange.getResponseBody()) {
@@ -194,30 +372,48 @@ public final class PrintAgent implements AutoCloseable {
      * printer should not need the counter restarted once the paper is back in.
      */
     private void printLoop() {
-        PrinterConnection connection = null;
         while (running) {
-            Job job;
+            Task task;
             try {
-                job = queue.poll(1, TimeUnit.SECONDS);
+                task = queue.poll(1, TimeUnit.SECONDS);
             } catch (InterruptedException stopping) {
                 Thread.currentThread().interrupt();
                 break;
             }
-            if (job == null) {
+            if (task == null) {
                 continue;
             }
             try {
-                if (connection == null) {
-                    connection = connect(config.printer(), spoolFolder);
+                task.run(connectionFor(printer));
+                if (task.clearsLastError()) {
+                    lastError = "";
                 }
-                connection.write(EscPos.rendered(job.bytes(), job.lines()));
-                lastError = "";
             } catch (RuntimeException failed) {
                 lastError = failed.getMessage() == null ? failed.toString() : failed.getMessage();
-                connection = closeQuietly(connection);
+                closeOpen();
             }
         }
-        closeQuietly(connection);
+        closeOpen();
+    }
+
+    /**
+     * The connection for the printer as it is set now, rebuilt when the settings screen has changed
+     * it - the same bargain the server's {@code PrinterConnections} strikes, and for the same
+     * reason: a printer is only ever swapped between two jobs, on the thread that writes them.
+     */
+    private PrinterConnection connectionFor(PrinterProperties now) {
+        if (connection != null && now.equals(openedFor)) {
+            return connection;
+        }
+        closeOpen();
+        connection = connect(now, spoolFolder);
+        openedFor = now;
+        return connection;
+    }
+
+    private void closeOpen() {
+        connection = closeQuietly(connection);
+        openedFor = null;
     }
 
     private static PrinterConnection closeQuietly(PrinterConnection connection) {

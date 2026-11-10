@@ -2,6 +2,7 @@ package com.masspos.auth;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import com.masspos.web.LocalApiGuard;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
@@ -25,7 +26,14 @@ public class AuthController {
         this.auth = auth;
     }
 
-    public record LoginRequest(@NotBlank String username, @NotBlank String pin) {
+    /**
+     * @param counterName what this machine is called on its own settings window, e.g. "Counter 2".
+     *                    In the body rather than beside the counter number in a header, because it
+     *                    is text somebody typed: a name in Devanagari or Tamil cannot go through a
+     *                    header at all, and it is only ever acted on here.
+     */
+    public record LoginRequest(@NotBlank String username, @NotBlank String pin,
+                               @Size(max = 60) String counterName) {
     }
 
     public record LoginResponse(String token, Principal user) {
@@ -44,7 +52,7 @@ public class AuthController {
     @PostMapping("/login")
     public LoginResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest http) {
         AuthService.LoginResult result = auth.signIn(request.username(), request.pin(),
-                http.getHeader(LocalApiGuard.COUNTER_HEADER), overTheNetwork(http));
+                http.getHeader(LocalApiGuard.COUNTER_HEADER), request.counterName(), overTheNetwork(http));
         return new LoginResponse(result.token(), result.principal());
     }
 

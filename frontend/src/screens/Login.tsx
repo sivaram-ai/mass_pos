@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, messageOfFailure, postBinary, saveToken } from '../api'
+import { counterName } from '../counter'
 import type { BackupCandidate, Principal, SetupView } from '../types'
 import { Banner, Button, Field, inputClass } from '../components/ui'
 
@@ -68,7 +69,10 @@ export function Login({ onSignedIn }: { onSignedIn: (user: Principal) => void })
     setBusy(true)
     setError(null)
     try {
-      const result = await api.post<{ token: string; user: Principal }>('/api/auth/login', { username, pin })
+      // The counter's own name goes with the sign-in: the server keeps it against this counter's
+      // till, and every screen afterwards names the machine the person is actually standing at.
+      const result = await api.post<{ token: string; user: Principal }>('/api/auth/login',
+        { username, pin, counterName: counterName() })
       saveToken(result.token)
       onSignedIn(result.user)
     } catch (failure) {

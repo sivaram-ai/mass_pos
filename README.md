@@ -224,7 +224,10 @@ machine has, saves to the database, and takes effect on the next bill — nothin
 `pos.printer.*` entries in `pos.properties` only seed that row on the very first start, so an
 installer can set a shop up before anyone signs in.
 
-Each till keeps its own printer. Nothing about it is shared with the other counters.
+Each till keeps its own printer. Nothing about it is shared with the other counters: open
+Settings → Printer **on the machine you are setting up** and you are choosing that machine's
+printer. On a counter the panel is headed with the counter's name, and what you save goes into
+that counter's own settings — the server and the other counters keep printing where they were.
 
 - **SERIAL** covers RS-232 printers and USB printers that appear as a COM port. Most USB printers
   need the vendor's virtual COM port driver; one installed only as a Windows printer (`USB001`) is

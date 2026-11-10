@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, fieldErrorsOf, messageOfFailure } from '../api'
+import { agentRequest, counterCode, counterName, forgetCounterPrinter, hasPrintAgent } from '../counter'
 import type { PrinterSettingsForm, PrinterSetupView, PrinterStatus, PrinterType } from '../types'
 import { Banner, Button, Empty, errorFor, Field, inputClass, Panel } from './ui'
 import type { Toast } from '../App'
@@ -24,10 +25,18 @@ const TYPE_HINTS: Record<PrinterType, string> = {
 const BAUD_RATES = [9600, 19200, 38400, 57600, 115200]
 
 /**
- * This till's printer, set here rather than in a file on the machine. Saving takes effect on the
+ * The printer on *this* machine, set here rather than in a file on it. Saving takes effect on the
  * next bill: nothing restarts, and a printer that is switched off or unplugged never stops billing.
+ *
+ * <p>Which machine that is matters, and used not to. The page is served by the shop's server, so
+ * asking the server for "the printer" gave every counter the server's own - and saving from a
+ * counter set the back office's printer, and through it every other counter's. A counter asks its
+ * own print agent instead, on its own loopback, and what it saves lands in that machine's
+ * settings. One page, two places to send it, the same way the keyboard shortcuts below are kept
+ * per machine.
  */
-export default function PrinterPanel({ canEdit, onToast }: { canEdit: boolean; onToast: Toast }) {
+export default function PrinterPanel({ canEdit, shopName, onToast }:
+  { canEdit: boolean; shopName?: string; onToast: Toast }) {
   const [setup, setSetup] = useState<PrinterSetupView | null>(null)
   const [form, setForm] = useState<PrinterSettingsForm | null>(null)
   const [status, setStatus] = useState<PrinterStatus | null>(null)
@@ -36,15 +45,27 @@ export default function PrinterPanel({ canEdit, onToast }: { canEdit: boolean; o
   const [saveError, setSaveError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  /** True on a counter: this machine prints for itself, so it owns its printer settings too. */
+  const onCounter = hasPrintAgent()
+  const whose = onCounter
+    ? `${counterName() || counterCode()}${counterCode() ? ` (${counterCode()})` : ''}`
+    : ''
+
   const load = () => {
-    api.get<PrinterSetupView>('/api/hardware/printer/settings')
+    (onCounter
+      ? agentRequest<PrinterSetupView>('GET', '/settings')
+      : api.get<PrinterSetupView>('/api/hardware/printer/settings'))
       .then((view) => {
         setSetup(view)
         setForm(view.printer)
         setLoadError(null)
       })
-      .catch((failure) => setLoadError(messageOfFailure(failure, 'Could not read the printer settings')))
-    api.get<PrinterStatus>('/api/hardware/printer/status')
+      .catch((failure) => setLoadError(messageOfFailure(failure, onCounter
+        ? 'Could not read the printer on this counter. Is the GO RockIt Counter app still running?'
+        : 'Could not read the printer settings')))
+    ;(onCounter
+      ? agentRequest<PrinterStatus>('GET', '/status')
+      : api.get<PrinterStatus>('/api/hardware/printer/status'))
       .then(setStatus)
       .catch(() => setStatus(null))
   }
@@ -65,7 +86,14 @@ export default function PrinterPanel({ canEdit, onToast }: { canEdit: boolean; o
   const save = async () => {
     setBusy(true)
     try {
-      const saved = await api.put<PrinterSetupView>('/api/hardware/printer/settings', form)
+      const saved = onCounter
+        ? await agentRequest<PrinterSetupView>('PUT', '/settings', form)
+        : await api.put<PrinterSetupView>('/api/hardware/printer/settings', form)
+      if (onCounter) {
+        // The server lays each bill out for the roll this counter says it has, so what it was
+        // told before this change has to go with it.
+        forgetCounterPrinter()
+      }
       setSetup(saved)
       setForm(saved.printer)
       setErrors({})
@@ -84,7 +112,11 @@ export default function PrinterPanel({ canEdit, onToast }: { canEdit: boolean; o
 
   const testPage = async () => {
     try {
-      await api.post('/api/hardware/printer/test-page')
+      if (onCounter) {
+        await agentRequest('POST', '/test-page', { shop: shopName ?? '' })
+      } else {
+        await api.post('/api/hardware/printer/test-page')
+      }
       onToast({ tone: 'good', text: 'Test page sent to the printer' })
     } catch (failure) {
       onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not print') })
@@ -96,9 +128,13 @@ export default function PrinterPanel({ canEdit, onToast }: { canEdit: boolean; o
     current && !options.includes(current) ? [...options, current] : options
 
   return (
-    <Panel title="Printer" actions={<Button onClick={testPage}>Print test page</Button>}>
+    <Panel
+      title={onCounter && whose ? `Printer on ${whose}` : 'Printer'}
+      actions={<Button onClick={testPage}>Print test page</Button>}
+    >
       <p className="mb-3 text-sm text-slate-600">
-        Bills are going to <span className="font-medium text-slate-800">{setup.target}</span>.
+        Bills {onCounter ? 'taken here are' : 'are'} going to{' '}
+        <span className="font-medium text-slate-800">{setup.target}</span>.
       </p>
 
       {saveError && (
@@ -283,7 +319,11 @@ export default function PrinterPanel({ canEdit, onToast }: { canEdit: boolean; o
         )}
       </ul>
       <p className="mt-2 text-xs text-slate-400">
-        This printer belongs to this machine alone. Every counter has its own.
+        {onCounter
+          ? 'This is the printer standing on this counter, saved on this machine. Changing it leaves'
+            + ' the other counters and the server printing where they were.'
+          : 'This printer belongs to this machine alone. Every counter has its own, set on that'
+            + ' counter’s own screen.'}
       </p>
     </Panel>
   )

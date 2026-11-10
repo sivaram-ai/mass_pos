@@ -264,7 +264,11 @@ export default function Settings({ role, settings, onSaved, onToast }: {
         </fieldset>
       </Panel>
 
-      <PrinterPanel canEdit={canEdit} onToast={onToast} />
+      <PrinterPanel
+        canEdit={canEdit}
+        shopName={settings.shop.tradeName || settings.shop.legalName}
+        onToast={onToast}
+      />
 
       <DatabasePanel canEdit={canEdit} onToast={onToast} />
 
@@ -325,7 +329,9 @@ export default function Settings({ role, settings, onSaved, onToast }: {
 
       <Panel title="Tills in this shop" className="xl:col-span-2">
         <p className="mb-3 text-xs text-slate-400">
-          Each machine registers itself from its own pos.properties. Counters replicate their sales to the master.
+          The server registers itself from its own pos.properties; a counter registers itself when somebody
+          signs in on it, under the number and name set in its own settings window. The one you are using is
+          marked.
         </p>
         <table className="w-full text-sm">
           <thead className="text-xs uppercase tracking-wide text-slate-400">

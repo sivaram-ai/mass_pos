@@ -64,6 +64,20 @@ if (-not (Test-Path target\mass-pos-counter.jar)) { throw "target\mass-pos-count
 # A counter carries no Spring and no database. If this jar has grown towards the server's size,
 # the include list in the pom has stopped doing its job and a shop would be installing both.
 if ((Get-Item target\mass-pos-counter.jar).Length -gt 5MB) { throw "target\mass-pos-counter.jar is suspiciously large: it should hold the counter app and the printer classes, nothing else" }
+# The screen is built into the jar, and Vite empties src\main\resources\static to write it while the
+# same build copies that folder into target\classes. Overlap once and the jar is packaged without
+# index.html: the server starts, the window opens, and every page answers 404 with no error anywhere
+# in the log. 0.4.11 shipped that way, which is why the UI is counted here rather than assumed.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$built = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path target\mass-pos.jar))
+$ui = @($built.Entries | Where-Object { $_.FullName -like "BOOT-INF/classes/static/*" -and $_.Length -gt 0 })
+$page = $ui | Where-Object { $_.FullName -eq "BOOT-INF/classes/static/index.html" }
+$bundle = $ui | Where-Object { $_.FullName -like "BOOT-INF/classes/static/assets/*" }
+$built.Dispose()
+if (-not $page -or -not $bundle) {
+    throw "target\mass-pos.jar has no screen in it (index.html $(if ($page) {'yes'} else {'MISSING'}), assets $($bundle.Count)):" `
+        + " the UI build and the resource copy overlapped. Run .\mvnw.cmd clean package again and build the installer from that."
+}
 
 Step "2/5 Building the trimmed Java runtimes"
 jlink --add-modules java.base,java.compiler,java.desktop,java.instrument,java.management,java.net.http,java.prefs,java.rmi,java.scripting,java.security.jgss,java.sql.rowset,jdk.jfr,jdk.unsupported,jdk.crypto.ec,jdk.localedata,jdk.charsets `

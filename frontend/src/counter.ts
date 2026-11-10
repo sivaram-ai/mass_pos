@@ -11,6 +11,7 @@ import { api } from './api'
  */
 
 const COUNTER_KEY = 'masspos.counter'
+const COUNTER_NAME_KEY = 'masspos.counter.name'
 const AGENT_KEY = 'masspos.counter.agent'
 
 /** Reads `?counter=` once when the counter app opens the window, then keeps it. */
@@ -18,14 +19,18 @@ export function rememberCounterFromUrl(): void {
   try {
     const params = new URLSearchParams(window.location.search)
     const code = params.get('counter')
+    const name = params.get('counterName')
     const agent = params.get('agent')
     if (code) {
       localStorage.setItem(COUNTER_KEY, code.toUpperCase())
     }
+    if (name) {
+      localStorage.setItem(COUNTER_NAME_KEY, name)
+    }
     if (agent) {
       localStorage.setItem(AGENT_KEY, agent)
     }
-    if (code || agent) {
+    if (code || name || agent) {
       // Out of the address bar, so a reload or a shared link cannot carry it somewhere else.
       window.history.replaceState({}, '', window.location.pathname)
     }
@@ -38,6 +43,18 @@ export function rememberCounterFromUrl(): void {
 export function counterCode(): string {
   try {
     return localStorage.getItem(COUNTER_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * What this machine is called on its own settings window, e.g. "Counter 2". Sent once, at sign-in,
+ * so the server can keep it against this counter's till and show it on every screen afterwards.
+ */
+export function counterName(): string {
+  try {
+    return localStorage.getItem(COUNTER_NAME_KEY) ?? ''
   } catch {
     return ''
   }
@@ -75,6 +92,39 @@ export interface CounterPrinter {
 }
 
 let paper: CounterPrinter | null = null
+
+/**
+ * Asks the print agent on this machine. It listens on loopback only and answers this shop
+ * server's page alone, so nothing here can reach another counter - which is the whole point: the
+ * printer being read or set is the one the paper comes out of, beside the person asking.
+ */
+export async function agentRequest<T>(method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown): Promise<T> {
+  const response = await fetch(`${agentUrl()}${path}`, {
+    method,
+    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  const text = await response.text()
+  let payload: { error?: string } | null = null
+  try {
+    payload = text ? JSON.parse(text) as { error?: string } : null
+  } catch {
+    payload = null
+  }
+  if (!response.ok) {
+    throw new Error(payload?.error ?? `The printer on this counter did not answer (${response.status})`)
+  }
+  return payload as T
+}
+
+/**
+ * Forgets what this counter said about its paper. Called after the printer here is changed: the
+ * server lays a bill out for the roll it is told about, and a 58 mm bill on a stale 48 columns
+ * comes out cut in half.
+ */
+export function forgetCounterPrinter(): void {
+  paper = null
+}
 
 /**
  * The counter's own paper, asked for once and kept. The server needs it to lay a bill out for

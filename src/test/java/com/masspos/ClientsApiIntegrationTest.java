@@ -24,6 +24,7 @@ import java.io.File;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -139,13 +140,71 @@ class ClientsApiIntegrationTest {
                 .andExpect(jsonPath("$.detail").value(containsString("not a usable counter number")));
     }
 
+    /**
+     * The screen a counter is looking at is the counter's own till. It used to be the server's,
+     * because the settings view answered from the machine holding the database: Counter 2 was shown
+     * "Counter 1 (T1)" in its header, and "this machine" was marked against the server's row in the
+     * list of tills - so a shop with three machines was told three times that it was the first one.
+     */
+    @Test
+    void aCounterIsShownItsOwnTillAndNotTheServers() throws Exception {
+        String token = tokenOf(signIn("192.168.1.55", "T2", "Counter 2").andExpect(status().isOk()));
+
+        settingsSeenBy(token, "T2")
+                .andExpect(jsonPath("$.thisTerminal.code").value("T2"))
+                .andExpect(jsonPath("$.thisTerminal.name").value("Counter 2"))
+                .andExpect(jsonPath("$.thisTerminal.type").value("COUNTER"))
+                .andExpect(jsonPath("$.terminals[?(@.code == 'T2')].name").value("Counter 2"));
+    }
+
+    /** The browser on the server itself is still shown the server, named from its own file. */
+    @Test
+    void theBrowserOnTheServerIsStillShownTheServersTill() throws Exception {
+        String token = tokenOf(mvc.perform(login()).andExpect(status().isOk()));
+
+        settingsSeenBy(token, null).andExpect(jsonPath("$.thisTerminal.code").value("T1"));
+    }
+
+    /**
+     * A machine renamed in its own settings window says so at the next sign-in, and the name
+     * follows it onto every screen. Keeping the first name it ever gave would mean a shop could
+     * never correct a typo without somebody editing the database.
+     */
+    @Test
+    void takesTheNameACounterWasGivenEachTimeItSignsIn() throws Exception {
+        signIn("192.168.1.56", "TF", "Coutner 2").andExpect(status().isOk());
+
+        String token = tokenOf(signIn("192.168.1.56", "TF", "Counter 2").andExpect(status().isOk()));
+
+        settingsSeenBy(token, "TF").andExpect(jsonPath("$.thisTerminal.name").value("Counter 2"));
+    }
+
+    private ResultActions settingsSeenBy(String token, String counter) throws Exception {
+        MockHttpServletRequestBuilder request = get("/api/settings")
+                .header(LocalApiGuard.CLIENT_HEADER, "test")
+                .header(HttpHeaders.HOST, "localhost")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token);
+        if (counter != null) {
+            request = request.header(LocalApiGuard.COUNTER_HEADER, counter);
+        }
+        return mvc.perform(request).andExpect(status().isOk());
+    }
+
     private String counterOf(ResultActions signedIn) throws Exception {
         JsonNode body = json.readTree(signedIn.andReturn().getResponse().getContentAsString());
         return body.get("user").get("counter").asText();
     }
 
+    private String tokenOf(ResultActions signedIn) throws Exception {
+        return json.readTree(signedIn.andReturn().getResponse().getContentAsString()).get("token").asText();
+    }
+
     private ResultActions signIn(String fromAddress, String counter) throws Exception {
-        MockHttpServletRequestBuilder request = login().with(from(fromAddress));
+        return signIn(fromAddress, counter, null);
+    }
+
+    private ResultActions signIn(String fromAddress, String counter, String name) throws Exception {
+        MockHttpServletRequestBuilder request = login(name).with(from(fromAddress));
         if (counter != null) {
             request = request.header(LocalApiGuard.COUNTER_HEADER, counter);
         }
@@ -153,11 +212,18 @@ class ClientsApiIntegrationTest {
     }
 
     private MockHttpServletRequestBuilder login() {
+        return login(null);
+    }
+
+    private MockHttpServletRequestBuilder login(String counterName) {
         return post("/api/auth/login")
                 .header(LocalApiGuard.CLIENT_HEADER, "test")
                 .header(HttpHeaders.HOST, "localhost")
                 .contentType(APPLICATION_JSON)
-                .content("{\"username\":\"asha\",\"pin\":\"%s\"}".formatted(TestAccounts.CHOSEN_PIN));
+                .content(counterName == null
+                        ? "{\"username\":\"asha\",\"pin\":\"%s\"}".formatted(TestAccounts.CHOSEN_PIN)
+                        : "{\"username\":\"asha\",\"pin\":\"%s\",\"counterName\":\"%s\"}"
+                                .formatted(TestAccounts.CHOSEN_PIN, counterName));
     }
 
     /** MockMvc speaks from loopback unless told otherwise, which is the server's own browser. */

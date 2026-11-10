@@ -87,14 +87,18 @@ public class ClientRegistry {
             throw new ClientRefusedException("Counter " + code + " is the server itself. Give this machine a"
                     + " counter number of its own.");
         }
+        String called = readableName(name);
         Terminal known = terminals.findByCode(code).orElse(null);
         if (known == null) {
             refuseIfFull(code);
-            known = terminals.save(new Terminal(code, name == null || name.isBlank() ? code : name.trim(), "",
-                    TerminalType.COUNTER));
+            known = terminals.save(new Terminal(code, called.isEmpty() ? code : called, "", TerminalType.COUNTER));
             log.info("Counter {} joined the shop; {} of {} places now taken", code, taken().size(), clients.max());
         }
-        known.describe(known.getName(), known.getSection(), TerminalType.COUNTER, Instant.now());
+        // The name travels on every sign-in, not only the first: a shop that renames a machine in
+        // its own settings window should see the new name on its screens, which is the only place
+        // the name is ever shown.
+        known.describe(called.isEmpty() ? known.getName() : called, known.getSection(), TerminalType.COUNTER,
+                Instant.now());
         return code;
     }
 
@@ -125,6 +129,19 @@ public class ClientRegistry {
 
     public int places() {
         return clients.max();
+    }
+
+    /**
+     * What the machine calls itself, fit for a 60-character column and for a screen. Control
+     * characters are blanked rather than refused: a name is cosmetic, and a counter must never be
+     * stopped from billing over one.
+     */
+    private static String readableName(String name) {
+        if (name == null) {
+            return "";
+        }
+        String clean = name.replaceAll("\\p{Cntrl}", " ").trim();
+        return clean.length() <= 60 ? clean : clean.substring(0, 60).trim();
     }
 
     private void refuseIfFull(String joining) {

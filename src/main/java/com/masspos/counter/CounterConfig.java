@@ -4,6 +4,7 @@ import com.masspos.desktop.PosPaths;
 import com.masspos.hardware.CodePage;
 import com.masspos.hardware.EscPos;
 import com.masspos.hardware.PrinterProperties;
+import com.masspos.hardware.PrinterSettingsForm;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -39,6 +40,13 @@ public final class CounterConfig {
         URL
     }
 
+    /**
+     * Where this copy is read from and written to: the counter's own folder, except in a test,
+     * which must never write a developer's real counter settings while checking the screen that
+     * edits them.
+     */
+    private Path folder = folder();
+
     private String code = "";
     private String name = "";
     private Find find = Find.AUTOMATIC;
@@ -72,10 +80,16 @@ public final class CounterConfig {
 
     /** Whatever is on disk, with sensible answers for anything missing or unreadable. */
     public static CounterConfig load() {
+        return loadFrom(folder());
+    }
+
+    static CounterConfig loadFrom(Path folder) {
         CounterConfig config = new CounterConfig();
+        config.folder = folder;
         Properties saved = new Properties();
-        if (Files.isRegularFile(file())) {
-            try (InputStream in = Files.newInputStream(file())) {
+        Path file = folder.resolve(FILE);
+        if (Files.isRegularFile(file)) {
+            try (InputStream in = Files.newInputStream(file)) {
                 saved.load(in);
             } catch (IOException unreadable) {
                 // A corrupt file must not stop the counter starting: the settings screen opens
@@ -130,10 +144,27 @@ public final class CounterConfig {
         out.setProperty("printer.drawer-pulse-millis", Integer.toString(drawerPulseMillis));
         out.setProperty("printer.timeout-seconds", Integer.toString(timeoutSeconds));
         out.setProperty("print-agent.port", Integer.toString(agentPort));
-        Files.createDirectories(folder());
-        try (OutputStream stream = Files.newOutputStream(file())) {
+        Files.createDirectories(folder);
+        try (OutputStream stream = Files.newOutputStream(folder.resolve(FILE))) {
             out.store(stream, "GO RockIt counter. Edited from the counter's own settings screen.");
         }
+    }
+
+    /**
+     * Why a counter number would be refused at sign-in, or null if it is usable. The server holds
+     * counters to this shape (it lands in bill numbers), and the settings window says so while the
+     * number is being set, not later at the sign-in screen where the cause is out of sight.
+     */
+    public static String codeProblem(String code) {
+        String value = code == null ? "" : code.trim().toUpperCase(Locale.ROOT);
+        if (value.isEmpty()) {
+            return "Give this counter a number first - it goes on every bill it takes.";
+        }
+        if (!value.matches("[A-Z][A-Z0-9]{0,2}")) {
+            return "\"" + value + "\" is not a usable counter number: up to three characters,"
+                    + " a letter first, e.g. T2. (A name like MAIN goes in the Name box.)";
+        }
+        return null;
     }
 
     /** Enough to start: a counter number, and somewhere to look for a server. */
@@ -143,6 +174,35 @@ public final class CounterConfig {
             case ADDRESS -> !address.isBlank();
             case URL -> !url.isBlank();
         };
+    }
+
+    /**
+     * The printer in the shape the settings screen shows and sends it, so a counter's printer page
+     * is the same page as the server's rather than a second one that drifts from it.
+     */
+    public PrinterSettingsForm printerForm() {
+        return PrinterSettingsForm.from(printer());
+    }
+
+    /**
+     * Takes a printer chosen on the settings screen. Only the printer is touched: which counter
+     * this is and where its server lives are settled before there is a screen to change them on,
+     * and are not the browser's to rewrite.
+     */
+    public void applyPrinter(PrinterSettingsForm form) {
+        this.printerType = form.type();
+        this.serialPort = form.serialPort();
+        this.serialBaudRate = form.serialBaudRate();
+        this.serialFlowControl = form.serialFlowControl();
+        this.tcpHost = form.tcpHost();
+        this.tcpPort = form.tcpPort();
+        this.windowsPrinter = form.windowsPrinter();
+        this.windowsWidthMm = form.windowsWidthMm();
+        this.columns = form.columns();
+        this.codePage = form.codePage();
+        this.drawerPin = form.drawerPin();
+        this.drawerPulseMillis = form.drawerPulseMillis();
+        this.timeoutSeconds = form.timeoutSeconds();
     }
 
     /** What the print agent builds its connection from. */

@@ -380,6 +380,17 @@ folder and everything under it, so that is the only copy that survives one.
   - The counter is fixed **at sign-in** and kept on the `AuthToken`. Not read from a header per
     request (a signed-in browser could then renumber its own bills) and not from the client's IP
     (DHCP changes it).
+  - **`settings.thisTerminal` is the till the browser asking is billing as**, resolved through
+    `CurrentCounter` and the `terminal` row, never from `pos.terminal()`. Answering from this
+    machine's own properties showed every counter in the shop the *server's* name in the header and
+    marked the server's row as "this machine" in Tills in this shop - three machines all told they
+    were the first one. `pos.terminal()` is still the right answer for this machine's own printer,
+    drawer and folder.
+  - **A counter's name travels in the login body** (`counterName`), not beside its number in a
+    header: it is text somebody typed, and a name in Devanagari or Tamil cannot go through an HTTP
+    header at all. `ClientRegistry.admit` writes it onto the `terminal` row at *every* sign-in, so
+    renaming a machine in its own settings window reaches the screens without anyone editing the
+    database.
 - **A counter is a different program, not a till with the database removed.**
   `com.masspos.counter` is the client application: no Spring, no JPA, no licence, one properties
   file in `%LOCALAPPDATA%\GoRockitPOS-Counter`. It builds as `mass-pos-counter.jar` (its own
@@ -431,9 +442,33 @@ folder and everything under it, so that is the only copy that survives one.
 
 ### Hardware
 
-- **The printer is a per-till database row, not a property.** `printer_settings` (one row, seeded
-  once from `pos.printer.*`) is what the Settings screen edits; `pos.properties` is only the seed
-  after that. Three things follow:
+- **"This till's printer" means two different things, and the screen has to pick the right one.**
+  The server's printer is the `printer_settings` row in its database. A counter's printer is in that
+  counter's own `counter.properties`, because that is the machine the paper comes out of and the
+  only machine that can see its ports. Settings > Printer is one page with two places to send it:
+  the browser on the server asks `/api/hardware/printer/*`, a counter asks its own print agent
+  (`hasPrintAgent()` → `agentRequest()` in `counter.ts` → `/settings`, `/status`, `/test-page`).
+  Asking the server from a counter was the bug: a manager at Counter 2 who chose a printer there set
+  the *server's* row, so the back office's bills - and every other counter's - followed it.
+  - **The agent is therefore more than a pipe for bytes**: it owns which printer this counter has.
+    Its handlers run on a small thread pool rather than the listener's own thread, because asking
+    the printer for its status waits on the printer thread and that wait would otherwise hold up
+    the next bill. `config` is read and written only under `PrintAgent`'s `settings` lock, and the
+    printer thread reads a whole `PrinterProperties` out of one volatile field: a half-applied
+    change - a new type with the old port still in it - would reach the paper.
+  - **The counter carries the server's own `PrinterSettingsForm`** (in the counter jar's include
+    list) so the two ends cannot drift in their field names. Its `jakarta.validation` annotations
+    are not on a counter's classpath, which is harmless: the JVM ignores an annotation whose type
+    is missing. Checked rather than assumed - Jackson read it, wrote it and described its target on
+    `mass-pos-counter.jar` + `counter-lib` alone, with no validator anywhere on it (2026-11-10).
+    The agent checks the ranges itself in `CounterPrinter.read`, and its message is the whole of
+    the answer - there is no validator and no error page out there.
+  - **`CounterConfig` reads and writes the folder it was loaded from** (`loadFrom`), not
+    `folder()`, so a test exercising the screen that edits a counter cannot overwrite a
+    developer's real `counter.properties` in `%LOCALAPPDATA%`.
+- **The server's printer is a per-till database row, not a property.** `printer_settings` (one row,
+  seeded once from `pos.printer.*`) is what the Settings screen edits on the server;
+  `pos.properties` is only the seed after that. Three things follow:
   - **It must never sync.** Every counter has its own printer: pushing the master's row out would
     stop the whole shop printing. Keep it out of the phase-4 sync set.
   - **Nothing caches the settings across a job.** `ThermalPrinter` asks
@@ -611,6 +646,10 @@ made the rename safe. Renaming it again would need the same treatment.
 - **Unregistered sellers** now bill without tax as a plain "BILL". **Composition-scheme** sellers
   (registered, but may not collect tax) still need a *bill of supply* with its mandatory
   declaration; add a GST scheme setting for that.
+- **A "no sale" drawer opening from a counter still opens the server's drawer.** `Billing.tsx`
+  posts `/api/hardware/drawer/open`, which is the back office's printer: the counter's own drawer
+  hangs off its own printer, so this needs a drawer kick through the print agent the way printing
+  already goes. The printer *settings* are per counter now; this one action is not.
 - **"No sale" drawer openings are only logged.** Persist them once login exists.
 - **The drawer kick is chosen by the caller.** Derive it from a cash tender in Phase 3.
 - **No status pre-check before printing.**

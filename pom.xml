@@ -16,7 +16,7 @@
     <!-- The till's version: shown at the top of the Settings screen, and what
          tools/build-installer.ps1 gives jpackage as the installer's app version. Bump it for every
          shipped build, as Windows refuses to install the same app version over itself (error 1638). -->
-    <version>5.0.0</version>
+    <version>0.4.14</version>
     <name>Mass POS</name>
     <description>Offline-first GST billing and inventory POS (single desktop executable)</description>
 
@@ -146,6 +146,7 @@
                                 <include>com/masspos/desktop/Browser*</include>
                                 <include>com/masspos/desktop/PosPaths*</include>
                                 <include>com/masspos/client/Discovery.class</include>
+                                <include>com/masspos/common/IndiaTime*</include>
                                 <include>com/masspos/hardware/CodePage*</include>
                                 <include>com/masspos/hardware/EscPos*</include>
                                 <include>com/masspos/hardware/FilePrinterConnection*</include>
@@ -153,6 +154,9 @@
                                 <include>com/masspos/hardware/PrinterConnection*</include>
                                 <include>com/masspos/hardware/PrinterException*</include>
                                 <include>com/masspos/hardware/PrinterProperties*</include>
+                                <!-- The printer settings screen's own shape: a counter's printer
+                                     page is the server's page, saved on the counter instead. -->
+                                <include>com/masspos/hardware/PrinterSettingsForm*</include>
                                 <include>com/masspos/hardware/PrinterStatus*</include>
                                 <include>com/masspos/hardware/ReceiptLayout*</include>
                                 <include>com/masspos/hardware/SerialPrinterConnection*</include>

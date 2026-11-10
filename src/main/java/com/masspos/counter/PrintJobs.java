@@ -20,6 +20,22 @@ final class PrintJobs {
     }
 
     /**
+     * The shop as the screen knows it, for a test page. Empty for an empty or unreadable body: a
+     * test page is worth printing with a heading missing, and the screen may simply not have the
+     * name yet.
+     */
+    static String shopName(byte[] body) {
+        if (body == null || body.length == 0) {
+            return "";
+        }
+        try {
+            return JSON.readTree(body).path("shop").asText("");
+        } catch (Exception notJson) {
+            return "";
+        }
+    }
+
+    /**
      * @throws RuntimeException for anything that is not a bill, which the agent turns into a 400
      *                          rather than letting a stray POST reach the printer
      */

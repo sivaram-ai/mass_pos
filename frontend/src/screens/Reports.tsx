@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, downloadCsv, messageOfFailure, percent, quantity, rupees } from '../api'
 import type { AuditEntry, DayReport, GstReport, SoldItem } from '../types'
 import { Button, Empty, inputClass, Modal, Panel } from '../components/ui'
 import type { Toast } from '../App'
+import { useScreenKeys } from '../shortcuts'
 
 type Tab = 'day' | 'gst' | 'audit'
 
@@ -101,12 +102,32 @@ export default function Reports({ onToast }: { onToast: Toast }) {
     }
   }
 
+  const toggleRange = () => {
+    if (!dayRange) {
+      setDayTo(endOfDay(date))
+    }
+    setDayRange(!dayRange)
+  }
+
+  /** A dialog is open: the screen's own keys stand down so they never act behind it. */
+  const dialogOpen = printing !== null || showAllSold
+
+  // Screen keys: F2-F4 the three reports, F6 print, F7 export, F8 single day / date range.
+  useScreenKeys({
+    F2: () => setTab('day'),
+    F3: () => setTab('gst'),
+    F4: () => setTab('audit'),
+    F6: tab === 'day' && printing === null ? () => setPrinting('asking') : undefined,
+    F7: () => void exportSheet(),
+    F8: tab === 'day' ? toggleRange : undefined,
+  }, !dialogOpen)
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex rounded-md border border-slate-200 bg-white p-1">
-          {([['day', "Day's takings"], ['gst', 'GST summary'], ['audit', 'Audit trail']] as [Tab, string][])
-            .map(([id, label]) => (
+          {([['day', "Day's takings", 'F2'], ['gst', 'GST summary', 'F3'], ['audit', 'Audit trail', 'F4']] as [Tab, string, string][])
+            .map(([id, label, key]) => (
               <button
                 key={id}
                 onClick={() => setTab(id)}
@@ -114,7 +135,7 @@ export default function Reports({ onToast }: { onToast: Toast }) {
                   tab === id ? 'bg-slate-800 font-medium text-white' : 'text-slate-600 hover:bg-slate-100'
                 }`}
               >
-                {label}
+                {label} <kbd>{key}</kbd>
               </button>
             ))}
         </div>
@@ -130,12 +151,8 @@ export default function Reports({ onToast }: { onToast: Toast }) {
               </>
             )}
             <Button
-              onClick={() => {
-                if (!dayRange) {
-                  setDayTo(endOfDay(date))
-                }
-                setDayRange(!dayRange)
-              }}
+              onClick={toggleRange}
+              hint="F8"
               title={dayRange ? 'Back to a single day' : 'Add the takings up over a stretch of days'}
             >
               {dayRange ? 'Single day' : 'Choose date range'}
@@ -152,13 +169,13 @@ export default function Reports({ onToast }: { onToast: Toast }) {
         )}
         <div className="ml-auto flex items-center gap-2">
           {tab === 'day' && (
-            <Button className="whitespace-nowrap" onClick={() => setPrinting('asking')}
+            <Button className="whitespace-nowrap" onClick={() => setPrinting('asking')} hint="F6"
                     disabled={printing === 'busy'}
                     title="Print the day's takings on this till's printer">
               {printing === 'busy' ? 'Printing…' : 'Print report'}
             </Button>
           )}
-          <Button className="whitespace-nowrap" onClick={() => void exportSheet()}
+          <Button className="whitespace-nowrap" onClick={() => void exportSheet()} hint="F7"
                   title="Save what is on screen as a sheet you can open in Excel">
             Export
           </Button>
@@ -345,20 +362,7 @@ export default function Reports({ onToast }: { onToast: Toast }) {
       )}
 
       {printing === 'asking' && (
-        <Modal title="Print the day's takings?" onClose={() => setPrinting(null)}>
-          <p className="text-sm text-slate-600">
-            The figures go on the paper either way. Choose how much of what sold goes with them.
-          </p>
-          <div className="mt-4 flex flex-col gap-2">
-            <Button tone="primary" onClick={() => void printReport('ALL')}>
-              Print all sold items{day && ` (${day.soldItems.length})`}
-            </Button>
-            <Button onClick={() => void printReport('BEST_SELLERS')}>
-              Print best sellers only{day && ` (top ${Math.min(BEST_SELLERS, day.soldItems.length)})`}
-            </Button>
-            <Button tone="ghost" onClick={() => setPrinting(null)} hint="Esc">Cancel</Button>
-          </div>
-        </Modal>
+        <PrintChoice day={day} onChoose={(items) => void printReport(items)} onClose={() => setPrinting(null)} />
       )}
     </div>
   )
@@ -421,5 +425,52 @@ function Line({ label, value }: { label: string; value: string }) {
       <dt className="text-slate-500">{label}</dt>
       <dd className="num text-slate-800">{value}</dd>
     </div>
+  )
+}
+
+/**
+ * "Print the day's takings?": the first option takes focus the moment it opens, ↑↓ move between the
+ * options and Enter runs the one in focus, so the whole choice is made without the mouse. Focus has
+ * to land in here, or a button behind the dialog would keep receiving the keys.
+ */
+function PrintChoice({ day, onChoose, onClose }: {
+  day: DayReport | null
+  onChoose: (items: 'ALL' | 'BEST_SELLERS') => void
+  onClose: () => void
+}) {
+  const box = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    box.current?.querySelector('button')?.focus()
+  }, [])
+
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const buttons = Array.from(box.current?.querySelectorAll('button') ?? [])
+    const at = buttons.indexOf(document.activeElement as HTMLButtonElement)
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      const step = event.key === 'ArrowDown' ? 1 : -1
+      buttons[(at + step + buttons.length) % buttons.length]?.focus()
+    } else if (event.key === 'Enter' && at >= 0) {
+      // The in-app browser does not activate a focused button on Enter, so do it here.
+      event.preventDefault()
+      buttons[at].click()
+    }
+  }
+
+  return (
+    <Modal title="Print the day's takings?" onClose={onClose}>
+      <p className="text-sm text-slate-600">
+        The figures go on the paper either way. Choose how much of what sold goes with them.
+      </p>
+      <div ref={box} onKeyDown={onKeyDown} className="mt-4 flex flex-col gap-2">
+        <Button tone="primary" onClick={() => onChoose('ALL')}>
+          Print all sold items{day && ` (${day.soldItems.length})`}
+        </Button>
+        <Button onClick={() => onChoose('BEST_SELLERS')}>
+          Print best sellers only{day && ` (top ${Math.min(BEST_SELLERS, day.soldItems.length)})`}
+        </Button>
+        <Button tone="ghost" onClick={onClose} hint="Esc">Cancel</Button>
+      </div>
+    </Modal>
   )
 }

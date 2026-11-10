@@ -17,7 +17,8 @@ public record PrinterStatus(boolean responding, boolean online, boolean coverOpe
     /** A reply with no flags raised: bits 1 and 4 are always set. */
     private static final int NO_FLAGS = 0x12;
 
-    static PrinterStatus query(PrinterConnection connection, Duration timeout) {
+    /** Asked for by the till's own printer and by the agent on a counter, which has no Spring. */
+    public static PrinterStatus query(PrinterConnection connection, Duration timeout) {
         OptionalInt printer = connection.query(EscPos.statusRequest(1), timeout);
         if (printer.isEmpty() || !isStatusByte(printer.getAsInt())) {
             return NOT_RESPONDING;

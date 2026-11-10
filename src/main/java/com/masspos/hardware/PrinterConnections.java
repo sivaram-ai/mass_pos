@@ -63,20 +63,11 @@ public class PrinterConnections implements DisposableBean {
     }
 
     static String describe(PrinterProperties printer, Path fileDirectory) {
-        return describe(printer, fileDirectory, WindowsPrinterConnection::defaultPrinterName);
+        return printer.describe(fileDirectory);
     }
 
     static String describe(PrinterProperties printer, Path fileDirectory, Supplier<String> windowsDefault) {
-        return switch (printer.type()) {
-            case SERIAL -> printer.serial().port().isBlank() ? "no COM port chosen" : printer.serial().port();
-            case TCP -> printer.tcp().host().isBlank()
-                    ? "no address set" : printer.tcp().host() + ":" + printer.tcp().port();
-            // Named, not just "the default": a till printing into the wrong queue looks like
-            // nothing at all is wrong until someone goes looking for the paper.
-            case WINDOWS -> printer.windows().name().isBlank()
-                    ? windowsDefault.get() : printer.windows().name();
-            case FILE -> fileDirectory.toAbsolutePath().toString();
-        };
+        return printer.describe(fileDirectory, windowsDefault);
     }
 
     @Override
