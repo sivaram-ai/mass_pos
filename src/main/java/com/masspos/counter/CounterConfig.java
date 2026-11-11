@@ -243,6 +243,15 @@ public final class CounterConfig {
         return name.isBlank() ? code : name;
     }
 
+    /**
+     * What was actually typed, which is not the same question as what to show: {@link #name()}
+     * falls back to the counter's number so no screen is ever blank, and the settings window has
+     * to be able to tell a name that was given from one that was not.
+     */
+    public String rawName() {
+        return name;
+    }
+
     public void name(String value) {
         this.name = value == null ? "" : value.trim();
     }
@@ -281,6 +290,15 @@ public final class CounterConfig {
 
     public int agentPort() {
         return agentPort;
+    }
+
+    /**
+     * Only for a test that needs a port nothing else on the build machine is using. A shop sets
+     * this in its own {@code counter.properties}, where two tills sharing one machine each get
+     * their own; nothing on a screen offers to change it.
+     */
+    void agentPort(int value) {
+        this.agentPort = value;
     }
 
     public PrinterProperties.Type printerType() {

@@ -9,7 +9,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
  * Which tills somebody is standing at right now, and who.
@@ -38,12 +40,15 @@ public class TillPresence {
     }
 
     /**
-     * @param inUse somebody is signed in on this till and its screen is still there
-     * @param staff who that is, or null when the till is not in use
+     * @param inUse    somebody is signed in and the screen is answering: a till being billed on
+     * @param signedIn somebody is signed in, answering or not - which is what holds the till's
+     *                 place in the shop, so the two have to be told apart or the list of tills
+     *                 and the count of free places appear to contradict each other
+     * @param staff    who is signed in, or null when nobody is
      */
-    public record Presence(boolean inUse, String staff) {
+    public record Presence(boolean inUse, boolean signedIn, String staff) {
 
-        public static final Presence NOBODY = new Presence(false, null);
+        public static final Presence NOBODY = new Presence(false, false, null);
     }
 
     /** "I am still here", from the screen on that till. */
@@ -57,8 +62,8 @@ public class TillPresence {
     }
 
     /**
-     * Every till that is in use, by code. One query for the whole shop: the settings screen draws
-     * all of its tills at once.
+     * Every till somebody is signed in on, by code. One query for the whole shop: the settings
+     * screen draws all of its tills at once.
      *
      * <p>Read oldest sign-in first, so when two people are signed in on one counter - a cashier
      * who walked off without signing out, and the one who took over - the name shown is the person
@@ -70,9 +75,9 @@ public class TillPresence {
         Map<String, Presence> present = new HashMap<>();
         for (AuthToken token : tokens.liveSignIns()) {
             Instant seen = heardFrom.get(token.getTerminalCode());
-            if (seen != null && seen.isAfter(silentBefore)) {
-                present.put(token.getTerminalCode(), new Presence(true, token.getUser().getDisplayName()));
-            }
+            boolean answering = seen != null && seen.isAfter(silentBefore);
+            present.put(token.getTerminalCode(),
+                    new Presence(answering, true, token.getUser().getDisplayName()));
         }
         return present;
     }
@@ -80,5 +85,21 @@ public class TillPresence {
     /** The till's state, for a till the shop may never have heard from. */
     public Presence of(String tillCode, Map<String, Presence> present) {
         return present.getOrDefault(tillCode, Presence.NOBODY);
+    }
+
+    /**
+     * Every till somebody is signed in on, whether or not its screen has said anything lately.
+     *
+     * <p>This is the question a counter's <em>place</em> turns on, and it is deliberately not the
+     * same question as "is somebody standing there". A counter whose screen has been quiet for
+     * four minutes - asleep, off the Wi-Fi, part way through a reboot - must not have its place
+     * given to another machine while its cashier is still signed in on it, or it comes back to a
+     * shop that will not let it bill.
+     */
+    @Transactional(readOnly = true)
+    public Set<String> signedIn() {
+        return tokens.liveSignIns().stream()
+                .map(AuthToken::getTerminalCode)
+                .collect(Collectors.toSet());
     }
 }

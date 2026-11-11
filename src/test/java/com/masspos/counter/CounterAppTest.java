@@ -4,6 +4,7 @@ import com.masspos.hardware.EscPos;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.Base64;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -46,6 +47,52 @@ class CounterAppTest {
         String url = CounterApp.billingScreen(config, "http://192.168.1.10:8765");
 
         assertThat(url).isEqualTo("http://192.168.1.10:8765/?counter=T2&counterName=Counter+2&agent=8767");
+    }
+
+    /**
+     * One counter process per machine. Clicking the shortcut again used to start a second copy of
+     * the whole program: only one of them could hold the printer, but both stayed alive, so a shop
+     * that opens the till a few times a day ended the week with a row of them in Task Manager.
+     * Now the second click finds the first and opens a window on the server it is already using.
+     */
+    @Test
+    void opensAWindowOnTheCounterAlreadyRunningInsteadOfStartingASecond() throws Exception {
+        CounterConfig config = new CounterConfig();
+        config.code("T2");
+        config.name("Counter 2");
+        config.agentPort(freePort());
+
+        assertThat(CounterApp.windowOfRunningCounter(config))
+                .as("nothing running here, so this process starts the counter itself").isEmpty();
+
+        try (PrintAgent running = new PrintAgent(config, Path.of("target", "test-data", "counter-spool"))) {
+            running.start();
+            running.serving("http://192.168.1.10:8765");
+
+            assertThat(CounterApp.windowOfRunningCounter(config))
+                    .contains("http://192.168.1.10:8765/?counter=T2&counterName=Counter+2&agent="
+                            + config.agentPort());
+        }
+    }
+
+    /** A counter that is up but still being set up has no billing screen to open a window on. */
+    @Test
+    void saysSoWhenTheCounterAlreadyRunningHasNotReachedAServerYet() throws Exception {
+        CounterConfig config = new CounterConfig();
+        config.code("T2");
+        config.agentPort(freePort());
+
+        try (PrintAgent running = new PrintAgent(config, Path.of("target", "test-data", "counter-spool"))) {
+            running.start();
+
+            assertThat(CounterApp.windowOfRunningCounter(config)).contains("");
+        }
+    }
+
+    private static int freePort() throws Exception {
+        try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
+            return socket.getLocalPort();
+        }
     }
 
     /** A counter with nothing filled in asks rather than guessing at a server. */

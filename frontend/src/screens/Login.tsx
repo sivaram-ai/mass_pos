@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, messageOfFailure, postBinary, saveToken } from '../api'
-import { counterName } from '../counter'
+import { api, ApiError, messageOfFailure, postBinary, saveToken } from '../api'
+import { askForCounterSettings, counterName } from '../counter'
 import type { BackupCandidate, Principal, SetupView } from '../types'
 import { Banner, Button, Field, inputClass } from '../components/ui'
 
@@ -76,8 +76,18 @@ export function Login({ onSignedIn }: { onSignedIn: (user: Principal) => void })
       saveToken(result.token)
       onSignedIn(result.user)
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'Could not sign in')
+      const said = failure instanceof Error ? failure.message : 'Could not sign in'
       setPin('')
+      // Refused for what this machine is, not who is standing at it: no counter number, or a shop
+      // with every place taken - which is what the counter that loses the race for the last one is
+      // told. Nothing here can be put right on this screen, so the counter's own settings window
+      // comes back with the reason on it, and this screen says where to look.
+      if (failure instanceof ApiError && failure.counterSetup && await askForCounterSettings(said)) {
+        setError(`${said} This counter's settings window has opened: put it right there, then save`
+          + ' to start billing again.')
+      } else {
+        setError(said)
+      }
     } finally {
       setBusy(false)
     }

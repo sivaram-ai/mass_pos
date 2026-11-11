@@ -1,6 +1,7 @@
 package com.masspos.settings;
 
 import com.masspos.auth.RequiresRole;
+import com.masspos.client.ClientRegistry;
 import com.masspos.client.CurrentCounter;
 import com.masspos.client.TillPresence;
 import com.masspos.client.TillPresence.Presence;
@@ -38,14 +39,16 @@ public class SettingsController {
     private final TerminalRepository terminals;
     private final CurrentCounter counter;
     private final TillPresence presence;
+    private final ClientRegistry clients;
     private final PosProperties pos;
 
     public SettingsController(ShopSettingsService settings, TerminalRepository terminals, CurrentCounter counter,
-                              TillPresence presence, PosProperties pos) {
+                              TillPresence presence, ClientRegistry clients, PosProperties pos) {
         this.settings = settings;
         this.terminals = terminals;
         this.counter = counter;
         this.presence = presence;
+        this.clients = clients;
         this.pos = pos;
     }
 
@@ -62,12 +65,13 @@ public class SettingsController {
     }
 
     /**
-     * @param active  false for a till the shop has retired; it stays listed because its code is on bills
-     * @param inUse   somebody is signed in on it and its screen is still there, right now
-     * @param staff   who that is, or null when nobody is at it
+     * @param active   false for a till the shop has retired; it stays listed because its code is on bills
+     * @param inUse    somebody is signed in on it and its screen is still answering, right now
+     * @param signedIn somebody is signed in, answering or not: what holds the till's place
+     * @param staff    who that is, or null when nobody is signed in
      */
     public record TerminalView(String code, String name, String section, TerminalType type, boolean active,
-                               Instant lastSeenAt, boolean inUse, String staff) {
+                               Instant lastSeenAt, boolean inUse, boolean signedIn, String staff) {
     }
 
     @GetMapping
@@ -77,17 +81,27 @@ public class SettingsController {
     }
 
     /**
-     * Just the tills, for the panel that shows which ones somebody is standing at. It has to be
-     * asked for again every few seconds to be worth anything, and re-reading the whole settings
-     * would throw away whatever the person is part way through typing into the form beside it.
+     * @param places what pos.clients.max allows; 0 means this till keeps to itself
+     * @param used   places a counter is signed in on
+     * @param free   places another counter could still take
+     */
+    public record TillsView(int places, int used, int free, List<TerminalView> tills) {
+    }
+
+    /**
+     * The tills and how many places are left, for the panel that shows which ones somebody is
+     * standing at. It has to be asked for again every few seconds to be worth anything, and
+     * re-reading the whole settings would throw away whatever the person is part way through
+     * typing into the form beside it.
      */
     @GetMapping("/tills")
     @Transactional(readOnly = true)
-    public List<TerminalView> tills() {
+    public TillsView tills() {
         Map<String, Presence> present = presence.all();
-        return terminals.findAllByOrderBySectionAscCodeAsc().stream()
-                .map(terminal -> viewOf(terminal, present))
-                .toList();
+        return new TillsView(clients.places(), clients.connected().size(), clients.free(),
+                terminals.findAllByOrderBySectionAscCodeAsc().stream()
+                        .map(terminal -> viewOf(terminal, present))
+                        .toList());
     }
 
     /** Changing these never touches invoices already issued: each carries its own copy. */
@@ -152,17 +166,17 @@ public class SettingsController {
         Presence at = presence.of(here, present);
         if (here.equals(me.code())) {
             return new TerminalView(me.code(), me.name(), me.section(), me.type(), true, Instant.now(),
-                    at.inUse(), at.staff());
+                    at.inUse(), at.signedIn(), at.staff());
         }
         return terminals.findByCode(here)
                 .map(terminal -> viewOf(terminal, present))
                 .orElseGet(() -> new TerminalView(here, here, "", TerminalType.COUNTER, true, Instant.now(),
-                        at.inUse(), at.staff()));
+                        at.inUse(), at.signedIn(), at.staff()));
     }
 
     private TerminalView viewOf(Terminal terminal, Map<String, Presence> present) {
         Presence at = presence.of(terminal.getCode(), present);
         return new TerminalView(terminal.getCode(), terminal.getName(), terminal.getSection(), terminal.getType(),
-                terminal.isActive(), terminal.getLastSeenAt(), at.inUse(), at.staff());
+                terminal.isActive(), terminal.getLastSeenAt(), at.inUse(), at.signedIn(), at.staff());
     }
 }

@@ -310,8 +310,21 @@ export interface TerminalView {
   lastSeenAt: string | null
   /** Somebody is signed in on it and its screen has checked in within the last few minutes. */
   inUse: boolean
-  /** Who that is, or null when nobody is at it. */
+  /** Somebody is signed in, answering or not. This is what holds the till's place in the shop. */
+  signedIn: boolean
+  /** Who that is, or null when nobody is signed in. */
   staff: string | null
+}
+
+/** The shop's tills and how much room is left for another counter. */
+export interface TillsView {
+  /** What pos.clients.max allows; 0 means this till keeps to itself. */
+  places: number
+  /** Places a counter is signed in on. */
+  used: number
+  /** Places another counter could still take. */
+  free: number
+  tills: TerminalView[]
 }
 
 export interface SettingsView {

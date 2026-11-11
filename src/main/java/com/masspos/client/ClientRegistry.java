@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -24,9 +25,11 @@ import java.util.regex.Pattern;
  * itself in, so the shop's list of tills and the list of clients are one list - reports and the
  * audit trail have always been tagged by terminal code, and nothing had to learn a new word.
  *
- * <p>The count is of counters seen recently, not of counters ever seen. A shop that replaces a
- * machine, or reimages one, would otherwise spend a slot forever on a till that no longer exists,
- * and would have to be told to go and delete a row before the new one could be used.
+ * <p>The count is of counters somebody is signed in on, not of counters that have ever said hello.
+ * A shop that replaces a machine, or reimages one, would otherwise spend a slot forever on a till
+ * that no longer exists, and would have to be told to go and delete a row before the new one could
+ * be used. Logging out hands the place back at once; a machine that is switched off without anyone
+ * logging out holds it until the idle window has passed with no word from it.
  *
  * <p>Nothing here is a substitute for signing in: it decides which <em>machines</em> may take part,
  * while the PIN still decides which <em>person</em> is billing and what they may do.
@@ -41,11 +44,14 @@ public class ClientRegistry {
     private final TerminalRepository terminals;
     private final PosProperties pos;
     private final ClientProperties clients;
+    private final TillPresence presence;
 
-    public ClientRegistry(TerminalRepository terminals, PosProperties pos, ClientProperties clients) {
+    public ClientRegistry(TerminalRepository terminals, PosProperties pos, ClientProperties clients,
+                          TillPresence presence) {
         this.terminals = terminals;
         this.pos = pos;
         this.clients = clients;
+        this.presence = presence;
     }
 
     /**
@@ -58,17 +64,9 @@ public class ClientRegistry {
     @Transactional
     public String admit(String counterCode, String name, boolean overTheNetwork) {
         String own = pos.terminal().code();
-        String code = counterCode == null ? "" : counterCode.trim().toUpperCase(Locale.ROOT);
+        String code = normalise(counterCode);
         if (!overTheNetwork && code.isEmpty()) {
             return own;
-        }
-        if (code.isEmpty()) {
-            throw new ClientRefusedException("This machine has not been given a counter number yet."
-                    + " Open GO RockIt Counter settings and set one.");
-        }
-        if (!CODE.matcher(code).matches()) {
-            throw new ClientRefusedException("\"" + code + "\" is not a usable counter number:"
-                    + " up to three characters, a letter first, e.g. T2.");
         }
         if (!overTheNetwork) {
             // The server's own browser may name a counter, but only its own: its bills come off
@@ -79,20 +77,19 @@ public class ClientRegistry {
             }
             return own;
         }
-        if (!clients.serving()) {
-            throw new ClientRefusedException("This till does not take other machines. Set pos.clients.max"
-                    + " on the server to the number of counters it should serve.");
-        }
-        if (code.equals(own)) {
-            throw new ClientRefusedException("Counter " + code + " is the server itself. Give this machine a"
-                    + " counter number of its own.");
+        // Every sign-in, not only the first one this machine ever made. A counter used to be let in
+        // for good once it had a row in the table, so a shop set up for two could have three
+        // counters billing at once as long as each had signed in some time in the past.
+        String refusal = whyNot(code);
+        if (refusal != null) {
+            throw new ClientRefusedException(refusal);
         }
         String called = readableName(name);
         Terminal known = terminals.findByCode(code).orElse(null);
         if (known == null) {
-            refuseIfFull(code);
             known = terminals.save(new Terminal(code, called.isEmpty() ? code : called, "", TerminalType.COUNTER));
-            log.info("Counter {} joined the shop; {} of {} places now taken", code, taken().size(), clients.max());
+            log.info("Counter {} joined the shop; {} of {} places now taken", code, taken().size() + 1,
+                    clients.max());
         }
         // The name travels on every sign-in, not only the first: a shop that renames a machine in
         // its own settings window should see the new name on its screens, which is the only place
@@ -100,6 +97,60 @@ public class ClientRegistry {
         known.describe(called.isEmpty() ? known.getName() : called, known.getSection(), TerminalType.COUNTER,
                 Instant.now());
         return code;
+    }
+
+    /**
+     * Why a counter calling itself {@code counterCode} could not bill against this server right
+     * now, in a sentence somebody standing at the counter can act on - or null if it could.
+     *
+     * <p>The settings window on a counter asks this before it will let anybody press "Save and
+     * start billing", and {@link #admit} asks it again at the sign-in itself. Same question, same
+     * code, same words, so the window can never promise a place that the sign-in then refuses.
+     * The second ask is the one that counts: between the two, another machine may have taken the
+     * last place, and only the sign-in happens inside the transaction that settles who got it.
+     */
+    @Transactional(readOnly = true)
+    public String whyNot(String counterCode) {
+        String code = normalise(counterCode);
+        if (code.isEmpty()) {
+            return "This machine has not been given a counter number yet."
+                    + " Open GO RockIt Counter settings and set one.";
+        }
+        if (!CODE.matcher(code).matches()) {
+            return "\"" + code + "\" is not a usable counter number:"
+                    + " up to three characters, a letter first, e.g. T2.";
+        }
+        if (!clients.serving()) {
+            return "This till does not take other machines. Set pos.clients.max"
+                    + " on the server to the number of counters it should serve.";
+        }
+        if (code.equals(pos.terminal().code())) {
+            return "Counter " + code + " is the server itself. Give this machine a"
+                    + " counter number of its own.";
+        }
+        List<Terminal> others = taken(code);
+        if (others.size() >= clients.max()) {
+            return "This shop is set up for " + clients.max() + " counter"
+                    + (clients.max() == 1 ? "" : "s") + " and " + (clients.max() == 1 ? "it is" : "they are")
+                    + " in use (" + others.stream().map(Terminal::getCode).sorted().reduce((a, b) -> a + ", " + b)
+                            .orElse("")
+                    + "). Raise pos.clients.max on the server, or wait for one to sign out, before "
+                    + code + " can bill.";
+        }
+        return null;
+    }
+
+    /** Places not taken by another counter, for the counter settings window and the tills list. */
+    @Transactional(readOnly = true)
+    public int free() {
+        return Math.max(0, clients.max() - taken().size());
+    }
+
+    /** True while this counter holds one of the shop's places, i.e. somebody is signed in on it. */
+    @Transactional(readOnly = true)
+    public boolean holdsPlace(String counterCode) {
+        String code = normalise(counterCode);
+        return !code.isEmpty() && taken().stream().anyMatch(terminal -> terminal.getCode().equals(code));
     }
 
     /**
@@ -156,27 +207,32 @@ public class ClientRegistry {
         return clean.length() <= 60 ? clean : clean.substring(0, 60).trim();
     }
 
-    private void refuseIfFull(String joining) {
-        List<Terminal> taken = taken();
-        if (taken.size() >= clients.max()) {
-            throw new ClientRefusedException("This shop is set up for " + clients.max() + " counter"
-                    + (clients.max() == 1 ? "" : "s") + " and " + (clients.max() == 1 ? "it is" : "they are")
-                    + " in use (" + taken.stream().map(Terminal::getCode).sorted().reduce((a, b) -> a + ", " + b)
-                            .orElse("")
-                    + "). Raise pos.clients.max on the server, or wait for one to finish, before "
-                    + joining + " can bill.");
-        }
+    private static String normalise(String counterCode) {
+        return counterCode == null ? "" : counterCode.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private List<Terminal> taken() {
+        return taken("");
     }
 
     /**
-     * Counters that have been heard from inside the idle window. A machine switched off at the end
-     * of the day gives its place back by morning without anybody having to do anything.
+     * The counters holding a place, leaving out {@code exceptCode} - the machine asking, which is
+     * never counted against itself.
+     *
+     * <p>A place is held by a signed-in session, not by a machine that once said hello. Somebody
+     * pressing Log out gives the place back at once, which is what a shop expects when it swaps
+     * who is on a counter. A machine that is simply switched off, or carried away, cannot say
+     * anything, so its place also falls away once the idle window has passed with no word from it
+     * - long enough that a reboot or a lunch break never costs a counter its place.
      */
-    private List<Terminal> taken() {
+    private List<Terminal> taken(String exceptCode) {
         Instant since = Instant.now().minus(clients.idleMinutes(), ChronoUnit.MINUTES);
         String own = pos.terminal().code();
+        Set<String> signedIn = presence.signedIn();
         return terminals.findAll().stream()
                 .filter(terminal -> !terminal.getCode().equals(own))
+                .filter(terminal -> !terminal.getCode().equals(exceptCode))
+                .filter(terminal -> signedIn.contains(terminal.getCode()))
                 .filter(terminal -> terminal.getLastSeenAt() != null && terminal.getLastSeenAt().isAfter(since))
                 .sorted((a, b) -> b.getLastSeenAt().compareTo(a.getLastSeenAt()))
                 .toList();

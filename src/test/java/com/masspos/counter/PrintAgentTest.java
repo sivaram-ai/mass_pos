@@ -45,10 +45,11 @@ class PrintAgentTest {
     private PrintAgent agent;
     private String base;
     private Path spool;
+    private int port;
 
     @BeforeEach
     void aCounterWhosePrinterWritesToAFolder() throws IOException {
-        int port = freePort();
+        port = freePort();
         Files.writeString(folder.resolve("counter.properties"), """
                 counter.code=T2
                 counter.name=Counter 2
@@ -94,6 +95,49 @@ class PrintAgentTest {
                 .contains("printer.columns=32", "printer.timeout-seconds=20");
         assertThat(CounterConfig.loadFrom(folder).printer().columns()).isEqualTo(32);
         assertThat(json.readTree(get("/hello").body()).get("columns").asInt()).isEqualTo(32);
+    }
+
+    /**
+     * The sign-in screen asking for this counter's own settings window back, which is what happens
+     * when the shop has no place left for it. The counter program is waiting on exactly this, with
+     * the server's reason to put on the window.
+     */
+    @Test
+    void handsTheCounterBackToItsSettingsWindowWhenTheShopWillNotHaveIt() throws Exception {
+        HttpResponse<String> asked = send("POST", "/settings-window",
+                "{\"reason\":\"This shop is set up for 2 counters and they are in use (T2, T3).\"}");
+
+        assertThat(asked.statusCode()).isEqualTo(202);
+        assertThat(agent.awaitSettingsRequest())
+                .contains("This shop is set up for 2 counters and they are in use (T2, T3).");
+    }
+
+    /** Closing stops the counter waiting for somebody to finish with a window that will not come. */
+    @Test
+    void stopsWaitingForTheSettingsWindowWhenTheCounterShutsDown() {
+        agent.close();
+
+        assertThat(agent.awaitSettingsRequest()).isEmpty();
+    }
+
+    /**
+     * A second click of the shortcut has to find the copy already running rather than start
+     * another one, and it finds it here - along with where that copy is billing, so the window it
+     * opens points at the same server.
+     */
+    @Test
+    void saysWhereACounterAlreadyRunningOnThisMachineIsBilling() throws Exception {
+        agent.serving("http://192.168.1.10:8765/");
+
+        assertThat(json.readTree(get("/hello").body()).get("server").asText())
+                .isEqualTo("http://192.168.1.10:8765");
+        assertThat(PrintAgent.runningOn(port)).contains("http://192.168.1.10:8765");
+    }
+
+    /** Nothing listening is the ordinary case: this machine has no counter running on it. */
+    @Test
+    void saysNoCounterIsRunningWhenNothingAnswers() throws Exception {
+        assertThat(PrintAgent.runningOn(freePort())).isEmpty();
     }
 
     /** Which counter this is and where its server lives are not the browser's to rewrite. */

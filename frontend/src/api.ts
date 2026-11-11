@@ -12,11 +12,15 @@ export const LICENSE_CHANGED = 'masspos:license'
 export class ApiError extends Error {
   status: number
   fieldErrors: Record<string, string>
+  /** True when the server refused this machine rather than the person: see ApiExceptionHandler. */
+  counterSetup: boolean
 
-  constructor(status: number, message: string, fieldErrors: Record<string, string> = {}) {
+  constructor(status: number, message: string, fieldErrors: Record<string, string> = {},
+              counterSetup = false) {
     super(message)
     this.status = status
     this.fieldErrors = fieldErrors
+    this.counterSetup = counterSetup
   }
 }
 
@@ -86,7 +90,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     }
     const errors = (payload as { errors?: Record<string, string> } | null)?.errors
     throw new ApiError(response.status, messageOf(payload, response.status),
-      errors && typeof errors === 'object' ? errors : {})
+      errors && typeof errors === 'object' ? errors : {},
+      Boolean((payload as { counterSetup?: boolean } | null)?.counterSetup))
   }
   return payload as T
 }
@@ -178,7 +183,8 @@ export async function uploadCsv<T>(path: string, csv: string): Promise<T> {
   if (!response.ok) {
     const errors = (payload as { errors?: Record<string, string> } | null)?.errors
     throw new ApiError(response.status, messageOf(payload, response.status),
-      errors && typeof errors === 'object' ? errors : {})
+      errors && typeof errors === 'object' ? errors : {},
+      Boolean((payload as { counterSetup?: boolean } | null)?.counterSetup))
   }
   return payload as T
 }

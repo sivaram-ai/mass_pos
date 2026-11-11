@@ -74,6 +74,34 @@ export function agentUrl(): string {
   }
 }
 
+/**
+ * Hands this machine back to its own settings window, with the server's reason to show on it.
+ *
+ * <p>Used when the server refuses the machine rather than the person - this counter has no number,
+ * or the shop has no place left for it, which is what the counter that loses a race for the last
+ * place is told. Nothing can be done about any of that on a sign-in screen, and a web page cannot
+ * open a window belonging to the counter program, so the request goes through the print agent,
+ * which is the one piece of the counter both ends can reach.
+ *
+ * @return true when the counter took the request, i.e. its settings window is opening
+ */
+export async function askForCounterSettings(reason: string): Promise<boolean> {
+  if (!hasPrintAgent()) {
+    return false
+  }
+  try {
+    const response = await fetch(`${agentUrl()}/settings-window`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    })
+    return response.ok
+  } catch {
+    // An older counter build, or one whose agent has gone. The message on screen still stands.
+    return false
+  }
+}
+
 /** A bill the server laid out, in the two shapes a printer might want it. */
 export interface PrintJob {
   escpos: string

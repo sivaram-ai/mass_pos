@@ -170,6 +170,55 @@ public final class ServerFinder {
     }
 
     /**
+     * What a server says about letting one named counter in.
+     *
+     * @param holdsPlace true when this counter is already one of the machines billing there, so it
+     *                   is coming back to its own place rather than asking for a new one
+     * @param refusal    why it cannot, in the server's own words, or empty when it can
+     */
+    public record Room(String shop, int places, int used, int free, boolean holdsPlace, boolean canJoin,
+                       String refusal) {
+    }
+
+    /**
+     * Asks a server whether this counter could bill against it, before anybody signs in.
+     *
+     * <p>Discovery already says how many places are free, but not whether <em>this</em> counter is
+     * one of the machines already holding one - a counter coming back after a reboot is not asking
+     * for a new place, and a shop that is full must still let it in. Only the server can answer
+     * that, and it answers with the same words the sign-in would refuse with, so the settings
+     * window never promises a place the sign-in then takes away.
+     */
+    public static Optional<Room> roomFor(String url, String counterCode) {
+        try {
+            String ask = url + "/api/clients/places?counter="
+                    + java.net.URLEncoder.encode(counterCode == null ? "" : counterCode,
+                            StandardCharsets.UTF_8);
+            HttpURLConnection http = (HttpURLConnection) new URI(ask).toURL().openConnection();
+            http.setRequestProperty("X-POS-Client", "go-rockit-counter");
+            http.setConnectTimeout((int) REACHABLE.toMillis());
+            http.setReadTimeout((int) REACHABLE.toMillis());
+            if (http.getResponseCode() != 200) {
+                http.disconnect();
+                return Optional.empty();
+            }
+            try (java.io.InputStream answer = http.getInputStream()) {
+                com.fasterxml.jackson.databind.JsonNode said =
+                        new com.fasterxml.jackson.databind.ObjectMapper().readTree(answer.readAllBytes());
+                return Optional.of(new Room(said.path("shop").asText(""), said.path("places").asInt(),
+                        said.path("used").asInt(), said.path("free").asInt(),
+                        said.path("holdsPlace").asBoolean(false), said.path("canJoin").asBoolean(false),
+                        said.path("refusal").asText("")));
+            } finally {
+                http.disconnect();
+            }
+        } catch (URISyntaxException | IOException | RuntimeException notATill) {
+            // Older server, or not a till at all. The caller falls back to saying nothing answered.
+            return Optional.empty();
+        }
+    }
+
+    /**
      * Asks the server whether it is one, and how full. Done over HTTP after the port answers,
      * because a port that opens could be anything.
      */

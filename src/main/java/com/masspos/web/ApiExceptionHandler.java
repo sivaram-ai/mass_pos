@@ -92,6 +92,10 @@ public class ApiExceptionHandler {
     public ProblemDetail clientRefused(ClientRefusedException e) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, e.getMessage());
         problem.setTitle("This counter cannot bill against that server");
+        // Marked so the sign-in screen can tell this apart from a wrong PIN. Nothing is wrong with
+        // the person standing there: it is the machine's own setup, or a shop with no place left,
+        // and both are settled in the counter's settings window rather than on this screen.
+        problem.setProperty("counterSetup", true);
         return problem;
     }
 

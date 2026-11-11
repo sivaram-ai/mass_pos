@@ -35,6 +35,33 @@ final class PrintJobs {
         }
     }
 
+    /** Where a counter already running on this machine is billing, read back out of its /hello. */
+    static String serverOf(byte[] body) {
+        if (body == null || body.length == 0) {
+            return "";
+        }
+        try {
+            return JSON.readTree(body).path("server").asText("");
+        } catch (Exception notJson) {
+            return "";
+        }
+    }
+
+    /**
+     * Why the sign-in screen is sending this counter back to its settings, in the server's own
+     * words, so the window can say what went wrong instead of opening blank.
+     */
+    static String reason(byte[] body) {
+        if (body == null || body.length == 0) {
+            return "";
+        }
+        try {
+            return JSON.readTree(body).path("reason").asText("");
+        } catch (Exception notJson) {
+            return "";
+        }
+    }
+
     /**
      * @throws RuntimeException for anything that is not a bill, which the agent turns into a 400
      *                          rather than letting a stray POST reach the printer

@@ -22,6 +22,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3J | A stopped item stays on Products and Stock, marked; Delete tombstones it and frees its code; both lists sort by code, name, stock, price, MRP or status, remembered per machine | Done: 270 tests green, driven in the browser |
 | 3K | Shop-wide theme: `theme_settings` row (active theme + saved library), 8 designed presets + the original as Default, admin-only builder with live preview, WCAG checks enforced on the server, import/export, counters follow within ~4 s | Done: driven in the browser |
 | 3L | Tills in this shop say who is billing on them and whether anyone is; an item the shop will not sell without stock is marked on the bill row as it is rung up; a bill and a return each open on the same story - the bill, its versions, and everything that came back off it, with the opened one named and ringed | Done: 347 tests green, driven in the browser |
+| 3M | A counter's place is held by a live sign-in, not by having once said hello: the cap is checked at every sign-in, logging out frees a place at once, the settings window will not let anybody press "Save and start billing" until the shop has a place for this counter, the counter that loses the race for the last one is handed back to its own settings window, and clicking the shortcut twice no longer leaves two counter processes running | Done: 362 tests green, server side driven over the LAN; the Swing settings window itself is covered by tests, not driven on screen |
 | L1 | Offline subscription licence per till: Ed25519-signed key bound to a hardware machine ID, warn/grace days, billing lock, Licence screen + banner, vendor `tools/license/LicenseTool.java` | Done: 172 tests green, real key verified on this PC |
 | 5A | Windows installer: jpackage + WiX 3.14, trimmed JDK 21 runtime, one file, `tools/build-installer.ps1` | Done: installed and run from the exe on this PC |
 | 5B | One folder per till, `%LOCALAPPDATA%\GoRockitPOS`, data in `data\`, with an automatic move from the old `MassPOS` folder | Done: 235 tests green, this PC's own till migrated |
@@ -465,9 +466,47 @@ folder and everything under it, so that is the only copy that survives one.
   - **The counter number travels on the address** (`?counter=T2&agent=8767`), is kept per machine
     in `localStorage`, and goes out as `X-POS-Counter` on every request. The server acts on it
     once, at sign-in.
+- **A counter's place is held by a live sign-in** (`ClientRegistry.taken`), not by a row in
+  `terminal`. Three things follow, and each was a bug before:
+  - **The cap is checked at every sign-in**, not only the first one a machine ever made. It used to
+    be checked only when a machine had no row yet, so a shop set up for two counters could have
+    three billing at once as long as each had signed in at some point in the past. The counter
+    asking is never counted against itself (`taken(exceptCode)`), or a till that rebooted could not
+    get back into a full shop.
+  - **Logging out gives the place back at once.** A machine switched off without signing out holds
+    it until `pos.clients.idle-minutes` has passed with no word (4 h; the screen's own "still here"
+    refreshes `lastSeenAt`). Deliberately *not* the three-minute presence window: a counter asleep
+    or off the Wi-Fi for five minutes would otherwise lose its place to another machine and come
+    back still signed in, billing without one.
+  - **`whyNot(code)` is the one place the refusal is worded**, used by `admit` and by
+    `GET /api/clients/places`, so the counter settings window can never promise a place the sign-in
+    then refuses. The settings window asks before enabling its button; the sign-in asks again
+    inside the transaction that writes it, which is what settles a race for the last place.
+- **`GET /api/clients/places` needs no token**, and is in `AuthFilter.PUBLIC_PATHS` for the one
+  reason that matters: a counter has to know whether the shop has room for it *before* anybody
+  signs in. It gives away nothing `DiscoveryResponder` does not already broadcast to the whole LAN.
+- **A refusal of the machine carries `counterSetup: true`** (`ApiExceptionHandler`). The sign-in
+  screen tells that apart from a wrong PIN and posts to the agent's `/settings-window`, which is how
+  the counter that loses the race lands back in its own settings window with the server's sentence
+  on it. A web page cannot open a window belonging to the counter program; the agent is the one
+  piece both ends can reach.
+- **One counter process per machine** (`CounterApp.windowOfRunningCounter` → `PrintAgent.runningOn`,
+  which reads `server` out of `/hello`). Clicking the shortcut again used to start a whole second
+  copy: only one could hold the printer, the loser said so in a window and carried on running
+  anyway, and a shop that opens the till a few times a day finished the week with a row of them in
+  Task Manager. The second process now opens a window on the server the first is already using and
+  exits.
+- **"Save and start billing" is a promise** (`CounterSettings`). It stays disabled until every field
+  is filled in and sane *and* the server has said this counter can join - the local part is
+  `problemWith(config)`, the rest is `ServerFinder.roomFor`. Editing the counter number or where the
+  server is throws the server's answer away and the button goes out until it has been asked again.
+  A lit button that leads to a sign-in screen which turns somebody away is worse than no button.
 - **"Who is at which till" is in memory, not in the database** (`TillPresence`). A till counts as in
   use when both hold: somebody is signed in on it (an unrevoked `auth_token` for that code), and its
-  screen has posted `/api/clients/here` in the last three minutes. Every signed-in screen posts it
+  screen has posted `/api/clients/here` in the last three minutes. **Signed in and in use are
+  different questions and the screen shows both** - `signedIn` holds the shop's place, `inUse` means
+  a screen is answering - because a list that called a signed-in-but-quiet counter "Idle" would seem
+  to contradict the count of free places above it. Every signed-in screen posts it
   once a minute (`App.tsx`). Neither half is enough on its own - a machine switched off without
   signing out would read as billing all night, and a machine sitting on the sign-in page is not
   billing. The times are deliberately not persisted: `terminal` is `@Audited`, so a heartbeat a

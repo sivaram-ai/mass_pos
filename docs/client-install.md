@@ -89,9 +89,14 @@ It holds the database and the licence, and it is the machine every other till ta
 2. Start **GO RockIt Counter**. It asks two things:
    - **Counter number** - up to three characters, a letter first: `T2`, `T3`. It goes on every
      bill that counter takes, and no two machines may share one.
+   - **Name** - what staff call it, e.g. Counter 2. It is what every screen in the shop shows.
    - **Where the server is** - leave it on *Find the server on this network* and press **Look for
      the server**. It names the shop and says how many places are free. If nothing answers (some
      networks do not pass the broadcast), type the server's address instead.
+
+   **Save and start billing stays grey until all of that is right** and the shop has a place for
+   this counter, so a counter can never reach a sign-in screen that would turn it away. The line
+   above the buttons says what is still missing.
 3. Set the printer standing on that counter. Each counter prints its own bills on its own printer
    and opens its own drawer; the server never prints another machine's bill.
 4. Press **Save and start billing**. Staff sign in with the same username and PIN they use
@@ -104,8 +109,15 @@ It holds the database and the licence, and it is the machine every other till ta
   treat the server PC and the network switch as the things that must stay up.
 - Each counter has its **own bill number series** - `T2-2627-00001` - so two counters can never
   issue the same number. The screen shows the running number with the counter beside it.
-- A counter holds its place for four hours after it was last used, so a machine taken away frees
-  its place by itself. To free one straight away, an admin can release it from the server.
+- **A place belongs to whoever is signed in.** Pressing Log out hands it straight back, so the next
+  machine can sign in at once - which is how a shop with three counters and two places swaps
+  between them during the day. A counter switched off without anybody logging out holds its place
+  for four hours and then gives it up by itself.
+- **Settings > Tills in this shop is where to look**: how many places are free, which tills
+  somebody is billing on, and who is signed in on each. It keeps up by itself while it is open.
+- **Two counters can want the last place at once.** Both are told there is room, both press Save
+  and start billing, and whichever signs in first gets it. The other is told so in a sentence and
+  its settings window opens again; it can bill as soon as a place comes free.
 
 ## Vendor: issuing the licence
 

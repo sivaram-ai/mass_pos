@@ -191,10 +191,12 @@ class ClientsApiIntegrationTest {
     void aTillSaysWhoIsBillingOnItWhileSomebodyIsThere() throws Exception {
         String token = tokenOf(signIn("192.168.1.57", "TG", "Counter 7").andExpect(status().isOk()));
 
-        // Signed in, but the screen has said nothing yet, so nothing is claimed about the machine.
+        // Signed in, so it holds a place and the shop knows who is on it - but its screen has said
+        // nothing yet, so it is not claimed to be billing.
         JsonNode quiet = tillSeenBy(token, "TG");
         assertThat(quiet.get("inUse").asBoolean()).isFalse();
-        assertThat(quiet.get("staff").isNull()).isTrue();
+        assertThat(quiet.get("signedIn").asBoolean()).isTrue();
+        assertThat(quiet.get("staff").asText()).isEqualTo("Test CASHIER");
 
         stillHere(token, "TG").andExpect(status().isNoContent());
 
@@ -210,11 +212,118 @@ class ClientsApiIntegrationTest {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isNoContent());
 
-        // Somebody else's screen asking now: the counter spoke a moment ago but nobody is on it.
+        // Somebody else's screen asking now: the counter spoke a moment ago, but the person on it
+        // has gone, so it is billing nothing and holds no place.
         String office = tokenOf(mvc.perform(login()).andExpect(status().isOk()));
         JsonNode emptied = tillSeenBy(office, null, "TG");
         assertThat(emptied.get("inUse").asBoolean()).isFalse();
+        assertThat(emptied.get("signedIn").asBoolean()).isFalse();
         assertThat(emptied.get("staff").isNull()).isTrue();
+    }
+
+    /**
+     * A place belongs to whoever is signed in, not to whoever once was. Pressing Log out hands it
+     * straight back, which is what a shop expects when it takes a machine off a counter: the next
+     * one should be able to sign in without waiting hours for an idle timer.
+     */
+    @Test
+    void loggingOutGivesTheCountersPlaceBackAtOnce() throws Exception {
+        String leaving = tokenOf(signIn("192.168.1.101", "TH").andExpect(status().isOk()));
+        signIn("192.168.1.102", "TI").andExpect(status().isOk());
+        signIn("192.168.1.103", "TJ")
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.detail").value(containsString("set up for 2 counters")));
+
+        logOut(leaving);
+
+        signIn("192.168.1.103", "TJ").andExpect(status().isOk());
+    }
+
+    /**
+     * Signing in once did not used to buy a counter a place for ever, but that is exactly what it
+     * did: the cap was only checked when a machine had no row in the table yet, so a shop set up
+     * for two counters could have three billing at once as long as each had signed in at some
+     * point in the past. The number in pos.clients.max is a limit on machines billing, not on
+     * machines the server has ever heard of.
+     */
+    @Test
+    void aCounterThatHasBilledHereBeforeIsStillCountedAgainstTheLimit() throws Exception {
+        String known = tokenOf(signIn("192.168.1.111", "TK").andExpect(status().isOk()));
+        logOut(known);
+
+        signIn("192.168.1.112", "TL").andExpect(status().isOk());
+        signIn("192.168.1.113", "TM").andExpect(status().isOk());
+
+        signIn("192.168.1.111", "TK")
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.detail").value(containsString("TL")))
+                .andExpect(jsonPath("$.counterSetup").value(true));
+    }
+
+    /**
+     * A counter's settings window has to know whether the shop has room for it before anybody has
+     * signed in - which is the one moment there is no token to ask with. It gives away nothing the
+     * server does not already broadcast to the whole shop network when a counter looks for it.
+     */
+    @Test
+    void aCounterCanAskForRoomBeforeAnybodySignsIn() throws Exception {
+        JsonNode room = places("TN");
+        assertThat(room.get("canJoin").asBoolean()).isTrue();
+        assertThat(room.get("places").asInt()).isEqualTo(2);
+        assertThat(room.get("free").asInt()).isEqualTo(2);
+        assertThat(room.get("holdsPlace").asBoolean()).isFalse();
+
+        signIn("192.168.1.121", "TO").andExpect(status().isOk());
+        String second = tokenOf(signIn("192.168.1.122", "TP").andExpect(status().isOk()));
+
+        JsonNode full = places("TN");
+        assertThat(full.get("free").asInt()).isZero();
+        assertThat(full.get("canJoin").asBoolean()).isFalse();
+        assertThat(full.get("refusal").asText()).contains("set up for 2 counters");
+
+        // A counter already billing here is coming back to its own place, not asking for a new
+        // one, so a full shop must still let it in - otherwise a reboot locks a till out.
+        JsonNode itsOwn = places("TP");
+        assertThat(itsOwn.get("holdsPlace").asBoolean()).isTrue();
+        assertThat(itsOwn.get("canJoin").asBoolean()).isTrue();
+        assertThat(second).isNotNull();
+    }
+
+    /**
+     * The last place, wanted by two machines at once. Both are told there is room, both press Save
+     * and start billing, and both reach the sign-in screen - so the question is settled where it
+     * has to be, in the transaction that writes the sign-in. One bills; the other is told why in a
+     * sentence, and marked as a machine problem so its own settings window can come back.
+     */
+    @Test
+    void onlyOneOfTwoCountersGetsTheLastPlace() throws Exception {
+        signIn("192.168.1.131", "TQ").andExpect(status().isOk());
+        assertThat(places("TR").get("canJoin").asBoolean()).isTrue();
+        assertThat(places("TS").get("canJoin").asBoolean()).isTrue();
+
+        signIn("192.168.1.132", "TR").andExpect(status().isOk());
+
+        signIn("192.168.1.133", "TS")
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.counterSetup").value(true))
+                .andExpect(jsonPath("$.detail").value(containsString("wait for one to sign out")));
+    }
+
+    private JsonNode places(String counter) throws Exception {
+        String body = mvc.perform(get("/api/clients/places?counter=" + counter)
+                        .header(LocalApiGuard.CLIENT_HEADER, "test")
+                        .header(HttpHeaders.HOST, "localhost"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        return json.readTree(body);
+    }
+
+    private void logOut(String token) throws Exception {
+        mvc.perform(post("/api/auth/logout")
+                        .header(LocalApiGuard.CLIENT_HEADER, "test")
+                        .header(HttpHeaders.HOST, "localhost")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isNoContent());
     }
 
     /** A counter saying it is still there, the way every signed-in screen does on a timer. */

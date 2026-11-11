@@ -29,9 +29,14 @@ public class AuthFilter extends OncePerRequestFilter {
      * Sign-in, and the setup screen that offers to put a backup back before anyone has signed in.
      * The setup endpoints refuse once the till has issued a bill or the admin has picked a PIN;
      * see SetupController for why they cannot sit behind a token.
+     *
+     * <p>{@code /api/clients/places} is here because a counter has to know whether this shop has
+     * room for it <em>before</em> anybody signs in - that is the whole point of the question. It
+     * tells a caller only what this server already broadcasts to every machine on the shop's
+     * network when a counter looks for it: the shop's name and how many places are free.
      */
     private static final Set<String> PUBLIC_PATHS = Set.of("/api/auth/login",
-            "/api/setup", "/api/setup/restore", "/api/setup/upload");
+            "/api/setup", "/api/setup/restore", "/api/setup/upload", "/api/clients/places");
     /** All a user may do while their account still carries a forced PIN change. */
     private static final Set<String> PIN_CHANGE_PATHS =
             Set.of("/api/auth/change-pin", "/api/auth/logout", "/api/auth/me");

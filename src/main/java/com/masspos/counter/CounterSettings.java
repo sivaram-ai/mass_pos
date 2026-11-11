@@ -15,6 +15,8 @@ import javax.swing.JPanel;
 import javax.swing.JRadioButton;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Dimension;
@@ -39,12 +41,33 @@ final class CounterSettings {
     private CounterSettings() {
     }
 
+    /** Characters per line, as the server's own printer page allows. */
+    private static final int MIN_COLUMNS = 24;
+    private static final int MAX_COLUMNS = 64;
+
     /**
      * Opens the window and blocks until it is closed.
      *
      * @return the saved settings, or empty if the person closed it without saving
      */
     static Optional<CounterConfig> edit(CounterConfig config) {
+        return edit(config, "");
+    }
+
+    /**
+     * Opens the window and blocks until it is closed.
+     *
+     * <p>"Save and start billing" stays off until this counter could actually start billing: every
+     * field filled in and sane, a server that answers, and a place at that server for this counter.
+     * The last of those cannot be worked out here - only the server knows how many machines are
+     * signed in - so the window asks it, and asks again whenever anything that would change the
+     * answer is edited. The button being lit is a promise, and a promise this window cannot keep
+     * sends somebody to a sign-in screen that will turn them away.
+     *
+     * @param trouble why the window is open again, in the server's words, or blank the first time
+     * @return the saved settings, or empty if the person closed it without saving
+     */
+    static Optional<CounterConfig> edit(CounterConfig config, String trouble) {
         JDialog dialog = new JDialog((java.awt.Frame) null, "GO RockIt counter settings", true);
         JTextField code = new JTextField(config.code(), 6);
         JTextField name = new JTextField(config.name(), 18);
@@ -72,6 +95,12 @@ final class CounterSettings {
         JPanel fields = new JPanel();
         fields.setLayout(new BoxLayout(fields, BoxLayout.Y_AXIS));
         fields.setBorder(BorderFactory.createEmptyBorder(12, 14, 8, 14));
+        if (trouble != null && !trouble.isBlank()) {
+            JLabel sent = new JLabel(wrap("The shop's server turned this counter away: " + trouble));
+            sent.setForeground(new java.awt.Color(0xB1, 0x1C, 0x3C));
+            fields.add(row(sent));
+            fields.add(Box.createVerticalStrut(8));
+        }
         fields.add(heading("This counter"));
         fields.add(row(new JLabel("Counter number"), code,
                 new JLabel("  up to 3 characters, e.g. T2 - it goes on every bill")));
@@ -92,6 +121,7 @@ final class CounterSettings {
 
         JButton test = new JButton("Look for the server");
         JButton save = new JButton("Save and start billing");
+        save.setEnabled(false);
         JButton cancel = new JButton("Close");
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         buttons.add(test);
@@ -114,26 +144,95 @@ final class CounterSettings {
             config.columns(number(columns.getText(), 48));
         };
 
-        test.addActionListener(event -> {
+        /*
+         * Typed nonsense in a number box is its own problem, and has to be caught from the text:
+         * `collect` falls back to a sane number so the config never holds rubbish, which would
+         * otherwise make "abc" look like a perfectly good 48 to the range checks.
+         */
+        java.util.function.Supplier<String> problem = () -> {
+            if (!isWholeNumber(columns.getText())) {
+                return "Characters per line has to be a number - 48 for an 80mm roll, 32 for 58mm.";
+            }
+            if (config.printerType() == PrinterProperties.Type.TCP && !isWholeNumber(tcpPort.getText())) {
+                return "The network printer's port has to be a number, usually 9100.";
+            }
+            return problemWith(config);
+        };
+
+        /*
+         * What the server last said about taking this counter: null until it has been asked,
+         * which is also what every edit that would change the answer puts it back to. Touched only
+         * on the event thread, except where the worker hands it back through invokeLater.
+         */
+        ServerFinder.Room[] room = {null};
+        boolean[] looking = {false};
+
+        Runnable refresh = () -> {
+            String wrong = problem.get();
+            boolean ready = wrong == null && room[0] != null && room[0].canJoin();
+            save.setEnabled(ready);
+            test.setEnabled(wrong == null && !looking[0]);
+            told.setText(wrap(looking[0] ? "Looking for the server..."
+                    : wrong != null ? wrong
+                    : room[0] == null ? "Press \"Look for the server\" to check this shop has a place for "
+                            + config.code() + "."
+                    : room[0].canJoin() ? ready(config, room[0])
+                    : room[0].refusal()));
+        };
+
+        Runnable lookNow = () -> {
             collect.run();
-            told.setText("Looking...");
+            if (problem.get() != null) {
+                refresh.run();
+                return;
+            }
+            looking[0] = true;
+            room[0] = null;
+            refresh.run();
             // On a worker thread: a shout waits over a second, and a frozen window looks broken.
             new Thread(() -> {
-                String answer = describeWhatIsOutThere(config);
-                SwingUtilities.invokeLater(() -> told.setText(answer));
+                ServerFinder.Room answer = askTheServer(config);
+                SwingUtilities.invokeLater(() -> {
+                    looking[0] = false;
+                    room[0] = answer;
+                    refresh.run();
+                });
             }, "counter-find-server").start();
-        });
+        };
+
+        // Anything that changes which server is asked, or who is asking, makes the last answer
+        // worthless: the button goes out until the new question has been put to the server.
+        Runnable askAgain = () -> {
+            collect.run();
+            room[0] = null;
+            refresh.run();
+        };
+        Runnable recheck = () -> {
+            collect.run();
+            refresh.run();
+        };
+        onEdit(code, askAgain);
+        onEdit(address, askAgain);
+        onEdit(url, askAgain);
+        for (JRadioButton choice : List.of(automatic, byAddress, byUrl)) {
+            choice.addActionListener(event -> askAgain.run());
+        }
+        onEdit(name, recheck);
+        onEdit(windowsPrinter, recheck);
+        onEdit(serialPort, recheck);
+        onEdit(tcpHost, recheck);
+        onEdit(tcpPort, recheck);
+        onEdit(columns, recheck);
+        printerType.addActionListener(event -> recheck.run());
+
+        test.addActionListener(event -> lookNow.run());
 
         save.addActionListener(event -> {
             collect.run();
-            String badCode = CounterConfig.codeProblem(config.code());
-            if (badCode != null) {
-                told.setText(badCode);
-                code.requestFocusInWindow();
-                return;
-            }
-            if (!config.readyToConnect()) {
-                told.setText("Fill in where the server is, or choose finding it on this network.");
+            if (problem.get() != null || room[0] == null || !room[0].canJoin()) {
+                // Belt and braces: the button is off in all three cases. Keyboard shortcuts and
+                // the dialog's default button have been known to fire one anyway.
+                refresh.run();
                 return;
             }
             try {
@@ -141,10 +240,19 @@ final class CounterSettings {
                 saved[0] = true;
                 dialog.dispose();
             } catch (IOException cannotWrite) {
-                told.setText("Could not save to " + CounterConfig.file() + ": " + cannotWrite.getMessage());
+                told.setText(wrap("Could not save to " + CounterConfig.file() + ": " + cannotWrite.getMessage()));
             }
         });
         cancel.addActionListener(event -> dialog.dispose());
+
+        collect.run();
+        refresh.run();
+        // A counter that was already set up should not have to be asked to press anything: its
+        // settings are the ones that were working, and the only open question is whether the shop
+        // still has room. Ask straight away, and the window opens with the answer already on it.
+        if (problem.get() == null) {
+            lookNow.run();
+        }
 
         dialog.getRootPane().setDefaultButton(save);
         dialog.setLayout(new BorderLayout());
@@ -157,27 +265,100 @@ final class CounterSettings {
         return saved[0] ? Optional.of(config) : Optional.empty();
     }
 
-    /** What the settings screen says after "Look for the server", in one sentence. */
-    private static String describeWhatIsOutThere(CounterConfig config) {
-        if (config.find() == CounterConfig.Find.AUTOMATIC) {
-            List<ServerFinder.Found> servers = ServerFinder.discover();
-            if (servers.isEmpty()) {
-                return "<html>No shop server answered.<br>On the server: is pos.clients.max above 0,"
-                        + " did Windows Firewall allow GO RockIt, and is the network set to Private?"
-                        + "<br>Or type the server's address above instead.</html>";
-            }
-            if (servers.size() > 1) {
-                return servers.size() + " servers answered. Type the address of the right one: "
-                        + servers.stream().map(ServerFinder.Found::describe).reduce((a, b) -> a + "; " + b).orElse("");
-            }
-            ServerFinder.Found only = servers.get(0);
-            return only.full()
-                    ? "Found " + only.describe() + ", but it has no places left for another counter."
-                    : "Found " + only.describe() + ".";
+    /**
+     * The first thing wrong with what is on the window, in the words somebody setting a counter up
+     * would use, or null when everything here is fit to save. Only what this machine can judge by
+     * itself: whether the shop has a place for it is the server's answer, not this one's.
+     */
+    static String problemWith(CounterConfig config) {
+        String badCode = CounterConfig.codeProblem(config.code());
+        if (badCode != null) {
+            return badCode;
         }
-        return ServerFinder.find(config)
-                .map(found -> "That server answered. Save and start billing.")
-                .orElse("Nothing answered there. Check the address, and that the server is running.");
+        if (config.rawName().isBlank()) {
+            return "Give this counter a name - it is what staff see on every screen, e.g. Counter 2.";
+        }
+        if (config.find() == CounterConfig.Find.ADDRESS && config.address().isBlank()) {
+            return "Type the server's name or IP address, or choose finding it on this network.";
+        }
+        if (config.find() == CounterConfig.Find.URL && config.url().isBlank()) {
+            return "Type the server's full address, e.g. http://192.168.1.10:8765.";
+        }
+        return printerProblem(config);
+    }
+
+    /** The same ranges the agent holds a saved printer to, asked here before anything is saved. */
+    private static String printerProblem(CounterConfig config) {
+        if (config.printerType() == PrinterProperties.Type.SERIAL && config.serialPort().isBlank()) {
+            return "Which COM port is the printer on? e.g. COM3.";
+        }
+        if (config.printerType() == PrinterProperties.Type.TCP && config.tcpHost().isBlank()) {
+            return "Type the network printer's name or IP address.";
+        }
+        if (config.printerType() == PrinterProperties.Type.TCP
+                && (config.tcpPort() < 1 || config.tcpPort() > 65535)) {
+            return "The printer's port has to be between 1 and 65535 - 9100 on most network printers.";
+        }
+        if (config.columns() < MIN_COLUMNS || config.columns() > MAX_COLUMNS) {
+            return "Characters per line has to be between " + MIN_COLUMNS + " and " + MAX_COLUMNS
+                    + " - 48 for an 80mm roll, 32 for 58mm.";
+        }
+        return null;
+    }
+
+    /** What the server answered about taking this counter, or a made-up refusal when none did. */
+    private static ServerFinder.Room askTheServer(CounterConfig config) {
+        Optional<ServerFinder.Found> server = ServerFinder.find(config);
+        if (server.isEmpty()) {
+            return new ServerFinder.Room("", 0, 0, 0, false, false, nothingAnswered(config));
+        }
+        return ServerFinder.roomFor(server.get().url(), config.code())
+                .orElseGet(() -> new ServerFinder.Room("", 0, 0, 0, false, false,
+                        "Something answered at " + server.get().url() + ", but it is not a GO RockIt shop"
+                                + " server. Check the address."));
+    }
+
+    private static String nothingAnswered(CounterConfig config) {
+        if (config.find() == CounterConfig.Find.AUTOMATIC) {
+            return "No shop server answered. On the server: is pos.clients.max above 0, did Windows"
+                    + " Firewall allow GO RockIt, and is the network set to Private rather than Public?"
+                    + " Or type the server's address above instead.";
+        }
+        return "Nothing answered there. Check the address, and that the server is running.";
+    }
+
+    private static String ready(CounterConfig config, ServerFinder.Room room) {
+        String shop = room.shop() == null || room.shop().isBlank() ? "the shop's server" : room.shop();
+        String places = room.places() == 0 ? ""
+                : room.holdsPlace() ? " " + config.code() + " is already one of its counters."
+                : " " + room.free() + " of " + room.places() + " places free.";
+        return "Ready: " + config.code() + " can bill at " + shop + "." + places;
+    }
+
+    /** Runs on every keystroke, so the button and the line underneath never lag behind the fields. */
+    private static void onEdit(JTextField field, Runnable action) {
+        field.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent event) {
+                action.run();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent event) {
+                action.run();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent event) {
+                action.run();
+            }
+        });
+    }
+
+    /** A sentence long enough to need two lines, in a label that only wraps when told to. */
+    private static String wrap(String text) {
+        String escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        return "<html><body style='width:560px'>" + escaped + "</body></html>";
     }
 
     /** Tells somebody what went wrong in a window, for the times there is no screen to put it on. */
@@ -211,6 +392,15 @@ final class CounterSettings {
             return Integer.parseInt(text.trim());
         } catch (NumberFormatException notANumber) {
             return fallback;
+        }
+    }
+
+    private static boolean isWholeNumber(String text) {
+        try {
+            Integer.parseInt(text.trim());
+            return true;
+        } catch (NumberFormatException notANumber) {
+            return false;
         }
     }
 }

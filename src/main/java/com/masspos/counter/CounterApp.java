@@ -59,6 +59,9 @@ public final class CounterApp {
     public static void main(String[] args) {
         try {
             CounterConfig config = CounterConfig.load();
+            if (openOnTheCounterAlreadyRunning(config)) {
+                return;
+            }
             if (!config.readyToConnect() && settingsCancelled(config)) {
                 return;
             }
@@ -74,6 +77,47 @@ public final class CounterApp {
             // Nobody is watching a console on a counter, so anything that escapes gets a window.
             CounterSettings.say("GO RockIt counter", "This counter could not start: " + unexpected);
         }
+    }
+
+    /**
+     * One counter process per machine.
+     *
+     * <p>Clicking the shortcut again used to start a whole second copy of this program. Only one
+     * of them could hold the printer - the loser said so in a window and then carried on running
+     * anyway - so a shop that opens the till two or three times a day finished the week with a row
+     * of them in Task Manager, each with its own JVM. Now the new process asks the one already
+     * running where it is billing, opens a window there, and stops.
+     *
+     * @return true when a counter was already running and the billing screen has been opened on it
+     */
+    private static boolean openOnTheCounterAlreadyRunning(CounterConfig config) throws IOException {
+        Optional<String> window = windowOfRunningCounter(config);
+        if (window.isEmpty()) {
+            return false;
+        }
+        if (window.get().isEmpty()) {
+            // It is ours and it is up, but it has not reached a server yet - the settings window
+            // on the first copy is probably still open. Opening a second window on nothing would
+            // help nobody, so say where to look.
+            CounterSettings.say("GO RockIt counter",
+                    "This counter is already running and is still being set up.\n\n"
+                            + "Finish in the settings window that is already open.");
+            return true;
+        }
+        Browser.openApp(window.get());
+        return true;
+    }
+
+    /**
+     * The billing screen to open when a counter is already running on this machine.
+     *
+     * @return empty when none is running and this process should start one; the address to open
+     *         when one is; or an empty string when one is running but has not reached a server yet
+     */
+    static Optional<String> windowOfRunningCounter(CounterConfig config) {
+        return PrintAgent.runningOn(config.agentPort())
+                .map(server -> server.isBlank() ? config.lastServer() : server)
+                .map(server -> server.isBlank() ? "" : billingScreen(config, server));
     }
 
     /**
@@ -102,16 +146,7 @@ public final class CounterApp {
     }
 
     private static void start(CounterConfig config, String server) throws IOException {
-        if (!server.equals(config.lastServer())) {
-            config.lastServer(server);
-            try {
-                config.save();
-            } catch (IOException cannotRemember) {
-                // Not worth stopping for: the counter works, it just re-discovers next time.
-                CounterSettings.say("GO RockIt counter",
-                        "Could not remember where the server is: " + cannotRemember.getMessage());
-            }
-        }
+        remember(config, server);
         PrintAgent agent = new PrintAgent(config, Path.of(CounterConfig.folder().toString(), SPOOL));
         agent.serving(server);
         try {
@@ -119,12 +154,60 @@ public final class CounterApp {
         } catch (IOException portTaken) {
             CounterSettings.say("GO RockIt counter",
                     "Bills will not print on this counter: port " + agent.port() + " is already in use.\n\n"
-                            + "Another copy of the counter app is probably running. Close it and start again.");
+                            + "Another program on this machine is using it. Change the print agent port in"
+                            + " counter.properties, or close whatever has taken it, and start again.");
         }
         Browser.openApp(billingScreen(config, server));
         // The agent is the reason this process stays alive: the browser window is the shop's, but
         // the printer belongs to this program, and closing it would take the printer with it.
-        keepRunning();
+        //
+        // It is also how the sign-in screen gets this window back. A counter the server turns away
+        // - no place left in the shop, a number that is already the server's - has nothing useful
+        // to do on a sign-in screen, and the page cannot open a window of this program's by itself.
+        serveUntilClosed(config, agent);
+    }
+
+    /**
+     * Waits for work, which on a counter means one of two things: nothing at all, which is the
+     * normal day, or the page asking for the settings window back after the server refused this
+     * machine. Settings saved, it looks for the server again and opens billing on it.
+     */
+    private static void serveUntilClosed(CounterConfig config, PrintAgent agent) {
+        Optional<String> asked = agent.awaitSettingsRequest();
+        while (asked.isPresent()) {
+            if (CounterSettings.edit(config, asked.get().trim()).isPresent()) {
+                Optional<String> server = connect(config);
+                if (server.isPresent()) {
+                    remember(config, server.get());
+                    agent.serving(server.get());
+                    openQuietly(config, server.get());
+                }
+            }
+            asked = agent.awaitSettingsRequest();
+        }
+    }
+
+    private static void remember(CounterConfig config, String server) {
+        if (server.equals(config.lastServer())) {
+            return;
+        }
+        config.lastServer(server);
+        try {
+            config.save();
+        } catch (IOException cannotRemember) {
+            // Not worth stopping for: the counter works, it just re-discovers next time.
+            CounterSettings.say("GO RockIt counter",
+                    "Could not remember where the server is: " + cannotRemember.getMessage());
+        }
+    }
+
+    private static void openQuietly(CounterConfig config, String server) {
+        try {
+            Browser.openApp(billingScreen(config, server));
+        } catch (IOException noBrowser) {
+            CounterSettings.say("GO RockIt counter",
+                    "Could not open the billing screen: " + noBrowser.getMessage());
+        }
     }
 
     /**
@@ -137,11 +220,4 @@ public final class CounterApp {
                 + "&agent=" + config.agentPort();
     }
 
-    private static void keepRunning() {
-        try {
-            Thread.currentThread().join();
-        } catch (InterruptedException stopping) {
-            Thread.currentThread().interrupt();
-        }
-    }
 }

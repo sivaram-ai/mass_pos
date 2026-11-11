@@ -13,12 +13,15 @@ import com.sun.net.httpserver.HttpServer;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
@@ -70,10 +73,19 @@ public final class PrintAgent implements AutoCloseable {
     private static final Duration STATUS_TIMEOUT = Duration.ofMillis(500);
     /** Room for a status round trip and a bill queued ahead of it, as the server allows. */
     private static final Duration AWAIT_MARGIN = Duration.ofSeconds(3);
+    /** Asking a program on this same machine; anything slower than this is not it. */
+    private static final Duration PROBE = Duration.ofMillis(800);
+    /** Put on the settings queue by {@link #close()}, so the counter stops waiting for a person. */
+    private static final String CLOSING = "\u0000closing";
 
     private final CounterConfig config;
     private final Path spoolFolder;
     private final BlockingQueue<Task> queue = new ArrayBlockingQueue<>(32);
+    /**
+     * One pending "open the settings window", never a queue of them: a page that asks twice while
+     * somebody is already looking at the window should not open a second one behind it.
+     */
+    private final BlockingQueue<String> settingsRequests = new ArrayBlockingQueue<>(1);
     /** Held by anything that reads or writes {@link #config}; the printer thread never takes it. */
     private final Object settings = new Object();
     private volatile String allowedOrigin = "";
@@ -122,6 +134,7 @@ public final class PrintAgent implements AutoCloseable {
         http.createContext("/print", this::onPrint);
         http.createContext("/hello", this::onHello);
         http.createContext("/settings", this::onSettings);
+        http.createContext("/settings-window", this::onSettingsWindow);
         http.createContext("/status", this::onStatus);
         http.createContext("/test-page", this::onTestPage);
         // A handful of threads, not the listener's own: asking the printer how it is waits for the
@@ -144,6 +157,55 @@ public final class PrintAgent implements AutoCloseable {
         this.allowedOrigin = ServerFinder.normalise(serverUrl);
     }
 
+    /**
+     * Blocks until the counter's own page asks for the settings window back, which it does when
+     * the server turns this machine away - no counter number, no place left in the shop. The
+     * reason comes with it, so the window can open saying what happened rather than blank.
+     *
+     * @return the reason to show, or empty when the agent is shutting down and the counter should stop
+     */
+    public Optional<String> awaitSettingsRequest() {
+        try {
+            String asked = settingsRequests.take();
+            return CLOSING.equals(asked) ? Optional.empty() : Optional.of(asked);
+        } catch (InterruptedException stopping) {
+            Thread.currentThread().interrupt();
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Whether a counter is already running on this machine, and where it is billing.
+     *
+     * <p>Clicking the shortcut again must not leave a second copy of this program running in the
+     * background: only one of them can hold the printer, but both stay alive, and a shop that
+     * opens the till a few times a day ends the week with a row of them in Task Manager. The one
+     * already running answers here, and the new process opens a window on the same server and
+     * stops.
+     *
+     * @return the server the running counter is billing against, or empty when none is running
+     */
+    public static Optional<String> runningOn(int agentPort) {
+        try {
+            HttpURLConnection http = (HttpURLConnection) URI.create(
+                    "http://127.0.0.1:" + agentPort + "/hello").toURL().openConnection();
+            http.setConnectTimeout((int) PROBE.toMillis());
+            http.setReadTimeout((int) PROBE.toMillis());
+            if (http.getResponseCode() != 200) {
+                return Optional.empty();
+            }
+            try (java.io.InputStream answer = http.getInputStream()) {
+                return Optional.of(PrintJobs.serverOf(answer.readAllBytes()));
+            } finally {
+                http.disconnect();
+            }
+        } catch (IOException | RuntimeException nothingThere) {
+            // Nothing listening, or something that is not our agent: start normally and let the
+            // bind fail loudly if that port really is somebody else's.
+            return Optional.empty();
+        }
+    }
+
     public int port() {
         return config.agentPort();
     }
@@ -156,6 +218,7 @@ public final class PrintAgent implements AutoCloseable {
     @Override
     public void close() {
         running = false;
+        settingsRequests.offer(CLOSING);
         if (http != null) {
             http.stop(0);
         }
@@ -177,6 +240,9 @@ public final class PrintAgent implements AutoCloseable {
         PrinterProperties printer = this.printer;
         respond(exchange, 200, "{"
                 + "\"counter\":\"" + config.code() + "\","
+                // Where this counter is billing, so a second click of the shortcut can open a
+                // window on the same server instead of starting another copy of this program.
+                + "\"server\":\"" + allowedOrigin.replace("\\", "\\\\").replace("\"", "\\\"") + "\","
                 + "\"printer\":\"" + printer.type() + "\","
                 + "\"columns\":" + printer.columns() + ","
                 + "\"codePage\":\"" + printer.codePage() + "\","
@@ -253,6 +319,31 @@ public final class PrintAgent implements AutoCloseable {
         } catch (RuntimeException cannotSave) {
             respond(exchange, 500, error(cannotSave));
         }
+    }
+
+    /**
+     * "This shop will not have me." The sign-in screen calls this when the server refuses the
+     * machine rather than the person - no counter number, a number that is the server's own, or a
+     * shop with every place taken, which is what the counter that loses a race for the last one
+     * is told.
+     *
+     * <p>Nothing on the web page can reopen a window belonging to this program, and nothing should
+     * leave somebody staring at a sign-in screen that will never let them in. The agent is the one
+     * piece of the counter that both ends can reach, so the request comes through here and the
+     * counter's own settings window opens with the server's sentence on it.
+     */
+    private void onSettingsWindow(HttpExchange exchange) throws IOException {
+        if (cors(exchange)) {
+            return;
+        }
+        if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+            respond(exchange, 405, "{\"error\":\"ask for the settings window with POST\"}");
+            return;
+        }
+        String reason = PrintJobs.reason(exchange.getRequestBody().readNBytes(MAX_SETTINGS_BYTES));
+        // offer, not put: a window is already open or on its way, and one is all anybody wants.
+        settingsRequests.offer(reason.isBlank() ? " " : reason);
+        respond(exchange, 202, "{\"opening\":true}");
     }
 
     /** Paper and cover on this counter's printer, for the lines under the settings page. */

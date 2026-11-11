@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, downloadCsv, fieldErrorsOf, messageOfFailure, uploadCsv } from '../api'
-import type { Role, SettingsView, ShopSettingsForm, TerminalView } from '../types'
+import type { Role, SettingsView, ShopSettingsForm, TerminalView, TillsView } from '../types'
 import { Banner, Button, Empty, errorFor, Field, inputClass, Panel } from '../components/ui'
 import PrinterPanel from '../components/PrinterPanel'
 import DatabasePanel from '../components/DatabasePanel'
@@ -23,10 +23,11 @@ const FIELD_LABELS: Record<string, string> = {
 }
 
 /**
- * How often the list of tills asks again. Screens say "still here" every minute and fall idle after
- * three, so a few seconds here is enough for the panel to keep up without asking for no reason.
+ * How often the list of tills asks again. It is the one place a shop can see who is billing and
+ * how many places are left, and both change the moment somebody signs in or out across the room,
+ * so it is worth asking often. One small query against a table of a handful of rows.
  */
-const TILLS_REFRESH_MS = 10 * 1000
+const TILLS_REFRESH_MS = 5 * 1000
 
 /** `address[1]` → "Address line 2", in the same words the form uses. */
 function labelOf(field: string): string {
@@ -344,15 +345,15 @@ export default function Settings({ role, settings, onSaved, onToast }: {
  * settings the screen was given, which would throw away whatever is part way typed into the form.
  */
 function TillsPanel({ tills, thisTill }: { tills: TerminalView[]; thisTill: string }) {
-  const [rows, setRows] = useState(tills)
+  const [shop, setShop] = useState<TillsView>({ places: 0, used: 0, free: 0, tills })
 
   useEffect(() => {
     let stopped = false
     const refresh = () => {
-      api.get<TerminalView[]>('/api/settings/tills')
+      api.get<TillsView>('/api/settings/tills')
         .then((fresh) => {
           if (!stopped) {
-            setRows(fresh)
+            setShop(fresh)
           }
         })
         .catch(() => {
@@ -369,10 +370,34 @@ function TillsPanel({ tills, thisTill }: { tills: TerminalView[]; thisTill: stri
 
   return (
     <Panel title="Tills in this shop" className="xl:col-span-2">
+      {/* A place is held by a signed-in counter, so this is the number a shop can act on: it goes
+          up the moment somebody logs out, and a counter being set up across the room is checking
+          exactly this before it will let anybody press "Save and start billing". */}
+      <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        {shop.places === 0 ? (
+          <span className="text-sm text-slate-500">
+            This till keeps to itself. Set <span className="num">pos.clients.max</span> in pos.properties to
+            the number of counters the shop has, and restart, to let other machines bill against it.
+          </span>
+        ) : (
+          <>
+            <span className={`rounded-md px-2 py-1 text-sm font-medium ${
+              shop.free > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}>
+              {shop.free} of {shop.places} {shop.places === 1 ? 'place' : 'places'} free
+            </span>
+            <span className="text-sm text-slate-500">
+              {shop.free > 0
+                ? `${shop.free === 1 ? 'One more counter' : `Up to ${shop.free} more counters`} can sign in.`
+                : 'Every place is taken: another counter can only sign in once one of these logs out.'}
+            </span>
+          </>
+        )}
+      </div>
       <p className="mb-3 text-xs text-slate-400">
         The server registers itself from its own pos.properties; a counter registers itself when somebody
         signs in on it, under the number and name set in its own settings window. The one you are using is
-        marked. A till is billing while somebody is signed in on it and its screen is still answering.
+        marked. A till is billing while somebody is signed in on it and its screen is still answering, and
+        it holds one of the shop's places for exactly that long.
       </p>
       <table className="w-full text-sm">
         <thead className="text-xs uppercase tracking-wide text-slate-400">
@@ -387,7 +412,7 @@ function TillsPanel({ tills, thisTill }: { tills: TerminalView[]; thisTill: stri
           </tr>
         </thead>
         <tbody>
-          {rows.map((terminal) => (
+          {shop.tills.map((terminal) => (
             <tr key={terminal.code} className="border-t border-slate-100">
               <td className="num py-1.5 font-medium">
                 {terminal.code}
@@ -398,10 +423,21 @@ function TillsPanel({ tills, thisTill }: { tills: TerminalView[]; thisTill: stri
               <td className="py-1.5">{terminal.name}</td>
               <td className="py-1.5 text-slate-500">{terminal.section || '—'}</td>
               <td className="py-1.5 text-slate-500">{terminal.type}</td>
+              {/* Three states, not two, because a till that is signed in still holds one of the
+                  shop's places even while its screen has gone quiet - and a list that called that
+                  "Idle" would seem to contradict the count of free places above it. */}
               <td className="py-1.5">
                 {terminal.inUse ? (
                   <span className="inline-flex items-center gap-1.5 font-medium text-emerald-700">
                     <span className="h-2 w-2 rounded-full bg-emerald-500" aria-hidden />Billing now
+                  </span>
+                ) : terminal.signedIn ? (
+                  <span
+                    title="Signed in, so it still holds one of the shop's places, but its screen has not
+                           answered for a few minutes. It may be asleep, off the network, or switched off."
+                    className="inline-flex items-center gap-1.5 font-medium text-amber-700"
+                  >
+                    <span className="h-2 w-2 rounded-full bg-amber-500" aria-hidden />Signed in
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1.5 text-slate-400">
