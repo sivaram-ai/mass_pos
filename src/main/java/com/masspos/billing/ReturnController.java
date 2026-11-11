@@ -33,11 +33,14 @@ public class ReturnController {
     private static final Logger log = LoggerFactory.getLogger(ReturnController.class);
 
     private final ReturnService returns;
+    private final SaleService sales;
     private final ReceiptService receipts;
     private final ThermalPrinter printer;
 
-    public ReturnController(ReturnService returns, ReceiptService receipts, ThermalPrinter printer) {
+    public ReturnController(ReturnService returns, SaleService sales, ReceiptService receipts,
+                            ThermalPrinter printer) {
         this.returns = returns;
+        this.sales = sales;
         this.receipts = receipts;
         this.printer = printer;
     }
@@ -91,6 +94,17 @@ public class ReturnController {
     @RequiresRole({UserRole.CASHIER, UserRole.MANAGER, UserRole.AUDITOR})
     public CreditNoteView lookup(@RequestParam String number) {
         return returns.lookup(number);
+    }
+
+    /**
+     * Everything a return belongs to: the bill it came off, every version of that bill, and every
+     * other return against it. Declared before {@code /{id}} for readability; Spring matches the
+     * longer, literal path first anyway.
+     */
+    @GetMapping("/api/returns/{id}/history")
+    @RequiresRole({UserRole.CASHIER, UserRole.MANAGER, UserRole.AUDITOR})
+    public SaleService.History history(@PathVariable UUID id) {
+        return sales.historyOfReturn(id);
     }
 
     @GetMapping("/api/returns/{id}")

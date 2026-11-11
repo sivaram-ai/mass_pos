@@ -437,7 +437,7 @@ function KeyList<T, A extends string>({ ref, label, rows, idOf, actionsFor, onRu
                             }}
                             className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
                               lit
-                                ? `bg-sky-600 text-white ${focused ? 'ring-2 ring-sky-300' : ''}`
+                                ? `bg-sky-600 text-on-primary ${focused ? 'ring-2 ring-sky-300' : ''}`
                                 : one.tone === 'bad'
                                   ? 'text-rose-600 hover:bg-rose-50'
                                   : 'text-slate-600 hover:bg-slate-100'}`}

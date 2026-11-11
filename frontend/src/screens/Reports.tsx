@@ -125,14 +125,14 @@ export default function Reports({ onToast }: { onToast: Toast }) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex rounded-md border border-slate-200 bg-white p-1">
+        <div className="flex rounded-md border border-slate-200 bg-surface p-1">
           {([['day', "Day's takings", 'F2'], ['gst', 'GST summary', 'F3'], ['audit', 'Audit trail', 'F4']] as [Tab, string, string][])
             .map(([id, label, key]) => (
               <button
                 key={id}
                 onClick={() => setTab(id)}
                 className={`rounded px-3 py-1.5 text-sm ${
-                  tab === id ? 'bg-slate-800 font-medium text-white' : 'text-slate-600 hover:bg-slate-100'
+                  tab === id ? 'bg-secondary font-medium text-on-secondary' : 'text-slate-600 hover:bg-slate-100'
                 }`}
               >
                 {label} <kbd>{key}</kbd>
@@ -377,7 +377,7 @@ function AllSoldDialog({ items, onClose }: { items: SoldItem[]; onClose: () => v
     <Modal title={`All sold items (${items.length})`} onClose={onClose} size="3xl">
       <div className="max-h-[60vh] overflow-y-auto">
         <table className="w-full text-sm">
-          <thead className="sticky top-0 bg-white text-xs uppercase tracking-wide text-slate-400">
+          <thead className="sticky top-0 bg-surface text-xs uppercase tracking-wide text-slate-400">
             <tr>
               <th className="py-1 text-left">#</th>
               <th className="py-1 text-left">Item</th>

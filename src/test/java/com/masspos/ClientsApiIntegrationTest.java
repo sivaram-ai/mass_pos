@@ -179,6 +179,68 @@ class ClientsApiIntegrationTest {
         settingsSeenBy(token, "TF").andExpect(jsonPath("$.thisTerminal.name").value("Counter 2"));
     }
 
+    /**
+     * The shop's list of tills says which ones somebody is standing at and who that is - what a
+     * manager in the back office wants to know before ringing a counter or closing the shop.
+     *
+     * <p>Both halves have to hold. A machine whose screen has gone - switched off, or carried away
+     * at the end of the day without anybody signing out - must not keep reading as billing; and
+     * signing out must empty the till at once, however recently that machine spoke.
+     */
+    @Test
+    void aTillSaysWhoIsBillingOnItWhileSomebodyIsThere() throws Exception {
+        String token = tokenOf(signIn("192.168.1.57", "TG", "Counter 7").andExpect(status().isOk()));
+
+        // Signed in, but the screen has said nothing yet, so nothing is claimed about the machine.
+        JsonNode quiet = tillSeenBy(token, "TG");
+        assertThat(quiet.get("inUse").asBoolean()).isFalse();
+        assertThat(quiet.get("staff").isNull()).isTrue();
+
+        stillHere(token, "TG").andExpect(status().isNoContent());
+
+        JsonNode billing = tillSeenBy(token, "TG");
+        assertThat(billing.get("inUse").asBoolean()).isTrue();
+        assertThat(billing.get("staff").asText()).isEqualTo("Test CASHIER");
+        settingsSeenBy(token, "TG").andExpect(jsonPath("$.thisTerminal.inUse").value(true));
+
+        mvc.perform(post("/api/auth/logout")
+                        .header(LocalApiGuard.CLIENT_HEADER, "test")
+                        .header(HttpHeaders.HOST, "localhost")
+                        .header(LocalApiGuard.COUNTER_HEADER, "TG")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isNoContent());
+
+        // Somebody else's screen asking now: the counter spoke a moment ago but nobody is on it.
+        String office = tokenOf(mvc.perform(login()).andExpect(status().isOk()));
+        JsonNode emptied = tillSeenBy(office, null, "TG");
+        assertThat(emptied.get("inUse").asBoolean()).isFalse();
+        assertThat(emptied.get("staff").isNull()).isTrue();
+    }
+
+    /** A counter saying it is still there, the way every signed-in screen does on a timer. */
+    private ResultActions stillHere(String token, String counter) throws Exception {
+        return mvc.perform(post("/api/clients/here")
+                .header(LocalApiGuard.CLIENT_HEADER, "test")
+                .header(HttpHeaders.HOST, "localhost")
+                .header(LocalApiGuard.COUNTER_HEADER, counter)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token));
+    }
+
+    private JsonNode tillSeenBy(String token, String counter) throws Exception {
+        return tillSeenBy(token, counter, counter);
+    }
+
+    /** One till's row out of the shop's list, as the settings screen draws it. */
+    private JsonNode tillSeenBy(String token, String counter, String code) throws Exception {
+        JsonNode body = json.readTree(settingsSeenBy(token, counter).andReturn().getResponse().getContentAsString());
+        for (JsonNode till : body.get("terminals")) {
+            if (till.get("code").asText().equals(code)) {
+                return till;
+            }
+        }
+        throw new AssertionError("No till " + code + " in the shop's list");
+    }
+
     private ResultActions settingsSeenBy(String token, String counter) throws Exception {
         MockHttpServletRequestBuilder request = get("/api/settings")
                 .header(LocalApiGuard.CLIENT_HEADER, "test")

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { api, ApiError, billNo, messageOfFailure, percent, quantity, rupees } from '../api'
 import { printDocument } from '../counter'
-import type { CreditNote, Invoice, Role } from '../types'
+import type { BillHistory, CreditNote, Invoice, Role } from '../types'
 import { Button, Empty, Field, inputClass, KeyBox, Modal, Panel, smallInputClass } from '../components/ui'
 import { useScreenKeys } from '../shortcuts'
 import type { Toast } from '../App'
@@ -427,7 +427,7 @@ export default function Invoices({ role, onToast, onOpenInBilling }: {
                               }}
                               className={`rounded-md px-2.5 py-1 text-xs font-medium transition disabled:cursor-not-allowed disabled:text-slate-300 ${
                                 focused
-                                  ? `bg-sky-600 text-white ${listFocused ? 'ring-2 ring-sky-300' : ''}`
+                                  ? `bg-sky-600 text-on-primary ${listFocused ? 'ring-2 ring-sky-300' : ''}`
                                   : name === 'cancel' ? 'text-rose-600 hover:bg-rose-50' : 'text-slate-600 hover:bg-slate-100'}`}
                             >
                               {ACTION_LABELS[name]}
@@ -445,7 +445,7 @@ export default function Invoices({ role, onToast, onOpenInBilling }: {
       </div>
 
       {open && <BillDialog opened={open} onClose={() => closeDialog()} onToast={onToast} />}
-      {openNote && <CreditNoteDialog note={openNote} onClose={() => closeDialog()} />}
+      {openNote && <CreditNoteDialog note={openNote} onClose={() => closeDialog()} onToast={onToast} />}
       {cancelling && (
         <CancelDialog
           invoice={cancelling}
@@ -489,58 +489,134 @@ function timeOf(instant: string): string {
  * original and its replacement read side by side. The bill that was opened is marked.
  */
 function BillDialog({ opened, onClose, onToast }: { opened: Invoice; onClose: () => void; onToast: Toast }) {
-  const [versions, setVersions] = useState<Invoice[] | null>(null)
+  const story = useStory(`/api/invoices/${opened.id}/history`, { versions: [opened], returns: [] }, onToast)
+  return (
+    <Modal title={`Bill ${billNo(opened.invoiceNumber)}`} onClose={onClose} wide>
+      <Story story={story} openedId={opened.id} />
+    </Modal>
+  )
+}
+
+/**
+ * Everything that happened to one bill, however it was opened: the versions it went through when
+ * it was edited, and every return taken against it, oldest first. The one that was opened is named
+ * and ringed, because with three documents on screen the first question is which of them is the
+ * one that was clicked.
+ */
+function Story({ story, openedId }: { story: BillHistory | null; openedId: string }) {
   const openedSection = useRef<HTMLElement>(null)
   const body = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    api.get<Invoice[]>(`/api/invoices/${opened.id}/history`)
-      .then(setVersions)
-      .catch((failure) => {
-        onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not load the earlier versions of this bill') })
-        setVersions([opened])
-      })
-  }, [opened, onToast])
-
-  // Take the focus off the list behind, and show the opened version.
+  // Take the focus off the list behind, and show the document that was opened.
   useEffect(() => {
     body.current?.focus()
     openedSection.current?.scrollIntoView({ block: 'nearest' })
-  }, [versions])
+  }, [story])
 
-  const chain = versions ?? [opened]
+  const versions = story?.versions ?? []
+  const returns = story?.returns ?? []
+  // One document on its own needs no headings: the dialog's own title already names it.
+  const several = versions.length + returns.length > 1
+
   return (
-    <Modal title={`Bill ${billNo(opened.invoiceNumber)}`} onClose={onClose} wide>
-      <div ref={body} tabIndex={-1} className="max-h-[70vh] space-y-4 overflow-auto outline-none">
-        {chain.length > 1 && (
-          <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            This bill was edited, so all {chain.length} versions are shown, oldest first.
-          </p>
-        )}
-        {chain.map((invoice) => {
-          const isOpened = invoice.id === opened.id
-          return (
-            <section
-              key={invoice.id}
-              ref={isOpened ? openedSection : undefined}
-              className={`rounded-lg border p-3 ${isOpened ? 'border-sky-400 ring-2 ring-sky-100' : 'border-slate-200'}`}
-            >
-              {chain.length > 1 && (
-                <h3 className="mb-2 flex flex-wrap items-baseline gap-2 font-semibold text-slate-800">
-                  Bill {billNo(invoice.invoiceNumber)}
-                  {isOpened && <span className="text-sky-700">(Opened)</span>}
-                  {invoice.status === 'CANCELLED' && (
-                    <span className="rounded bg-rose-100 px-1.5 py-0.5 text-xs font-medium text-rose-700">cancelled</span>
-                  )}
-                </h3>
-              )}
-              <BillDetails invoice={invoice} />
-            </section>
-          )
-        })}
-      </div>
-    </Modal>
+    <div ref={body} tabIndex={-1} className="max-h-[70vh] space-y-4 overflow-auto outline-none">
+      {versions.length > 1 && (
+        <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          This bill was edited, so all {versions.length} versions are shown, oldest first.
+        </p>
+      )}
+      {returns.length > 0 && versions.length > 0 && (
+        <p className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-900">
+          {returns.length === 1 ? 'A return was' : `${returns.length} returns were`} taken against this bill, so the
+          bill and everything that came back off it are shown together. A bill that has been returned against can no
+          longer be edited or cancelled.
+        </p>
+      )}
+      {versions.length === 0 && returns.length > 0 && (
+        <p className="rounded-md bg-slate-100 px-3 py-2 text-sm text-slate-600">
+          This return was taken without a bill, so there is nothing else to show against it.
+        </p>
+      )}
+      {versions.map((invoice) => {
+        const isOpened = invoice.id === openedId
+        return (
+          <section
+            key={invoice.id}
+            ref={isOpened ? openedSection : undefined}
+            className={`rounded-lg border p-3 ${isOpened ? 'border-sky-500 ring-2 ring-sky-100' : 'border-slate-200'}`}
+          >
+            {several && (
+              <h3 className="mb-2 flex flex-wrap items-baseline gap-2 font-semibold text-slate-800">
+                Bill {billNo(invoice.invoiceNumber)}
+                {isOpened && <span className="text-sky-700">(Opened)</span>}
+                {invoice.status === 'CANCELLED' && (
+                  <span className="rounded bg-rose-100 px-1.5 py-0.5 text-xs font-medium text-rose-700">cancelled</span>
+                )}
+              </h3>
+            )}
+            <BillDetails invoice={invoice} />
+          </section>
+        )
+      })}
+      {returns.map((note) => {
+        const isOpened = note.id === openedId
+        return (
+          <section
+            key={note.id}
+            ref={isOpened ? openedSection : undefined}
+            className={`rounded-lg border bg-rose-50/40 p-3 ${
+              isOpened ? 'border-sky-500 ring-2 ring-sky-100' : 'border-rose-200'}`}
+          >
+            {several && (
+              <h3 className="mb-2 flex flex-wrap items-baseline gap-2 font-semibold text-rose-900">
+                Return {billNo(note.creditNoteNumber)}
+                {isOpened && <span className="text-sky-700">(Opened)</span>}
+                {note.originalInvoiceNumber && (
+                  <span className="text-xs font-normal text-rose-700">
+                    against bill {billNo(note.originalInvoiceNumber)}
+                  </span>
+                )}
+              </h3>
+            )}
+            <CreditNoteDetails note={note} />
+          </section>
+        )
+      })}
+    </div>
   )
+}
+
+/**
+ * Asks for a document's whole story. When that cannot be had, the dialog still opens on the one
+ * document the list already handed it, because a manager who clicked a bill should see the bill
+ * rather than an empty box.
+ *
+ * <p>`alone` is deliberately not a dependency: it is built fresh on every render, and the document
+ * the dialog is for is already named by the url.
+ */
+function useStory(url: string, alone: BillHistory, onToast: Toast): BillHistory | null {
+  const [story, setStory] = useState<BillHistory | null>(null)
+  const fallback = useRef(alone)
+  fallback.current = alone
+  useEffect(() => {
+    let dropped = false
+    api.get<BillHistory>(url)
+      .then((loaded) => {
+        if (!dropped) {
+          setStory(loaded)
+        }
+      })
+      .catch((failure) => {
+        if (!dropped) {
+          onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not load the rest of this document’s history') })
+          setStory(fallback.current)
+        }
+      })
+    return () => {
+      dropped = true
+    }
+  }, [url, onToast])
+  return story
 }
 
 function BillDetails({ invoice }: { invoice: Invoice }) {
@@ -582,37 +658,48 @@ function BillDetails({ invoice }: { invoice: Invoice }) {
   )
 }
 
-function CreditNoteDialog({ note, onClose }: { note: CreditNote; onClose: () => void }) {
-  const body = useRef<HTMLDivElement>(null)
-  useEffect(() => body.current?.focus(), [])
+/**
+ * A return, with the bill it came off and anything else that came back against that bill. It used
+ * to show the credit note alone, which left a manager looking at a refund with no way to see what
+ * was sold in the first place without going and finding the bill by its number.
+ */
+function CreditNoteDialog({ note, onClose, onToast }: { note: CreditNote; onClose: () => void; onToast: Toast }) {
+  const story = useStory(`/api/returns/${note.id}/history`, { versions: [], returns: [note] }, onToast)
   return (
     <Modal title={`Return ${billNo(note.creditNoteNumber)}`} onClose={onClose} wide>
-      <div ref={body} tabIndex={-1} className="outline-none">
-        <div className="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-500">
-          <span>{new Date(note.issuedAt).toLocaleString()}</span>
-          <span>By {note.cashier}</span>
-          <span>Counter {note.terminalCode}</span>
-          <span className="num text-slate-400" title="The full number this return is stored and filed under">
-            {note.creditNoteNumber}
-          </span>
-          <span>{note.originalInvoiceNumber ? `Against bill ${note.originalInvoiceNumber}` : 'Without a bill'}</span>
-          {note.reason && <span>Reason: {note.reason}</span>}
-        </div>
-        <LinesTable lines={note.lines} taxInvoice={note.taxInvoice} />
-        <div className="mt-4 grid grid-cols-2 gap-6 text-sm">
-          <div>
-            <h4 className="mb-1 text-xs uppercase tracking-wide text-slate-400">Paid back by</h4>
-            {note.refunds.map((refund, index) => (
-              <div key={index} className="flex justify-between text-slate-600">
-                <span>{refund.mode}{refund.reference ? ` · ${refund.reference}` : ''}</span>
-                <span className="num">{rupees(refund.amountPaise)}</span>
-              </div>
-            ))}
-          </div>
-          <Totals document={note} label="Refund" />
-        </div>
-      </div>
+      <Story story={story} openedId={note.id} />
     </Modal>
+  )
+}
+
+/** One return, as its own dialog shows it and as a bill's history shows it underneath the bill. */
+function CreditNoteDetails({ note }: { note: CreditNote }) {
+  return (
+    <>
+      <div className="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-500">
+        <span>{new Date(note.issuedAt).toLocaleString()}</span>
+        <span>By {note.cashier}</span>
+        <span>Counter {note.terminalCode}</span>
+        <span className="num text-slate-400" title="The full number this return is stored and filed under">
+          {note.creditNoteNumber}
+        </span>
+        <span>{note.originalInvoiceNumber ? `Against bill ${note.originalInvoiceNumber}` : 'Without a bill'}</span>
+        {note.reason && <span>Reason: {note.reason}</span>}
+      </div>
+      <LinesTable lines={note.lines} taxInvoice={note.taxInvoice} />
+      <div className="mt-4 grid grid-cols-2 gap-6 text-sm">
+        <div>
+          <h4 className="mb-1 text-xs uppercase tracking-wide text-slate-400">Paid back by</h4>
+          {note.refunds.map((refund, index) => (
+            <div key={index} className="flex justify-between text-slate-600">
+              <span>{refund.mode}{refund.reference ? ` · ${refund.reference}` : ''}</span>
+              <span className="num">{rupees(refund.amountPaise)}</span>
+            </div>
+          ))}
+        </div>
+        <Totals document={note} label="Refund" />
+      </div>
+    </>
   )
 }
 

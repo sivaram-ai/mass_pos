@@ -20,6 +20,8 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3H | `WINDOWS` printer type: tills with no thermal printer bill through any installed driver printer, receipt-width on the sheet, QR drawn by the till | Done: 199 tests green, printed on a real Canon G3080 |
 | 3I | Printer chosen on screen (Settings > Printer): per-till `printer_settings` row seeded from `pos.properties`, device lists from the machine, connection swapped on the next job | Done |
 | 3J | A stopped item stays on Products and Stock, marked; Delete tombstones it and frees its code; both lists sort by code, name, stock, price, MRP or status, remembered per machine | Done: 270 tests green, driven in the browser |
+| 3K | Shop-wide theme: `theme_settings` row (active theme + saved library), 8 designed presets + the original as Default, admin-only builder with live preview, WCAG checks enforced on the server, import/export, counters follow within ~4 s | Done: driven in the browser |
+| 3L | Tills in this shop say who is billing on them and whether anyone is; an item the shop will not sell without stock is marked on the bill row as it is rung up; a bill and a return each open on the same story - the bill, its versions, and everything that came back off it, with the opened one named and ringed | Done: 347 tests green, driven in the browser |
 | L1 | Offline subscription licence per till: Ed25519-signed key bound to a hardware machine ID, warn/grace days, billing lock, Licence screen + banner, vendor `tools/license/LicenseTool.java` | Done: 172 tests green, real key verified on this PC |
 | 5A | Windows installer: jpackage + WiX 3.14, trimmed JDK 21 runtime, one file, `tools/build-installer.ps1` | Done: installed and run from the exe on this PC |
 | 5B | One folder per till, `%LOCALAPPDATA%\GoRockitPOS`, data in `data\`, with an automatic move from the old `MassPOS` folder | Done: 235 tests green, this PC's own till migrated |
@@ -46,6 +48,13 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
   `localStorage`; Billing re-reads both each time it comes back in front.
 - Every modal must take focus when it opens (autofocus input, button or list): a grid cell that
   keeps focus behind a modal would still receive arrows, Enter and Space.
+- **A mark on a bill row goes in the name column, never the quantity column.** The "low stock" mark
+  (an item at or below zero that the shop will not bill without stock, taken from the catalogue at
+  `pick` time and kept on the row as `lowStock`) first went beside the unit in the qty cell, where
+  the cell is `w-24`, the input is `w-full` inside a flex row, and a 56-px chip squeezed the
+  quantity box to nothing - the cashier could not see or type the quantity. Name is the one
+  flexible column. Its wrapper `div` is rendered whether or not there is a mark, so React never
+  tears the input out and rebuilds it under the cursor when an item is replaced on a row.
 - **The screen never computes tax.** `POST /api/sales/quote` prices the cart with the same code
   that issues the bill; duplicating the rounding rules in TypeScript would drift.
 - Keyboard map lives in `localStorage` (`masspos.shortcuts`), editable on the Settings screen.
@@ -122,6 +131,36 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
   and green `#0a8c4b`, sampled from its pixels.
 - The in-app browser pane cannot send a real Space keydown or edit text with Backspace; test those
   by dispatching a `KeyboardEvent` and with `form_input`.
+
+## Theme notes (frontend/src/theme.ts, src/main/java/com/masspos/theme)
+
+- **A theme is applied by redefining Tailwind's CSS variables, not by editing classes.** Tailwind 4
+  paints `bg-sky-600` as `var(--color-sky-600)`, so `applyTheme` sets the slate (neutral) and sky
+  (primary) scales, and for dark themes rose / amber / emerald, on `<html>`. The default theme sets
+  **nothing**: the page keeps the colours it was built with, so "keep the current look" is exact.
+- **Eleven colours per theme, everything else derived** (`varsFor`). Neutral scale: step 100 is the page,
+  900 the text, the steps between are blends, so borders and muted text follow the theme. A theme is
+  dark when `luminance(background) < 0.2` (same constant on the server, `ThemeRules`); dark themes tint
+  toward the page instead of white.
+- **Dark chrome is its own scope.** The header, the slide-in menu, the bill table heading and the
+  total bars carry `.nav-scope` (index.css): inside it the slate scale runs from the nav colour (900) to
+  its text (50), `white` is the nav text, and rose-300 / sky-200 / sky-500 are remapped. New dark bars
+  must get the class or a light theme will turn them into light bars with white text.
+- **Do not use `bg-white`, `text-white` on primary, or `bg-slate-800 text-white` for new UI.** Use
+  `bg-surface`, `text-on-primary`, `bg-secondary text-on-secondary` (registered with `@theme` in
+  index.css, defaulting to the old colours). `text-white` stays right on rose/amber fills. Fixed
+  status bars use `bg-[#be123c]` style values because the status scales flip in dark themes.
+- **Preview = real components in a scoped box.** `previewStyle(theme)` puts the theme's variables on one
+  `div.themed`; CSS variables cascade, so the preview needs no copy of any component.
+- **Server is the authority.** `ThemeRules` enforces shape and WCAG floors on every custom theme (apply and
+  save); built-ins are always the server's copy (`ThemePresets`, `themes/presets.json`), so a client cannot
+  rename a poor palette "high-contrast". `ThemeRulesTest` holds every preset to AA. Keep `PAIRS` in
+  `ThemeRules.java` and `theme.ts` in step. The Default is exempt (white on sky-600 is 4.1:1).
+- **Sync is polling, deliberately** (`themeSync.ts`): `GET /api/theme/revision` every 4 s and on window
+  focus; fetch the theme only when the number moves. Survives sleep, Wi-Fi drops and server restarts
+  with no reconnection code.
+- **Admin only to change; everyone reads.** The Theme screen is in every role's menu, with the builder not
+  rendered for non-admins. `theme_settings` is a new table (SQLite takes it on upgrade) and audited.
 
 ## Slice 3A/3B notes
 
@@ -258,6 +297,20 @@ folder and everything under it, so that is the only copy that survives one.
   Reserve the new number *before* cancelling: a cancelled row is frozen by the trigger, so its
   reason ("Edited, replaced by …") cannot be written afterwards. Paid amounts carry over in order;
   only the difference is collected (request `payments`) or refunded (`refundPaise`).
+- **A bill's history is its versions and its returns** (`SaleService.History`, `GET
+  /api/invoices/{id}/history`): the edit chain, and the credit notes taken against any bill in it.
+  Gathered over the whole chain, not the one version asked about - a bill that has been returned
+  against can no longer be edited, so in practice they hang off the last version, but somebody
+  opening the cancelled original still has to be told the goods came back and which document says
+  so. It is why that bill can no longer be edited or cancelled.
+  - **A return opens on the same story** (`GET /api/returns/{id}/history` →
+    `SaleService.historyOfReturn`, which walks to the original bill and hands back its history):
+    the bill it came off, that bill's versions, and every other return against it. A return taken
+    without a bill comes back on its own rather than as a 404 - "nothing was sold against this" is
+    an answer, not an error. One `Story` component in `Invoices.tsx` draws both ends, so a bill and
+    a return read the same, with the document that was opened named `(Opened)` and ringed. That
+    marking is not decoration: with three documents stacked in one dialog the first question is
+    which one was clicked.
 - **Returns are credit notes** (`CreditNote*`, `ReturnService`), own series `T1-2627-R0001`, manager
   only. Against a bill, each line's refund is a pro-rata share of that bill line, and the line's
   last return takes the exact remainder, so returns never exceed the bill. A bill with any credit
@@ -412,6 +465,18 @@ folder and everything under it, so that is the only copy that survives one.
   - **The counter number travels on the address** (`?counter=T2&agent=8767`), is kept per machine
     in `localStorage`, and goes out as `X-POS-Counter` on every request. The server acts on it
     once, at sign-in.
+- **"Who is at which till" is in memory, not in the database** (`TillPresence`). A till counts as in
+  use when both hold: somebody is signed in on it (an unrevoked `auth_token` for that code), and its
+  screen has posted `/api/clients/here` in the last three minutes. Every signed-in screen posts it
+  once a minute (`App.tsx`). Neither half is enough on its own - a machine switched off without
+  signing out would read as billing all night, and a machine sitting on the sign-in page is not
+  billing. The times are deliberately not persisted: `terminal` is `@Audited`, so a heartbeat a
+  minute a till would bury the shop's real changes under thousands of revisions a day. For the same
+  reason `ClientRegistry.stillThere` only writes `lastSeenAt` once the row is halfway to going
+  stale (`idleMinutes / 2`), which is early enough that a till at work never loses its place.
+- **The tills panel asks for itself** (`GET /api/settings/tills`, polled every 10 s). Re-reading the
+  whole of `/api/settings` would reset the shop-details form beside it - `Settings.tsx` resets the
+  form whenever the settings object changes - and throw away whatever is part way typed.
 - **`pos.clients.max` is the one switch for a shop server.** 0 (the default, and every till shipped
   so far) = loopback only, nothing on the network can reach it. Above 0, `ServerBinding` binds
   0.0.0.0 and `LocalApiGuard` widens its Host check from loopback to this machine's own addresses

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, downloadCsv, fieldErrorsOf, messageOfFailure, uploadCsv } from '../api'
-import type { Role, SettingsView, ShopSettingsForm } from '../types'
+import type { Role, SettingsView, ShopSettingsForm, TerminalView } from '../types'
 import { Banner, Button, Empty, errorFor, Field, inputClass, Panel } from '../components/ui'
 import PrinterPanel from '../components/PrinterPanel'
 import DatabasePanel from '../components/DatabasePanel'
@@ -21,6 +21,12 @@ const FIELD_LABELS: Record<string, string> = {
   servicePhone: 'Service phone',
   serviceEmail: 'Service email',
 }
+
+/**
+ * How often the list of tills asks again. Screens say "still here" every minute and fall idle after
+ * three, so a few seconds here is enough for the panel to keep up without asking for no reason.
+ */
+const TILLS_REFRESH_MS = 10 * 1000
 
 /** `address[1]` → "Address line 2", in the same words the form uses. */
 function labelOf(field: string): string {
@@ -327,42 +333,90 @@ export default function Settings({ role, settings, onSaved, onToast }: {
         </div>
       </Panel>
 
-      <Panel title="Tills in this shop" className="xl:col-span-2">
-        <p className="mb-3 text-xs text-slate-400">
-          The server registers itself from its own pos.properties; a counter registers itself when somebody
-          signs in on it, under the number and name set in its own settings window. The one you are using is
-          marked.
-        </p>
-        <table className="w-full text-sm">
-          <thead className="text-xs uppercase tracking-wide text-slate-400">
-            <tr>
-              <th className="py-1 text-left">Code</th>
-              <th className="py-1 text-left">Name</th>
-              <th className="py-1 text-left">Floor / area</th>
-              <th className="py-1 text-left">Role</th>
-              <th className="py-1 text-left">Last seen</th>
-            </tr>
-          </thead>
-          <tbody>
-            {settings.terminals.map((terminal) => (
-              <tr key={terminal.code} className="border-t border-slate-100">
-                <td className="num py-1.5 font-medium">
-                  {terminal.code}
-                  {terminal.code === settings.thisTerminal.code && (
-                    <span className="ml-2 rounded bg-sky-100 px-1.5 py-0.5 text-xs text-sky-700">this machine</span>
-                  )}
-                </td>
-                <td className="py-1.5">{terminal.name}</td>
-                <td className="py-1.5 text-slate-500">{terminal.section || '—'}</td>
-                <td className="py-1.5 text-slate-500">{terminal.type}</td>
-                <td className="py-1.5 text-slate-500">
-                  {terminal.lastSeenAt ? new Date(terminal.lastSeenAt).toLocaleString() : '—'}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Panel>
+      <TillsPanel tills={settings.terminals} thisTill={settings.thisTerminal.code} />
     </div>
+  )
+}
+
+/**
+ * Every till in the shop and what it is doing. It asks again every few seconds, because "who is
+ * billing right now" is worth nothing a minute later - and asks on its own rather than through the
+ * settings the screen was given, which would throw away whatever is part way typed into the form.
+ */
+function TillsPanel({ tills, thisTill }: { tills: TerminalView[]; thisTill: string }) {
+  const [rows, setRows] = useState(tills)
+
+  useEffect(() => {
+    let stopped = false
+    const refresh = () => {
+      api.get<TerminalView[]>('/api/settings/tills')
+        .then((fresh) => {
+          if (!stopped) {
+            setRows(fresh)
+          }
+        })
+        .catch(() => {
+          // Keep what is on screen; the next one in a few seconds tries again.
+        })
+    }
+    refresh()
+    const timer = setInterval(refresh, TILLS_REFRESH_MS)
+    return () => {
+      stopped = true
+      clearInterval(timer)
+    }
+  }, [])
+
+  return (
+    <Panel title="Tills in this shop" className="xl:col-span-2">
+      <p className="mb-3 text-xs text-slate-400">
+        The server registers itself from its own pos.properties; a counter registers itself when somebody
+        signs in on it, under the number and name set in its own settings window. The one you are using is
+        marked. A till is billing while somebody is signed in on it and its screen is still answering.
+      </p>
+      <table className="w-full text-sm">
+        <thead className="text-xs uppercase tracking-wide text-slate-400">
+          <tr>
+            <th className="py-1 text-left">Code</th>
+            <th className="py-1 text-left">Name</th>
+            <th className="py-1 text-left">Floor / area</th>
+            <th className="py-1 text-left">Role</th>
+            <th className="py-1 text-left">Status</th>
+            <th className="py-1 text-left">Staff</th>
+            <th className="py-1 text-left">Last seen</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((terminal) => (
+            <tr key={terminal.code} className="border-t border-slate-100">
+              <td className="num py-1.5 font-medium">
+                {terminal.code}
+                {terminal.code === thisTill && (
+                  <span className="ml-2 rounded bg-sky-100 px-1.5 py-0.5 text-xs text-sky-700">this machine</span>
+                )}
+              </td>
+              <td className="py-1.5">{terminal.name}</td>
+              <td className="py-1.5 text-slate-500">{terminal.section || '—'}</td>
+              <td className="py-1.5 text-slate-500">{terminal.type}</td>
+              <td className="py-1.5">
+                {terminal.inUse ? (
+                  <span className="inline-flex items-center gap-1.5 font-medium text-emerald-700">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500" aria-hidden />Billing now
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 text-slate-400">
+                    <span className="h-2 w-2 rounded-full bg-slate-300" aria-hidden />Idle
+                  </span>
+                )}
+              </td>
+              <td className="py-1.5">{terminal.staff ?? <span className="text-slate-400">—</span>}</td>
+              <td className="py-1.5 text-slate-500">
+                {terminal.lastSeenAt ? new Date(terminal.lastSeenAt).toLocaleString() : '—'}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Panel>
   )
 }

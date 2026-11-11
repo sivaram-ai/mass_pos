@@ -21,10 +21,12 @@ public class ClientsController {
 
     private final ClientRegistry registry;
     private final CurrentCounter counter;
+    private final TillPresence presence;
 
-    public ClientsController(ClientRegistry registry, CurrentCounter counter) {
+    public ClientsController(ClientRegistry registry, CurrentCounter counter, TillPresence presence) {
         this.registry = registry;
         this.counter = counter;
+        this.presence = presence;
     }
 
     /**
@@ -51,14 +53,17 @@ public class ClientsController {
     }
 
     /**
-     * "I am still here." A counter calls this while somebody is working on it, so its place is
-     * only given up once the machine has really gone quiet. Cheap on purpose: one row touched.
+     * "I am still here." Every signed-in screen calls this on a timer, so the shop can see which
+     * tills somebody is actually standing at and a counter's place is only given up once the
+     * machine has really gone quiet. Cheap on purpose: usually nothing but a map entry.
      */
     @PostMapping("/here")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void stillThere() {
         AuthContext.require();
-        registry.stillThere(counter.code());
+        String here = counter.code();
+        presence.heard(here);
+        registry.stillThere(here);
     }
 
     /**
@@ -70,5 +75,6 @@ public class ClientsController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void release(@org.springframework.web.bind.annotation.PathVariable String code) {
         registry.release(code);
+        presence.gone(code);
     }
 }

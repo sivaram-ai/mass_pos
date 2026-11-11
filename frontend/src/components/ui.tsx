@@ -8,7 +8,7 @@ export function Panel({ title, actions, children, className = '' }: {
   className?: string
 }) {
   return (
-    <section className={`rounded-lg border border-slate-200 bg-white shadow-sm ${className}`}>
+    <section className={`rounded-lg border border-slate-200 bg-surface shadow-sm ${className}`}>
       {(title || actions) && (
         <header className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-2">
           <h2 className="text-sm font-semibold text-slate-700">{title}</h2>
@@ -34,8 +34,8 @@ type ButtonProps = {
 
 export function Button({ children, onClick, type = 'button', tone = 'default', hint, disabled, title, className = '' }: ButtonProps) {
   const tones = {
-    primary: 'bg-sky-600 text-white hover:bg-sky-500 disabled:bg-slate-300',
-    default: 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 disabled:text-slate-400',
+    primary: 'bg-sky-600 text-on-primary hover:bg-sky-500 disabled:bg-slate-300',
+    default: 'bg-surface text-slate-700 border border-slate-300 hover:bg-slate-50 disabled:text-slate-400',
     danger: 'bg-rose-600 text-white hover:bg-rose-500 disabled:bg-slate-300',
     ghost: 'text-slate-600 hover:bg-slate-100',
   }
@@ -139,9 +139,9 @@ export function Modal({ title, children, onClose, wide, size }: {
   }, [onClose])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={onClose}>
       <div
-        className={`w-full ${width} rounded-lg bg-white shadow-xl`}
+        className={`w-full ${width} rounded-lg bg-surface shadow-xl`}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header className="flex items-center justify-between border-b border-slate-200 px-4 py-3">

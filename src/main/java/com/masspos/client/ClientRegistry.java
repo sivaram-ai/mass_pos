@@ -102,11 +102,23 @@ public class ClientRegistry {
         return code;
     }
 
-    /** Keeps a counter's place while it is working, so its slot is only freed once it goes quiet. */
+    /**
+     * Keeps a counter's place while it is working, so its slot is only freed once it goes quiet.
+     *
+     * <p>The row is only touched once it is halfway to going stale, not on every call. Screens say
+     * "still here" every minute; {@code terminal} is audited, so writing each one would put a
+     * revision a minute a till into the trail the shop's real changes have to be found in. Half the
+     * idle window is early enough that a till at work never loses its place, and rare enough that
+     * the trail still reads.
+     */
     @Transactional
     public void stillThere(String code) {
-        terminals.findByCode(code).ifPresent(terminal ->
-                terminal.describe(terminal.getName(), terminal.getSection(), terminal.getType(), Instant.now()));
+        Instant now = Instant.now();
+        Instant refreshAfter = now.minus(clients.idleMinutes() / 2, ChronoUnit.MINUTES);
+        terminals.findByCode(code)
+                .filter(terminal -> terminal.getLastSeenAt() == null || terminal.getLastSeenAt().isBefore(refreshAfter))
+                .ifPresent(terminal ->
+                        terminal.describe(terminal.getName(), terminal.getSection(), terminal.getType(), now));
     }
 
     /**

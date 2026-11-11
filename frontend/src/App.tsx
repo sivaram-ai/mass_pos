@@ -10,11 +10,13 @@ import Invoices from './screens/Invoices'
 import Reports from './screens/Reports'
 import Settings from './screens/Settings'
 import Users from './screens/Users'
+import ThemeSettings from './screens/ThemeSettings'
+import { useThemeSync } from './themeSync'
 import License, { LicenseBanner } from './screens/License'
 import { Banner, isModalOpen } from './components/ui'
 import { MENU_KEY, useScreenKeys } from './shortcuts'
 
-type Screen = 'billing' | 'products' | 'stock' | 'invoices' | 'reports' | 'users' | 'settings' | 'license'
+type Screen = 'billing' | 'products' | 'stock' | 'invoices' | 'reports' | 'users' | 'theme' | 'settings' | 'license'
 
 const SCREEN_KEY = 'masspos.screen'
 
@@ -36,6 +38,13 @@ const rememberedScreen = remembered()
 /** Often enough that a till left on overnight shows the lapse soon after midnight. */
 const LICENSE_REFRESH_MS = 10 * 60 * 1000
 
+/**
+ * How often a signed-in screen tells the server it is still there, which is how the shop's list of
+ * tills knows which ones somebody is standing at. A minute is cheap - the server usually answers it
+ * out of memory without touching the database - and three missed words is what marks a till idle.
+ */
+const STILL_HERE_MS = 60 * 1000
+
 /** ADMIN reaches everything; the rest see only what their job needs. */
 const SCREENS: { id: Screen; label: string; roles: Role[] }[] = [
   { id: 'billing', label: 'Billing', roles: ['CASHIER', 'MANAGER'] },
@@ -44,6 +53,9 @@ const SCREENS: { id: Screen; label: string; roles: Role[] }[] = [
   { id: 'stock', label: 'Stock', roles: ['MANAGER'] },
   { id: 'reports', label: 'Reports', roles: ['MANAGER', 'AUDITOR'] },
   { id: 'users', label: 'Staff', roles: ['MANAGER', 'AUDITOR'] },
+  // Everyone may look at the shop's theme; only an administrator may change it (the screen enforces
+  // that, and so does the server).
+  { id: 'theme', label: 'Theme', roles: ['CASHIER', 'MANAGER', 'AUDITOR'] },
   { id: 'settings', label: 'Settings', roles: [] },
   { id: 'license', label: 'Licence', roles: [] },
 ]
@@ -93,6 +105,7 @@ export default function App() {
   }, [user, refreshSettings])
 
   const signedIn = Boolean(user && !user.mustChangePin)
+  const theme = useThemeSync(signedIn)
   useEffect(() => {
     if (!signedIn) {
       return
@@ -108,6 +121,26 @@ export default function App() {
     return () => {
       clearInterval(timer)
       window.removeEventListener(LICENSE_CHANGED, refresh)
+    }
+  }, [signedIn])
+
+  // "This till is being used, by me." Also on coming back to the window, so a machine that was
+  // asleep or in the background says so at once rather than up to a minute later.
+  useEffect(() => {
+    if (!signedIn) {
+      return
+    }
+    const sayStillHere = () => {
+      // A till that cannot reach the server has nothing to report and nothing to show for it:
+      // whatever is wrong is already on screen from the call the cashier made themselves.
+      api.post('/api/clients/here').catch(() => {})
+    }
+    sayStillHere()
+    const timer = setInterval(sayStillHere, STILL_HERE_MS)
+    window.addEventListener('focus', sayStillHere)
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('focus', sayStillHere)
     }
   }, [signedIn])
 
@@ -197,7 +230,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen flex-col">
-      <header className="flex h-12 shrink-0 items-center gap-4 overflow-hidden whitespace-nowrap bg-slate-900 px-3 text-slate-100">
+      <header className="nav-scope flex h-12 shrink-0 items-center gap-4 overflow-hidden whitespace-nowrap bg-slate-900 px-3 text-slate-100">
         <button
           type="button"
           onClick={() => setMenuOpen(true)}
@@ -308,6 +341,9 @@ export default function App() {
         {current === 'stock' && <Stock onToast={setToast} />}
         {current === 'reports' && <Reports onToast={setToast} />}
         {current === 'users' && <Users role={user.role} onToast={setToast} />}
+        {current === 'theme' && (
+          <ThemeSettings role={user.role} view={theme.view} onChanged={theme.take} onToast={setToast} />
+        )}
         {current === 'license' && <License status={license} onChanged={setLicense} onToast={setToast} />}
         {current === 'settings' && (
           <Settings
@@ -335,7 +371,7 @@ function Clock() {
   return (
     <div className="flex shrink-0 items-center gap-2">
       <span className="num hidden text-sm font-medium text-slate-200 md:inline">{billDate(now)}</span>
-      <span className="num rounded bg-slate-800 px-2 py-0.5 font-mono text-sm font-semibold text-emerald-300">
+      <span className="num rounded bg-slate-800 px-2 py-0.5 font-mono text-sm font-semibold text-accent">
         {clockTime(now)}
       </span>
     </div>
@@ -388,13 +424,13 @@ function MenuDrawer({ open, shopName, user, items, current, onPick, onClose, onS
   return (
     <div className={`fixed inset-0 z-50 ${open ? '' : 'pointer-events-none'}`} aria-hidden={!open}>
       <div
-        className={`absolute inset-0 bg-slate-900/50 transition-opacity duration-200 ${open ? 'opacity-100' : 'opacity-0'}`}
+        className={`absolute inset-0 bg-black/50 transition-opacity duration-200 ${open ? 'opacity-100' : 'opacity-0'}`}
         onMouseDown={onClose}
       />
       <nav
         ref={panel}
         inert={!open}
-        className={`absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col bg-slate-900 text-slate-100 shadow-2xl transition-transform duration-200 ${
+        className={`nav-scope absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col bg-slate-900 text-slate-100 shadow-2xl transition-transform duration-200 ${
           open ? 'translate-x-0' : '-translate-x-full'}`}
       >
         <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">

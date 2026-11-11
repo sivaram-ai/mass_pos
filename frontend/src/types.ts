@@ -254,6 +254,14 @@ export interface ReturnResponse {
   printError: string | null
 }
 
+/** Everything that has happened to one bill: the versions it went through, and what came back. */
+export interface BillHistory {
+  /** Oldest first; just the bill itself when it was never edited. */
+  versions: Invoice[]
+  /** Returns taken against any version, oldest first. */
+  returns: CreditNote[]
+}
+
 export interface HeldBill {
   id: string
   label: string
@@ -297,8 +305,13 @@ export interface TerminalView {
   name: string
   section: string
   type: 'MASTER' | 'COUNTER'
+  /** False for a till the shop has retired; it stays listed because its code is on bills. */
   active: boolean
   lastSeenAt: string | null
+  /** Somebody is signed in on it and its screen has checked in within the last few minutes. */
+  inUse: boolean
+  /** Who that is, or null when nobody is at it. */
+  staff: string | null
 }
 
 export interface SettingsView {

@@ -178,11 +178,37 @@ movement, so the count simply goes below zero.
 | **Cashier** | Bill, park and resume, reprint, open the drawer with a reason |
 | **Manager** | Also products, prices, stock, cancelling or editing a bill, returns and refunds, day and GST reports |
 | **Auditor** | Read-only: every report, GST figures and the audit trail. Cannot bill or edit. |
-| **Admin** | Everything, plus staff accounts and shop settings |
+| **Admin** | Everything, plus staff accounts, shop settings and the shop's theme |
 
 Signing in gives a token that **never expires** — a cashier stays signed in until Log out, which is
 what a shop floor needs. Changing a PIN signs that person out of every *other* till. A new or reset
 account must choose its own PIN before it can bill, so bills are never taken under a handover PIN.
+
+## Theme: one look for the whole shop
+
+**Theme** in the menu holds the shop's colour scheme. Everyone signed in can open it and see the
+theme in use; only an **Admin** can change it (the controls are not drawn for anyone else, and the
+server refuses the calls regardless).
+
+- **Gallery.** The original look is kept as **Default**. Beside it: Light, Dark, Modern Blue,
+  Emerald Green, Royal Red, Purple Luxe, Minimal Grey and High Contrast (black, white and signal
+  yellow, WCAG AAA). Click one to load it into the builder.
+- **Builder.** Eleven colours with a picker and a hex box each: primary, text on primary, secondary,
+  text on secondary, accent, page background, cards and dialogs, text, header and menu, text on the
+  header, and the open menu item. Tints, muted text, borders and the status colours are derived.
+  Changing a colour of a built-in makes a theme of your own under a new name.
+- **Live preview.** A miniature billing screen (real buttons, table, banners, menu) is painted in
+  the theme being built, beside the builder. Nothing on any real screen changes until **Apply**.
+- **Readability.** Eight colour pairs are measured against WCAG 2.1 (4.5:1 for text, 3:1 for
+  controls). A theme that falls short cannot be applied or saved - the server refuses it too, so an
+  imported or hand-edited file cannot get round the check.
+- **Import / export.** Export writes one theme as a `.gorockit-theme.json` file; *Back up all*
+  writes every saved theme. Import reads either: one theme opens in the builder to be checked,
+  several are added to the shop's saved themes. An imported theme always gets a new id.
+- **Every counter, in a few seconds.** The theme is stored in the server's database. Each screen asks
+  for its revision number every 4 seconds (and when its window is brought forward) and fetches the
+  theme when it has changed - no restart, no sign-out. The sign-in screen is the brand's own and is
+  never restyled.
 
 ## Settings: what lives where
 
@@ -267,6 +293,7 @@ is not a loopback name are refused. Together these stop a web page open on the t
 | Returns | `GET /api/invoices/{id}/returnable`, `POST /api/returns/quote`, `POST /api/returns`, `GET /api/returns`, `GET /api/returns/lookup?number=`, `GET /api/returns/{id}`, `POST /api/returns/{id}/receipt` |
 | Held bills | `GET/POST /api/holds`, `DELETE /api/holds/{id}` |
 | Reports | `GET /api/reports/day?from=&to=`, `/gst`, `/audit` |
+| Theme | `GET /api/theme`, `GET /api/theme/revision` (any signed-in user), `PUT /api/theme/active`, `PUT /api/theme/library`, `DELETE /api/theme/library/{id}` (admin) |
 | Settings | `GET/PUT /api/settings`, `GET /api/settings/export` (CSV out), `POST /api/settings/import` (CSV into the form, saved by PUT) |
 | Licence | `GET /api/license` (any signed-in user), `POST /api/license` (admin: install or renew a key) |
 | Hardware | `GET /api/hardware/printer/status`, `/printer/settings`, `/serial-ports`, `PUT /api/hardware/printer/settings`, `POST /api/hardware/printer/test-page`, `/drawer/open` |

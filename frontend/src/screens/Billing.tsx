@@ -56,9 +56,19 @@ const SEARCH_COLS: Col[] = ['code', 'name']
 
 /**
  * A bill row. On a return against a bill, `originalLineNo` ties it to the bill's line and `maxMilli`
- * is how much of that line can still come back.
+ * is how much of that line can still come back. `lowStock` is what the catalogue said about the item
+ * at the moment it was rung up, which is when the cashier can still do something about it.
  */
-type Row = CartLine & { key: number; originalLineNo?: number; maxMilli?: number }
+type Row = CartLine & { key: number; originalLineNo?: number; maxMilli?: number; lowStock?: boolean }
+
+/**
+ * An item the shelf has run out of, and that this shop will not sell without stock. Marked on the
+ * row as it is rung up: the sale may still be refused when the bill is taken, and a cashier who
+ * sees it now can fetch the item, correct the count, or tell the customer before the queue grows.
+ * An item set to bill without stock is deliberately never marked - running at or below zero is how
+ * it is meant to be sold.
+ */
+const isLowStock = (product: Product) => !product.billWithoutStock && product.stockMilli <= 0
 
 /** What the grid is building: a new bill, a correction of today's bill, or goods coming back. */
 type Mode =
@@ -560,6 +570,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
         quantityMilli: ONE_UNIT,
         discountPaise: 0,
         unitPricePaise: product.sellingPricePaise,
+        lowStock: isLowStock(product),
       }]
       at = updated.length - 1
     } else {
@@ -571,6 +582,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
         unit: product.unit,
         discountPaise: 0,
         unitPricePaise: product.sellingPricePaise,
+        lowStock: isLowStock(product),
       } : line))
     }
     replaceLines(updated)
@@ -1455,7 +1467,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
           ${col === 'name' ? 'font-medium uppercase' : ''} ${col === 'code' ? 'uppercase' : ''} ${readOnly ? 'cursor-default' : ''}
           ${bad ? 'border-rose-500 bg-rose-50 ring-2 ring-rose-200'
             : needsRate ? 'border-amber-400 bg-amber-50 placeholder:text-amber-700'
-              : 'border-transparent focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-200'}
+              : 'border-transparent focus:border-sky-500 focus:bg-surface focus:ring-2 focus:ring-sky-200'}
           disabled:cursor-not-allowed disabled:opacity-40`}
       />
     )
@@ -1470,7 +1482,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
       {active && headerSlot && createPortal(
         <>
           {mode.kind === 'edit' ? (
-            <span className="shrink-0 rounded-full bg-amber-400 px-2.5 py-0.5 text-xs font-semibold text-amber-950">
+            <span className="shrink-0 rounded-full bg-[#fbbf24] px-2.5 py-0.5 text-xs font-semibold text-[#451a03]">
               Editing bill {billNo(mode.invoice.invoiceNumber)}
             </span>
           ) : mode.kind === 'return' ? (
@@ -1500,7 +1512,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
             <span className="hidden lg:inline">
               Last amount <span className="num font-medium text-white">{lastBill ? rupees(lastBill.grandTotalPaise) : '—'}</span>
               {lastBill && lastBill.changePaise > 0 && (
-                <span className="num ml-2 text-emerald-300">change {rupees(lastBill.changePaise)}</span>
+                <span className="num ml-2 text-accent">change {rupees(lastBill.changePaise)}</span>
               )}
             </span>
           </div>
@@ -1538,7 +1550,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
       )}
 
       {asksForBillInfo && (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-slate-200 bg-surface px-3 py-2 shadow-sm">
           {settings?.shop.askForTable && (
             <label className="flex items-center gap-2 text-sm">
               <span className="font-medium text-slate-500">Table</span>
@@ -1610,7 +1622,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
                 }}
               />
               {supplierOpen && supplierMatches.length > 0 && (
-                <ul className="absolute left-20 top-full z-30 mt-1 max-h-52 w-60 overflow-y-auto rounded-md border border-slate-200 bg-white shadow-lg">
+                <ul className="absolute left-20 top-full z-30 mt-1 max-h-52 w-60 overflow-y-auto rounded-md border border-slate-200 bg-surface shadow-lg">
                   {supplierMatches.slice(0, 25).map((one, at) => (
                     <li key={one.supplierId}>
                       <button
@@ -1641,7 +1653,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
       )}
 
       {/* The bill */}
-      <section className="min-h-64 flex-1 overflow-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+      <section className="min-h-64 flex-1 overflow-auto rounded-lg border border-slate-200 bg-surface shadow-sm">
         <table className="w-full min-w-[46rem] table-fixed border-collapse text-sm">
           <colgroup>
             <col className="w-12" />
@@ -1654,7 +1666,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
             <col className="w-24" />
             <col className="w-32" />
           </colgroup>
-          <thead className="sticky top-0 z-10 bg-slate-800 text-xs uppercase tracking-wide text-slate-200">
+          <thead className="nav-scope sticky top-0 z-10 bg-slate-800 text-xs uppercase tracking-wide text-slate-200">
             <tr>
               <th className="px-2 py-2 text-left font-medium">S.No</th>
               <th className="py-2" aria-label="Delete" />
@@ -1675,7 +1687,13 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
                 <tr key={line.key}
                     className={`border-b border-slate-100 transition-colors duration-500 ${
                       foldedKey === line.key ? 'bg-amber-100' : activeRow ? 'bg-sky-50' : index % 2 ? 'bg-slate-50/60' : ''}`}>
-                  <td className="num px-2 text-slate-500">{index + 1}</td>
+                  {/* An out-of-stock row is marked where the eye already is - the serial it is
+                      rung up under, and the quantity being typed - rather than behind the row,
+                      which the highlight on the row being filled in would paint over. */}
+                  <td className={`num px-2 ${line.lowStock ? 'font-semibold text-rose-600' : 'text-slate-500'}`}
+                      title={line.lowStock ? `${line.name} is out of stock` : undefined}>
+                    {index + 1}
+                  </td>
                   <td className="text-center">
                     <button
                       type="button"
@@ -1690,7 +1708,23 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
                     </button>
                   </td>
                   <td className="px-1 py-0.5">{cellInput(index, 'code')}</td>
-                  <td className="px-1 py-0.5">{cellInput(index, 'name')}</td>
+                  {/* The mark goes beside the name, the one column with room to spare: in the
+                      narrow qty cell it squeezed the quantity box down to nothing. The wrapper is
+                      always here, mark or no mark, so the input is never torn out and rebuilt
+                      under the cursor when an item is replaced on a row. */}
+                  <td className="px-1 py-0.5">
+                    <div className="flex items-center gap-1">
+                      <div className="min-w-0 flex-1">{cellInput(index, 'name')}</div>
+                      {line.lowStock && (
+                        <span
+                          title={`${line.name} is out of stock, and this shop does not bill it without stock`}
+                          className="shrink-0 whitespace-nowrap rounded bg-rose-100 px-1.5 py-0.5 text-xs font-medium text-rose-700"
+                        >
+                          low stock
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   {gst && (
                     <td className="num px-2 text-right text-xs text-slate-400">
                       {priced ? percent(priced.gstRateBp) : ''}
@@ -1748,7 +1782,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
       {/* Shortcut list (clickable) · items and quantity · total · take bill */}
       <div className="flex shrink-0 flex-wrap items-stretch gap-2">
         {showShortcuts && (
-          <section className="min-w-[18rem] flex-1 rounded-lg border border-slate-200 bg-white px-1.5 py-1 shadow-sm">
+          <section className="min-w-[18rem] flex-1 rounded-lg border border-slate-200 bg-surface px-1.5 py-1 shadow-sm">
             <ul className="grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] gap-x-1 text-[11px] leading-4 text-slate-600 [&_kbd]:py-0 [&_kbd]:text-[10px] [&_kbd]:leading-[14px]">
               {(Object.keys(SHORTCUT_LABELS) as ShortcutAction[]).map((action) => (
                 <li key={action}>
@@ -1775,7 +1809,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
           </section>
         )}
 
-        <section className={`flex items-stretch gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1 shadow-sm ${
+        <section className={`flex items-stretch gap-2 rounded-lg border border-slate-200 bg-surface px-2 py-1 shadow-sm ${
           showShortcuts ? 'w-[30rem] max-w-full' : 'ml-auto w-full max-w-[36rem]'}`}>
           <dl className="grid shrink-0 grid-cols-[auto_auto] content-center gap-x-2 text-xs leading-4">
             <dt className="text-slate-500">Items</dt>
@@ -1784,7 +1818,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
             <dd className="num text-right font-semibold text-slate-800">{quantity(totalQuantity)}</dd>
           </dl>
           <div className={`flex min-w-0 flex-1 items-center justify-between gap-2 rounded-md px-2.5 py-1 text-white ${
-            mode.kind === 'return' ? 'bg-rose-700' : mode.kind === 'edit' ? 'bg-amber-800' : 'bg-slate-900'}`}>
+            mode.kind === 'return' ? 'bg-[#be123c]' : mode.kind === 'edit' ? 'bg-[#92400e]' : 'nav-scope bg-slate-900'}`}>
             <div className="min-w-0 leading-4">
               <div className="text-xs text-white/70">
                 {mode.kind === 'return' ? 'Refund' : mode.kind === 'edit' ? 'New total' : 'Total'}
@@ -1928,7 +1962,7 @@ function LookupList({ anchor, found, highlight, itemRefs, onHover, onPick }: {
   }
   return (
     <div
-      className="fixed z-40 overflow-auto rounded-md border border-slate-300 bg-white shadow-xl"
+      className="fixed z-40 overflow-auto rounded-md border border-slate-300 bg-surface shadow-xl"
       style={{ left: box.left, top: box.top, bottom: box.bottom, maxHeight: box.maxHeight, width: Math.min(620, window.innerWidth - 16) }}
       onMouseDown={(event) => event.preventDefault()}
     >
@@ -1957,7 +1991,7 @@ function LookupList({ anchor, found, highlight, itemRefs, onHover, onPick }: {
                 }}
                 onMouseEnter={() => onHover(index)}
                 onClick={() => onPick(product)}
-                className={`cursor-pointer ${index === highlight ? 'bg-sky-600 text-white' : 'hover:bg-sky-50'}`}
+                className={`cursor-pointer ${index === highlight ? 'bg-sky-600 text-on-primary' : 'hover:bg-sky-50'}`}
               >
                 <td className="num px-3 py-1.5 uppercase">{product.sku}</td>
                 <td className="px-3 py-1.5 font-medium uppercase">{product.name}</td>
@@ -2057,7 +2091,7 @@ function HeldBillsDialog({ holds, onClose, onResume, onDelete }: {
                 }}
                 onMouseEnter={() => setHighlight(index)}
                 className={`flex items-center justify-between gap-4 rounded-md px-3 py-2 ${
-                  index === at ? 'bg-sky-600 text-white' : ''}`}
+                  index === at ? 'bg-sky-600 text-on-primary' : ''}`}
               >
                 <div className="min-w-0">
                   <div className="truncate font-medium">{held.label}</div>
@@ -2073,7 +2107,7 @@ function HeldBillsDialog({ holds, onClose, onResume, onDelete }: {
                     tabIndex={-1}
                     onClick={() => void run(onResume, held)}
                     className={`rounded-md px-3 py-1.5 text-sm font-medium ${
-                      index === at ? 'bg-white text-sky-700' : 'bg-sky-600 text-white hover:bg-sky-500'}`}
+                      index === at ? 'bg-surface text-sky-700' : 'bg-sky-600 text-on-primary hover:bg-sky-500'}`}
                   >
                     Resume
                   </button>
@@ -2083,7 +2117,7 @@ function HeldBillsDialog({ holds, onClose, onResume, onDelete }: {
                     aria-label={`Delete held bill ${held.label}`}
                     title="Delete (Delete key)"
                     onClick={() => void run(onDelete, held)}
-                    className={`rounded-md p-1.5 ${index === at ? 'text-white hover:bg-sky-500' : 'text-rose-500 hover:bg-rose-50'}`}
+                    className={`rounded-md p-1.5 ${index === at ? 'text-on-primary hover:bg-sky-500' : 'text-rose-500 hover:bg-rose-50'}`}
                   >
                     <TrashIcon />
                   </button>
@@ -2114,8 +2148,8 @@ function AutoFocusButton({ children, onClick, tone }: { children: string; onClic
           onClick()
         }
       }}
-      className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-white ${
-        tone === 'danger' ? 'bg-rose-600 hover:bg-rose-500' : 'bg-sky-600 hover:bg-sky-500'}`}
+      className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${
+        tone === 'danger' ? 'bg-rose-600 text-white hover:bg-rose-500' : 'bg-sky-600 text-on-primary hover:bg-sky-500'}`}
     >
       {children}
       <kbd>Enter</kbd>
@@ -2242,7 +2276,7 @@ function RefundDialog({ kind, due, total, defaultMode, number, saving, onClose, 
         }}
       >
         <div className={`flex items-baseline justify-between rounded-md px-4 py-3 text-white ${
-          kind === 'edit' ? 'bg-amber-800' : 'bg-rose-700'}`}>
+          kind === 'edit' ? 'bg-[#92400e]' : 'bg-[#be123c]'}`}>
           <span className="text-sm text-white/80">{due > 0 ? 'Give back' : 'Nothing to give back'}</span>
           <span className="num text-3xl font-semibold">{rupees(due)}</span>
         </div>
@@ -2280,7 +2314,7 @@ function RefundDialog({ kind, due, total, defaultMode, number, saving, onClose, 
             type="submit"
             disabled={saving}
             className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-white disabled:opacity-50 ${
-              kind === 'edit' ? 'bg-amber-700 hover:bg-amber-600' : 'bg-rose-600 hover:bg-rose-500'}`}
+              kind === 'edit' ? 'bg-[#b45309] hover:bg-[#d97706]' : 'bg-rose-600 hover:bg-rose-500'}`}
           >
             {saving ? 'Saving…' : kind === 'edit' ? 'Save edit' : `Refund ${rupees(due)}`}
             <kbd>Enter</kbd>
@@ -2311,7 +2345,7 @@ function ModeList({ modes, value, tone, onChange }: {
   tone: 'sky' | 'rose'
   onChange: (mode: PaymentMode) => void
 }) {
-  const chosen = tone === 'rose' ? 'border-rose-600 bg-rose-600 text-white' : 'border-sky-600 bg-sky-600 text-white'
+  const chosen = tone === 'rose' ? 'border-rose-600 bg-rose-600 text-white' : 'border-sky-600 bg-sky-600 text-on-primary'
   return (
     <div className="flex w-32 shrink-0 flex-col gap-1.5">
       <ul role="listbox" aria-label="Payment mode" className="flex flex-col gap-1.5">
@@ -2466,11 +2500,11 @@ function PaymentDialog({ due, title = 'Payment', confirmLabel = 'Take bill', ask
         <ModeList modes={MODES} value={mode} tone="sky" onChange={choose} />
 
         <div className="min-w-0 flex-1 space-y-3">
-          <div className="flex items-baseline justify-between rounded-md bg-slate-900 px-4 py-3 text-white">
+          <div className="flex items-baseline justify-between nav-scope rounded-md bg-slate-900 px-4 py-3 text-white">
             <span className="flex items-baseline gap-2 text-sm text-slate-300">
               {parts.length ? 'Still to pay' : 'Bill total'}
               {parcel && (
-                <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-bold text-amber-950">
+                <span className="rounded-full bg-[#fbbf24] px-2 py-0.5 text-xs font-bold text-[#451a03]">
                   PARCEL
                 </span>
               )}

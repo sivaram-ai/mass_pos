@@ -1,5 +1,17 @@
 @import "tailwindcss";
 
+/*
+ * Colours a theme sets beyond the palette. Each defaults to what the screens always used, so with no
+ * theme applied nothing changes. src/theme.ts redefines them (and the slate / sky scales) on <html>.
+ */
+@theme {
+  --color-surface: var(--color-white);
+  --color-secondary: var(--color-slate-800);
+  --color-on-secondary: var(--color-white);
+  --color-on-primary: var(--color-white);
+  --color-accent: var(--color-emerald-300);
+}
+
 /* A till runs one screen all day: dark chrome, bright working area, numbers that line up. */
 :root {
   color-scheme: light;
@@ -8,8 +20,8 @@
 body {
   margin: 0;
   font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
-  background: #f1f5f9;
-  color: #0f172a;
+  background: var(--page-bg, #f1f5f9);
+  color: var(--page-text, #0f172a);
   overscroll-behavior: none;
 }
 
@@ -24,7 +36,48 @@ kbd {
   font-size: 0.7rem;
   padding: 0.05rem 0.3rem;
   border-radius: 0.25rem;
-  border: 1px solid #cbd5e1;
-  background: #f8fafc;
-  color: #475569;
+  border: 1px solid var(--kbd-border, #cbd5e1);
+  background: var(--kbd-bg, #f8fafc);
+  color: var(--kbd-text, #475569);
+}
+
+/*
+ * The header, the slide-in menu and the bill table's heading are dark bars on a light page in the
+ * original look, and in a theme they follow the navigation colours instead. Inside one of them the
+ * slate greys run from the bar colour (900) up to its text (50), so every class already written there
+ * ("text-slate-300", "hover:bg-slate-800", "text-white") means "a step toward the text" whatever the
+ * bar is. Only a themed page has these variables; the original look is untouched.
+ */
+.themed .nav-scope {
+  --color-slate-50: var(--nav-s50);
+  --color-slate-100: var(--nav-s100);
+  --color-slate-200: var(--nav-s200);
+  --color-slate-300: var(--nav-s300);
+  --color-slate-400: var(--nav-s400);
+  --color-slate-500: var(--nav-s500);
+  --color-slate-600: var(--nav-s600);
+  --color-slate-700: var(--nav-s700);
+  --color-slate-800: var(--nav-s800);
+  --color-slate-900: var(--nav-s900);
+  --color-slate-950: var(--nav-s950);
+  --color-white: var(--nav-white);
+  --color-rose-300: var(--nav-danger);
+  --color-sky-200: var(--nav-accent);
+  --color-sky-500: var(--nav-accent);
+}
+
+.themed {
+  accent-color: var(--color-sky-600);
+}
+
+/* A visible focus ring on every theme, in the accent colour. */
+.themed :focus-visible {
+  outline-color: var(--color-sky-400);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }

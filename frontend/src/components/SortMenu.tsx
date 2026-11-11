@@ -62,7 +62,7 @@ export function SortMenu({ sort, onChange, onClose }: {
         aria-label="Sort by"
         aria-activedescendant={`sort-${sort.field}`}
         onKeyDown={onKeyDown}
-        className="absolute right-0 top-full z-50 mt-1 w-64 rounded-lg border border-slate-200 bg-white p-2 text-left shadow-xl outline-none"
+        className="absolute right-0 top-full z-50 mt-1 w-64 rounded-lg border border-slate-200 bg-surface p-2 text-left shadow-xl outline-none"
       >
         <p className="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Sort by</p>
         <div className="max-h-60 overflow-y-auto">
@@ -79,7 +79,7 @@ export function SortMenu({ sort, onChange, onClose }: {
                 aria-selected={isChosen}
                 onClick={() => onChange({ ...sort, field })}
                 className={`block w-full rounded-md px-2 py-1.5 text-left text-sm transition ${
-                  isChosen ? 'bg-sky-600 font-medium text-white' : 'text-slate-700 hover:bg-slate-100'}`}
+                  isChosen ? 'bg-sky-600 font-medium text-on-primary' : 'text-slate-700 hover:bg-slate-100'}`}
               >
                 {SORT_LABELS[field]}
               </button>
@@ -97,7 +97,7 @@ export function SortMenu({ sort, onChange, onClose }: {
                 aria-pressed={sort.dir === dir}
                 onClick={() => onChange({ ...sort, dir })}
                 className={`flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition ${
-                  sort.dir === dir ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+                  sort.dir === dir ? 'bg-secondary text-on-secondary' : 'text-slate-600 hover:bg-slate-100'}`}
               >
                 <kbd className="mr-1">{key}</kbd>{label}
               </button>

@@ -240,11 +240,26 @@ public class SaleService {
     }
 
     /**
-     * Every version of a bill that was edited, oldest first: back through the bills it replaced and
-     * on through the bills that replaced it. A bill never edited comes back on its own.
+     * Everything that has happened to one bill.
+     *
+     * @param versions every version it went through when it was edited, oldest first
+     * @param returns  the goods that came back against any of those versions, oldest first
+     */
+    public record History(List<InvoiceView> versions, List<CreditNoteView> returns) {
+    }
+
+    /**
+     * The whole story of a bill: back through the bills it replaced, on through the bills that
+     * replaced it, and the returns taken against any of them. A bill never edited and never
+     * returned against comes back on its own with nothing beside it.
+     *
+     * <p>The returns are gathered over the whole chain rather than the one version asked about. A
+     * bill that has been returned against can no longer be edited, so in practice they hang off the
+     * last version - but a shop opening the cancelled original should still be told the goods came
+     * back, and which document says so.
      */
     @Transactional(readOnly = true)
-    public List<InvoiceView> history(UUID invoiceId) {
+    public History history(UUID invoiceId) {
         Invoice opened = invoices.findById(invoiceId)
                 .orElseThrow(() -> new EntityNotFoundException("No bill " + invoiceId));
         java.util.LinkedList<Invoice> chain = new java.util.LinkedList<>(List.of(opened));
@@ -263,7 +278,29 @@ public class SaleService {
             }
             chain.addLast(later);
         }
-        return chain.stream().map(InvoiceView::of).toList();
+        List<CreditNoteView> returns = chain.stream()
+                .flatMap(invoice -> creditNotes.findByOriginalInvoiceIdOrderByIssuedAtAsc(invoice.getId()).stream())
+                .sorted(java.util.Comparator.comparing(CreditNote::getIssuedAt))
+                .map(CreditNoteView::of)
+                .toList();
+        return new History(chain.stream().map(InvoiceView::of).toList(), returns);
+    }
+
+    /**
+     * The same story, opened from the other end: the bill a return came off, every version of that
+     * bill, and every return taken against it - the one being looked at among them.
+     *
+     * <p>A return taken without a bill has nothing else to show, so it comes back on its own rather
+     * than as a refusal: "nothing was returned against a bill here" is an answer, not an error.
+     */
+    @Transactional(readOnly = true)
+    public History historyOfReturn(UUID creditNoteId) {
+        CreditNote note = creditNotes.findById(creditNoteId)
+                .orElseThrow(() -> new EntityNotFoundException("No return " + creditNoteId));
+        Invoice against = note.getOriginalInvoice();
+        return against == null
+                ? new History(List.of(), List.of(CreditNoteView.of(note)))
+                : history(against.getId());
     }
 
     /** Builds a complete, unpaid invoice under a reserved number: lines, tax and round-off. */

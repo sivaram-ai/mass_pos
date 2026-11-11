@@ -1,0 +1,90 @@
+[
+  {
+    "id": "light", "name": "Light",
+    "description": "Clean and bright, white navigation. Easy on a well-lit counter.",
+    "colors": {
+      "primary": "#2563eb", "onPrimary": "#ffffff",
+      "secondary": "#334155", "onSecondary": "#ffffff",
+      "accent": "#1d4ed8",
+      "background": "#f8fafc", "surface": "#ffffff", "text": "#0f172a",
+      "nav": "#ffffff", "navText": "#0f172a", "navActive": "#e2e8f0"
+    }
+  },
+  {
+    "id": "dark", "name": "Dark",
+    "description": "Low-glare charcoal for dim shops and long evening shifts.",
+    "colors": {
+      "primary": "#3b82f6", "onPrimary": "#06101f",
+      "secondary": "#cbd5e1", "onSecondary": "#0b1220",
+      "accent": "#7dd3fc",
+      "background": "#0b1220", "surface": "#131c2e", "text": "#e6edf7",
+      "nav": "#070d18", "navText": "#e6edf7", "navActive": "#1e2a42"
+    }
+  },
+  {
+    "id": "modern-blue", "name": "Modern Blue",
+    "description": "Corporate navy with a confident blue. The enterprise SaaS look.",
+    "colors": {
+      "primary": "#1d4ed8", "onPrimary": "#ffffff",
+      "secondary": "#0f3a7d", "onSecondary": "#ffffff",
+      "accent": "#38bdf8",
+      "background": "#eef3fb", "surface": "#ffffff", "text": "#0f1f3d",
+      "nav": "#0b2a5b", "navText": "#eaf1fc", "navActive": "#1d4a8f"
+    }
+  },
+  {
+    "id": "emerald-green", "name": "Emerald Green",
+    "description": "Fresh and calm. Reads as money and growth.",
+    "colors": {
+      "primary": "#047857", "onPrimary": "#ffffff",
+      "secondary": "#134e4a", "onSecondary": "#ffffff",
+      "accent": "#6ee7b7",
+      "background": "#f0f7f4", "surface": "#ffffff", "text": "#0b2a22",
+      "nav": "#064e3b", "navText": "#ecfdf5", "navActive": "#0b6b52"
+    }
+  },
+  {
+    "id": "royal-red", "name": "Royal Red",
+    "description": "Bold crimson on deep maroon. Warm, urgent, retail.",
+    "colors": {
+      "primary": "#b91c1c", "onPrimary": "#ffffff",
+      "secondary": "#7f1d1d", "onSecondary": "#ffffff",
+      "accent": "#fca5a5",
+      "background": "#faf5f5", "surface": "#ffffff", "text": "#2b0d0d",
+      "nav": "#3f0d12", "navText": "#fdeeee", "navActive": "#7a1a24"
+    }
+  },
+  {
+    "id": "purple-luxe", "name": "Purple Luxe",
+    "description": "Deep violet with a soft lilac glow. Premium boutique feel.",
+    "colors": {
+      "primary": "#6d28d9", "onPrimary": "#ffffff",
+      "secondary": "#4c1d95", "onSecondary": "#ffffff",
+      "accent": "#d8b4fe",
+      "background": "#f6f3fb", "surface": "#ffffff", "text": "#1e1033",
+      "nav": "#2e1065", "navText": "#f5efff", "navActive": "#5b2fa8"
+    }
+  },
+  {
+    "id": "minimal-grey", "name": "Minimal Grey",
+    "description": "Monochrome and quiet. Nothing competes with the numbers.",
+    "colors": {
+      "primary": "#404040", "onPrimary": "#ffffff",
+      "secondary": "#525252", "onSecondary": "#ffffff",
+      "accent": "#525252",
+      "background": "#fafafa", "surface": "#ffffff", "text": "#171717",
+      "nav": "#e5e5e5", "navText": "#171717", "navActive": "#d4d4d4"
+    }
+  },
+  {
+    "id": "high-contrast", "name": "High Contrast",
+    "description": "Black and white with signal yellow. Built for low vision and glare (WCAG AAA).",
+    "colors": {
+      "primary": "#ffd400", "onPrimary": "#000000",
+      "secondary": "#ffffff", "onSecondary": "#000000",
+      "accent": "#ffd400",
+      "background": "#000000", "surface": "#0a0a0a", "text": "#ffffff",
+      "nav": "#000000", "navText": "#ffffff", "navActive": "#333333"
+    }
+  }
+]

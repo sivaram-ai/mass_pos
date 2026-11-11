@@ -250,12 +250,69 @@ class ReturnsAndEditsApiIntegrationTest {
         for (JsonNode opened : java.util.List.of(first, second, third)) {
             JsonNode history = call(get("/api/invoices/" + opened.get("id").asText() + "/history"), cashierToken,
                     null, status().isOk());
-            assertThat(history.findValuesAsText("invoiceNumber")).containsExactlyElementsOf(chain);
+            assertThat(history.get("versions").findValuesAsText("invoiceNumber")).containsExactlyElementsOf(chain);
+            assertThat(history.get("returns")).isEmpty();
         }
 
         JsonNode alone = sell(productId, 1_000, 10_000, "CASH");
-        assertThat(call(get("/api/invoices/" + alone.get("id").asText() + "/history"), cashierToken, null,
-                status().isOk()).findValuesAsText("invoiceNumber")).containsExactly(alone.get("invoiceNumber").asText());
+        JsonNode never = call(get("/api/invoices/" + alone.get("id").asText() + "/history"), cashierToken, null,
+                status().isOk());
+        assertThat(never.get("versions").findValuesAsText("invoiceNumber"))
+                .containsExactly(alone.get("invoiceNumber").asText());
+        assertThat(never.get("returns")).isEmpty();
+    }
+
+    /**
+     * A manager opening a bill has to be able to see that some of it came back, without going
+     * looking for the credit note: it is why the bill can no longer be edited or cancelled, and
+     * the refund is part of what that bill finally came to.
+     */
+    @Test
+    void aBillsHistoryCarriesTheReturnsTakenAgainstIt() throws Exception {
+        String productId = newProductWithStock(10_000);
+        JsonNode bill = sell(productId, 3_000, 30_000, "CASH");
+        String billId = bill.get("id").asText();
+
+        JsonNode first = call(post("/api/returns"), managerToken, returnOf(billId, productId, 1_000, 10_000),
+                status().isCreated()).get("creditNote");
+        JsonNode second = call(post("/api/returns"), managerToken, returnOf(billId, productId, 1_000, 10_000),
+                status().isCreated()).get("creditNote");
+
+        JsonNode history = call(get("/api/invoices/" + billId + "/history"), cashierToken, null, status().isOk());
+        assertThat(history.get("versions").findValuesAsText("invoiceNumber"))
+                .containsExactly(bill.get("invoiceNumber").asText());
+        // Oldest first, each saying which bill it came off and what went back to the customer.
+        assertThat(history.get("returns").findValuesAsText("creditNoteNumber")).containsExactly(
+                first.get("creditNoteNumber").asText(), second.get("creditNoteNumber").asText());
+        JsonNode returned = history.get("returns").get(0);
+        assertThat(returned.get("originalInvoiceNumber").asText()).isEqualTo(bill.get("invoiceNumber").asText());
+        assertThat(returned.get("grandTotalPaise").asLong()).isEqualTo(10_000);
+        assertThat(returned.get("lines")).hasSize(1);
+
+        // Opened from the other end, a return tells the same story: a manager looking at a refund
+        // can see what was sold in the first place without going and finding the bill by number.
+        for (JsonNode opened : java.util.List.of(first, second)) {
+            JsonNode fromReturn = call(get("/api/returns/" + opened.get("id").asText() + "/history"), cashierToken,
+                    null, status().isOk());
+            assertThat(fromReturn.get("versions").findValuesAsText("invoiceNumber"))
+                    .containsExactly(bill.get("invoiceNumber").asText());
+            assertThat(fromReturn.get("returns").findValuesAsText("creditNoteNumber")).containsExactly(
+                    first.get("creditNoteNumber").asText(), second.get("creditNoteNumber").asText());
+        }
+    }
+
+    /** Nothing was sold against it, so there is nothing to show but the return itself. */
+    @Test
+    void aReturnTakenWithoutABillHasOnlyItselfToShow() throws Exception {
+        String productId = newProductWithStock(1_000);
+        JsonNode note = call(post("/api/returns"), managerToken, returnOf(null, productId, 1_000, 10_000),
+                status().isCreated()).get("creditNote");
+
+        JsonNode history = call(get("/api/returns/" + note.get("id").asText() + "/history"), cashierToken, null,
+                status().isOk());
+        assertThat(history.get("versions")).isEmpty();
+        assertThat(history.get("returns").findValuesAsText("creditNoteNumber"))
+                .containsExactly(note.get("creditNoteNumber").asText());
     }
 
     @Test

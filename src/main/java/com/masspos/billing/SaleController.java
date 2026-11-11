@@ -114,10 +114,13 @@ public class SaleController {
                 .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
-    /** Every version of an edited bill, oldest first; just the bill when it was never edited. */
+    /**
+     * The whole story of a bill: every version it went through when it was edited, and every
+     * return taken against it. A bill never edited and never returned against comes back alone.
+     */
     @GetMapping("/api/invoices/{id}/history")
     @RequiresRole({UserRole.CASHIER, UserRole.MANAGER, UserRole.AUDITOR})
-    public List<InvoiceView> history(@PathVariable UUID id) {
+    public SaleService.History history(@PathVariable UUID id) {
         return sales.history(id);
     }
 

@@ -292,7 +292,7 @@ export default function Stock({ onToast }: { onToast: Toast }) {
                               }}
                               className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
                                 focused
-                                  ? `bg-sky-600 text-white ${listFocused ? 'ring-2 ring-sky-300' : ''}`
+                                  ? `bg-sky-600 text-on-primary ${listFocused ? 'ring-2 ring-sky-300' : ''}`
                                   : name === 'damages'
                                     ? 'text-rose-600 hover:bg-rose-50'
                                     : 'text-slate-600 hover:bg-slate-100'}`}
