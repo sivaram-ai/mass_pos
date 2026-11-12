@@ -334,7 +334,8 @@ export default function Settings({ role, settings, onSaved, onToast }: {
         </div>
       </Panel>
 
-      <TillsPanel tills={settings.terminals} thisTill={settings.thisTerminal.code} />
+      <TillsPanel tills={settings.terminals} thisTill={settings.thisTerminal.code} canEdit={canEdit}
+                  onToast={onToast} />
     </div>
   )
 }
@@ -344,8 +345,32 @@ export default function Settings({ role, settings, onSaved, onToast }: {
  * billing right now" is worth nothing a minute later - and asks on its own rather than through the
  * settings the screen was given, which would throw away whatever is part way typed into the form.
  */
-function TillsPanel({ tills, thisTill }: { tills: TerminalView[]; thisTill: string }) {
+function TillsPanel({ tills, thisTill, canEdit, onToast }: {
+  tills: TerminalView[]
+  thisTill: string
+  canEdit: boolean
+  onToast: Toast
+}) {
   const [shop, setShop] = useState<TillsView>({ places: 0, used: 0, free: 0, tills })
+  const [releasing, setReleasing] = useState<string | null>(null)
+
+  /*
+   * A machine switched off or carried away without anybody logging out keeps its session open,
+   * and with it the shop's place, until the idle window runs out hours later. This is how a shop
+   * gets that place back now rather than this evening.
+   */
+  const release = async (till: TerminalView) => {
+    setReleasing(till.code)
+    try {
+      await api.post(`/api/clients/${encodeURIComponent(till.code)}/release`)
+      setShop(await api.get<TillsView>('/api/settings/tills'))
+      onToast({ tone: 'good', text: `${till.code} has been signed out. Its place is free.` })
+    } catch (failure) {
+      onToast({ tone: 'bad', text: messageOfFailure(failure, `Could not sign ${till.code} out`) })
+    } finally {
+      setReleasing(null)
+    }
+  }
 
   useEffect(() => {
     let stopped = false
@@ -409,6 +434,7 @@ function TillsPanel({ tills, thisTill }: { tills: TerminalView[]; thisTill: stri
             <th className="py-1 text-left">Status</th>
             <th className="py-1 text-left">Staff</th>
             <th className="py-1 text-left">Last seen</th>
+            {canEdit && <th className="py-1 text-right" aria-label="Sign out" />}
           </tr>
         </thead>
         <tbody>
@@ -449,6 +475,21 @@ function TillsPanel({ tills, thisTill }: { tills: TerminalView[]; thisTill: stri
               <td className="py-1.5 text-slate-500">
                 {terminal.lastSeenAt ? new Date(terminal.lastSeenAt).toLocaleString() : '—'}
               </td>
+              {canEdit && (
+                <td className="py-1.5 text-right">
+                  {terminal.signedIn && terminal.code !== thisTill && (
+                    <Button
+                      tone="ghost"
+                      disabled={releasing === terminal.code}
+                      onClick={() => release(terminal)}
+                      title={`Sign ${terminal.code} out from here and give its place back. Use this when the`
+                        + ' machine has been switched off or taken away without anybody logging out.'}
+                    >
+                      {releasing === terminal.code ? 'Signing out…' : 'Sign out'}
+                    </Button>
+                  )}
+                </td>
+              )}
             </tr>
           ))}
         </tbody>

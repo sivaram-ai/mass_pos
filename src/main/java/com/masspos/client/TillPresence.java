@@ -8,6 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -59,6 +60,23 @@ public class TillPresence {
     /** Lets a till go at once, rather than waiting for it to fall silent. */
     public void gone(String tillCode) {
         heardFrom.remove(tillCode);
+    }
+
+    /**
+     * Signs a till out from the server, which is how a shop gets a place back from a machine that
+     * was switched off or carried away without anybody logging out. Nothing else can: that machine
+     * is gone, its session stays open behind it, and until the idle window has passed the place is
+     * still spoken for - which on a shop set up for one counter means nobody else can bill at all.
+     *
+     * @return how many sessions were open on it, so the caller can say what it did
+     */
+    @Transactional
+    public int signOut(String tillCode) {
+        Instant now = Instant.now();
+        List<AuthToken> open = tokens.findByTerminalCodeAndRevokedAtIsNull(tillCode);
+        open.forEach(token -> token.revoke("RELEASED", now));
+        gone(tillCode);
+        return open.size();
     }
 
     /**

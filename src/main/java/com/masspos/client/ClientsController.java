@@ -103,14 +103,16 @@ public class ClientsController {
     }
 
     /**
-     * Lets a counter go before its idle time is up, so a shop swapping a machine over does not
-     * have to wait for a place to come free.
+     * Signs a till out from here and gives its place back, for the machine that was switched off
+     * or carried away without anybody logging out. Its session is ended, so the place is free at
+     * once rather than when the idle window runs out - which on a shop set up for one counter is
+     * the difference between the next machine billing now and not billing until this evening.
      */
     @PostMapping("/{code}/release")
     @RequiresRole({UserRole.ADMIN})
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void release(@org.springframework.web.bind.annotation.PathVariable String code) {
         registry.release(code);
-        presence.gone(code);
+        presence.signOut(code);
     }
 }

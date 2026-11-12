@@ -15,6 +15,7 @@ import javax.swing.JPanel;
 import javax.swing.JRadioButton;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.BorderLayout;
@@ -40,6 +41,9 @@ final class CounterSettings {
 
     private CounterSettings() {
     }
+
+    /** How often a counter that was told the shop is full asks again, while its window is open. */
+    private static final int WATCH_MS = 4000;
 
     /** Characters per line, as the server's own printer page allows. */
     private static final int MIN_COLUMNS = 24;
@@ -166,6 +170,8 @@ final class CounterSettings {
          */
         ServerFinder.Room[] room = {null};
         boolean[] looking = {false};
+        /** True while a check the window started by itself is in flight, so it says nothing. */
+        boolean[] waiting = {false};
 
         Runnable refresh = () -> {
             String wrong = problem.get();
@@ -177,17 +183,26 @@ final class CounterSettings {
                     : room[0] == null ? "Press \"Look for the server\" to check this shop has a place for "
                             + config.code() + "."
                     : room[0].canJoin() ? ready(config, room[0])
-                    : room[0].refusal()));
+                    : room[0].refusal() + "  Watching for a place to come free."));
         };
 
-        Runnable lookNow = () -> {
+        /*
+         * `quiet` is the difference between somebody pressing the button and the window looking
+         * again on its own: a quiet check leaves the last answer on screen until it has a new one,
+         * so a counter waiting for a place does not flicker "Looking for the server..." at nobody
+         * every few seconds.
+         */
+        java.util.function.Consumer<Boolean> check = quiet -> {
             collect.run();
             if (problem.get() != null) {
                 refresh.run();
                 return;
             }
-            looking[0] = true;
-            room[0] = null;
+            if (!quiet) {
+                looking[0] = true;
+                room[0] = null;
+            }
+            waiting[0] = quiet;
             refresh.run();
             // On a worker thread: a shout waits over a second, and a frozen window looks broken.
             new Thread(() -> {
@@ -195,10 +210,12 @@ final class CounterSettings {
                 SwingUtilities.invokeLater(() -> {
                     looking[0] = false;
                     room[0] = answer;
+                    waiting[0] = false;
                     refresh.run();
                 });
             }, "counter-find-server").start();
         };
+        Runnable lookNow = () -> check.accept(false);
 
         // Anything that changes which server is asked, or who is asking, makes the last answer
         // worthless: the button goes out until the new question has been put to the server.
@@ -254,6 +271,19 @@ final class CounterSettings {
             lookNow.run();
         }
 
+        /*
+         * A counter turned away because the shop was full should not need anybody to press
+         * anything: somebody logging out across the room frees a place at once, and the only thing
+         * standing between this machine and billing is asking again. So it asks itself, and the
+         * button lights up on its own within a few seconds of the place coming free.
+         */
+        Timer watching = new Timer(WATCH_MS, event -> {
+            if (!looking[0] && !waiting[0] && problem.get() == null && room[0] != null && !room[0].canJoin()) {
+                check.accept(true);
+            }
+        });
+        watching.start();
+
         dialog.getRootPane().setDefaultButton(save);
         dialog.setLayout(new BorderLayout());
         dialog.add(fields, BorderLayout.CENTER);
@@ -262,6 +292,8 @@ final class CounterSettings {
         dialog.setMinimumSize(new Dimension(640, dialog.getHeight()));
         dialog.setLocationRelativeTo(null);
         dialog.setVisible(true);
+        // Modal, so this is reached once the window has gone: nothing left to watch for.
+        watching.stop();
         return saved[0] ? Optional.of(config) : Optional.empty();
     }
 

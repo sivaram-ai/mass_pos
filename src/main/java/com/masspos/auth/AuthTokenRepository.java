@@ -13,6 +13,9 @@ public interface AuthTokenRepository extends JpaRepository<AuthToken, UUID> {
 
     List<AuthToken> findByUserIdAndRevokedAtIsNull(UUID userId);
 
+    /** Every session still open on one till, whoever they belong to. */
+    List<AuthToken> findByTerminalCodeAndRevokedAtIsNull(String terminalCode);
+
     /**
      * Who is signed in where, oldest sign-in first. The user comes with it: the caller wants the
      * name to put on the screen, and a lazy load per token would be a query per person signed in.

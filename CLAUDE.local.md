@@ -22,7 +22,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3J | A stopped item stays on Products and Stock, marked; Delete tombstones it and frees its code; both lists sort by code, name, stock, price, MRP or status, remembered per machine | Done: 270 tests green, driven in the browser |
 | 3K | Shop-wide theme: `theme_settings` row (active theme + saved library), 8 designed presets + the original as Default, admin-only builder with live preview, WCAG checks enforced on the server, import/export, counters follow within ~4 s | Done: driven in the browser |
 | 3L | Tills in this shop say who is billing on them and whether anyone is; an item the shop will not sell without stock is marked on the bill row as it is rung up; a bill and a return each open on the same story - the bill, its versions, and everything that came back off it, with the opened one named and ringed | Done: 347 tests green, driven in the browser |
-| 3M | A counter's place is held by a live sign-in, not by having once said hello: the cap is checked at every sign-in, logging out frees a place at once, the settings window will not let anybody press "Save and start billing" until the shop has a place for this counter, the counter that loses the race for the last one is handed back to its own settings window, and clicking the shortcut twice no longer leaves two counter processes running | Done: 362 tests green, server side driven over the LAN; the Swing settings window itself is covered by tests, not driven on screen |
+| 3M | A counter's place is held by a live sign-in, not by having once said hello: the cap is checked at every sign-in, logging out frees a place at once, the settings window will not let anybody press "Save and start billing" until the shop has a place for this counter, the counter that loses the race for the last one is handed back to its own settings window, and clicking the shortcut twice no longer leaves two counter processes running. Logging out frees the place there and then: a counter signing in ends whatever session was open on it, an admin can sign a till out from the tills panel, and a counter turned away watches for a place to come free | Done: 365 tests green, server side driven over the LAN; the Swing settings window itself is covered by tests, not driven on screen |
 | L1 | Offline subscription licence per till: Ed25519-signed key bound to a hardware machine ID, warn/grace days, billing lock, Licence screen + banner, vendor `tools/license/LicenseTool.java` | Done: 172 tests green, real key verified on this PC |
 | 5A | Windows installer: jpackage + WiX 3.14, trimmed JDK 21 runtime, one file, `tools/build-installer.ps1` | Done: installed and run from the exe on this PC |
 | 5B | One folder per till, `%LOCALAPPDATA%\GoRockitPOS`, data in `data\`, with an automatic move from the old `MassPOS` folder | Done: 235 tests green, this PC's own till migrated |
@@ -478,6 +478,18 @@ folder and everything under it, so that is the only copy that survives one.
     refreshes `lastSeenAt`). Deliberately *not* the three-minute presence window: a counter asleep
     or off the Wi-Fi for five minutes would otherwise lose its place to another machine and come
     back still signed in, billing without one.
+  - **One counter, one session** (`AuthService.endEarlierSessionsOn`, counters only). The counter
+    app opens exactly one window, so a counter signing in again means the window before it has
+    gone. Those abandoned sign-ins used to stay open for ever, and each went on holding the place
+    and showing the cashier who had left - so pressing Log out on a counter looked like it did
+    nothing, because the session behind it was still there. The server's own till is left alone: it
+    is a shared machine where a manager and an auditor may both be signed in, it holds no place,
+    and every API test signs several people in on it.
+  - **An admin can sign a till out** (`POST /api/clients/{code}/release`, the Sign out button on
+    the tills panel). It ends that till's sessions as well as winding `lastSeenAt` back, because
+    nothing the machine does can give the place back once it has been switched off or carried away
+    - and on a shop set up for one counter that is the difference between the next machine billing
+    now and not billing until this evening.
   - **`whyNot(code)` is the one place the refusal is worded**, used by `admit` and by
     `GET /api/clients/places`, so the counter settings window can never promise a place the sign-in
     then refuses. The settings window asks before enabling its button; the sign-in asks again
@@ -496,6 +508,10 @@ folder and everything under it, so that is the only copy that survives one.
   anyway, and a shop that opens the till a few times a day finished the week with a row of them in
   Task Manager. The second process now opens a window on the server the first is already using and
   exits.
+- **A counter turned away watches for a place** (`CounterSettings`, a 4 s Swing `Timer`). Somebody
+  logging out across the room frees a place at once, and the only thing between this machine and
+  billing is asking again - so it asks itself, quietly (the last answer stays on screen rather than
+  flickering "Looking..." at nobody), and the button lights up on its own.
 - **"Save and start billing" is a promise** (`CounterSettings`). It stays disabled until every field
   is filled in and sane *and* the server has said this counter can join - the local part is
   `problemWith(config)`, the rest is `ServerFinder.roomFor`. Editing the counter number or where the

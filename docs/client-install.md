@@ -112,7 +112,10 @@ It holds the database and the licence, and it is the machine every other till ta
 - **A place belongs to whoever is signed in.** Pressing Log out hands it straight back, so the next
   machine can sign in at once - which is how a shop with three counters and two places swaps
   between them during the day. A counter switched off without anybody logging out holds its place
-  for four hours and then gives it up by itself.
+  for four hours and then gives it up by itself; to have it back now, an admin presses **Sign out**
+  beside that till in Settings > Tills in this shop.
+- **A counter told the shop is full keeps watching.** Leave its settings window open: when somebody
+  logs out across the room, Save and start billing lights up by itself within a few seconds.
 - **Settings > Tills in this shop is where to look**: how many places are free, which tills
   somebody is billing on, and who is signed in on each. It keeps up by itself while it is open.
 - **Two counters can want the last place at once.** Both are told there is room, both press Save

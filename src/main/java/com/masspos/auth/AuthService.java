@@ -80,10 +80,32 @@ public class AuthService {
             throw new AuthException("Wrong username or PIN");
         }
         String counter = clients.admit(counterCode, counterName, overTheNetwork);
+        if (overTheNetwork) {
+            endEarlierSessionsOn(counter);
+        }
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes());
         AuthToken saved = tokens.save(new AuthToken(user, hash(token), counter));
         log.info("{} signed in on {}", user.getUsername(), counter);
         return new LoginResult(token, principal(user, saved.getId(), counter));
+    }
+
+    /**
+     * One counter, one session.
+     *
+     * <p>The counter app opens exactly one billing window, so a counter signing in again means the
+     * window before it has gone: logged out, or closed and the shortcut clicked afresh. Those
+     * abandoned sign-ins used to stay open for ever, and each one went on holding the shop's place
+     * and showing the last cashier's name on the tills list long after they had left - so pressing
+     * Log out on a counter appeared to do nothing at all, because the session before it was still
+     * there behind it.
+     *
+     * <p>The server's own till is deliberately left alone. It is a shared machine, where a manager
+     * and an auditor may both be signed in and both still be at it, and it holds no place anyway.
+     */
+    private void endEarlierSessionsOn(String counter) {
+        Instant now = Instant.now();
+        tokens.findByTerminalCodeAndRevokedAtIsNull(counter)
+                .forEach(open -> open.revoke("REPLACED", now));
     }
 
     @Transactional(readOnly = true)

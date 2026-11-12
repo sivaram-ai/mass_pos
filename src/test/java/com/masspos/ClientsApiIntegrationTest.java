@@ -64,6 +64,8 @@ class ClientsApiIntegrationTest {
 
     private final ObjectMapper json = new ObjectMapper();
     private static boolean staffReady;
+    /** Only an admin may sign another till out, so the shop has one. */
+    private static String adminToken;
 
     /**
      * An empty shop before each test. The places are shop-wide and a counter holds its one for
@@ -74,6 +76,7 @@ class ClientsApiIntegrationTest {
     void anEmptyShopWithOneCashier() {
         if (!staffReady) {
             TestAccounts.tokenFor(auth, "asha", UserRole.CASHIER);
+            adminToken = TestAccounts.tokenFor(auth, "owner", UserRole.ADMIN);
             staffReady = true;
         }
         terminals.deleteAll(terminals.findAll().stream()
@@ -307,6 +310,64 @@ class ClientsApiIntegrationTest {
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.counterSetup").value(true))
                 .andExpect(jsonPath("$.detail").value(containsString("wait for one to sign out")));
+    }
+
+    /**
+     * Pressing Log out on a counter has to free its place there and then. It appeared not to: the
+     * counter app opens a window, and a window closed without logging out left its session open
+     * behind the next one, so the till went on holding the shop's place and showing the cashier
+     * who had left. Signing in on a counter now ends whatever was open on it.
+     */
+    @Test
+    void loggingOutOfACounterLeavesNothingOpenBehindIt() throws Exception {
+        // Three sign-ins on one counter, as a machine closed and reopened twice would make.
+        signIn("192.168.1.141", "TT").andExpect(status().isOk());
+        signIn("192.168.1.141", "TT").andExpect(status().isOk());
+        String last = tokenOf(signIn("192.168.1.141", "TT").andExpect(status().isOk()));
+
+        logOut(last);
+
+        JsonNode after = places("TU");
+        assertThat(after.get("free").asInt()).isEqualTo(2);
+        JsonNode till = tillSeenBy(tokenOf(mvc.perform(login()).andExpect(status().isOk())), null, "TT");
+        assertThat(till.get("signedIn").asBoolean()).isFalse();
+        assertThat(till.get("inUse").asBoolean()).isFalse();
+        assertThat(till.get("staff").isNull()).isTrue();
+    }
+
+    /** The sessions it ends are that counter's own; the back office is nobody's to sign out. */
+    @Test
+    void aCounterSigningInLeavesEveryOtherTillAlone() throws Exception {
+        String office = tokenOf(mvc.perform(login()).andExpect(status().isOk()));
+        signIn("192.168.1.142", "TV").andExpect(status().isOk());
+
+        mvc.perform(get("/api/auth/me")
+                        .header(LocalApiGuard.CLIENT_HEADER, "test")
+                        .header(HttpHeaders.HOST, "localhost")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + office))
+                .andExpect(status().isOk());
+    }
+
+    /**
+     * The machine that was switched off without logging out. Nothing it does can give the place
+     * back, so an admin does it from here - and on a shop set up for one counter that is the
+     * difference between the next machine billing now and not billing until this evening.
+     */
+    @Test
+    void anAdminCanSignOutATillThatWasCarriedAway() throws Exception {
+        signIn("192.168.1.151", "TW").andExpect(status().isOk());
+        signIn("192.168.1.152", "TX").andExpect(status().isOk());
+        assertThat(places("TY").get("canJoin").asBoolean()).isFalse();
+
+        mvc.perform(post("/api/clients/TW/release")
+                        .header(LocalApiGuard.CLIENT_HEADER, "test")
+                        .header(HttpHeaders.HOST, "localhost")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+                .andExpect(status().isNoContent());
+
+        assertThat(places("TY").get("canJoin").asBoolean()).isTrue();
+        assertThat(tillSeenBy(adminToken, null, "TW").get("signedIn").asBoolean()).isFalse();
+        signIn("192.168.1.153", "TY").andExpect(status().isOk());
     }
 
     private JsonNode places(String counter) throws Exception {
