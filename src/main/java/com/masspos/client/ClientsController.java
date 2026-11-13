@@ -65,7 +65,7 @@ public class ClientsController {
      *                find itself knows which of the two happened
      */
     public record Choice(String id, String code, String name, String section, boolean taken,
-                         boolean blocked) {
+                         boolean blocked, boolean overLimit) {
     }
 
     /** @param counters the shop's counters, for the picker on a counter's settings window */
@@ -84,7 +84,7 @@ public class ClientsController {
                 registry.choices().stream()
                         .map(counter -> new Choice(counter.getId().toString(), counter.getCode(),
                                 counter.getName(), counter.getSection(), registry.holds(counter),
-                                !counter.isActive()))
+                                !counter.isActive(), registry.overLicenceLimit(counter)))
                         .toList());
     }
 

@@ -23,7 +23,8 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3K | Shop-wide theme: `theme_settings` row (active theme + saved library), 8 designed presets + the original as Default, admin-only builder with live preview, WCAG checks enforced on the server, import/export, counters follow within ~4 s | Done: driven in the browser |
 | 3L | Tills in this shop say who is billing on them and whether anyone is; an item the shop will not sell without stock is marked on the bill row as it is rung up; a bill and a return each open on the same story - the bill, its versions, and everything that came back off it, with the opened one named and ringed | Done: 347 tests green, driven in the browser |
 | 3M | A counter's place is held by a live sign-in, not by having once said hello: the cap is checked at every sign-in, logging out frees a place at once, the settings window will not let anybody press "Save and start billing" until the shop has a place for this counter, the counter that loses the race for the last one is handed back to its own settings window, and clicking the shortcut twice no longer leaves two counter processes running. Logging out frees the place there and then: a counter signing in ends whatever session was open on it, an admin can sign a till out from the tills panel, and a counter turned away watches for a place to come free | Done: 365 tests green, server side driven over the LAN; the Swing settings window itself is covered by tests, not driven on screen |
-| 3N | The shop owns its counters: an admin adds them on the server (number fixed at creation, name editable, block/unblock), and a counter machine chooses which of them it is from the list the server offers. A machine signs in with that till's id, never a number it typed. The counter settings window asks two questions and no longer sets a printer; a new counter saves its bills to a file on its own machine until somebody picks a printer in the app | Done: 365 tests green, driven over the LAN; the Swing window is covered by tests, not driven on screen |
+| 3N | The shop owns its counters: an admin adds them on the server (number fixed at creation, name editable, block/unblock), and a counter machine chooses which of them it is from the list the server offers. A machine signs in with that till's id, never a number it typed. The counter settings window asks two questions and no longer sets a printer; a new counter saves its bills to a file on its own machine until somebody picks a printer in the app | Done: 368 tests green, driven over the LAN; the Swing window is covered by tests, not driven on screen |
+| 3O | `pos.clients.max` caps how many counters a shop may have, not only how many may bill at once: creating one past the limit is refused with the licence message, Add a counter goes grey, and a counter beyond the limit (a licence cut below the counters a shop already has) is red and marked "Licence limit exceeded", as blocked ones now are | Done: 368 tests green, driven over the LAN and in the browser |
 | L1 | Offline subscription licence per till: Ed25519-signed key bound to a hardware machine ID, warn/grace days, billing lock, Licence screen + banner, vendor `tools/license/LicenseTool.java` | Done: 172 tests green, real key verified on this PC |
 | 5A | Windows installer: jpackage + WiX 3.14, trimmed JDK 21 runtime, one file, `tools/build-installer.ps1` | Done: installed and run from the exe on this PC |
 | 5B | One folder per till, `%LOCALAPPDATA%\GoRockitPOS`, data in `data\`, with an automatic move from the old `MassPOS` folder | Done: 235 tests green, this PC's own till migrated |
@@ -478,6 +479,18 @@ folder and everything under it, so that is the only copy that survives one.
   a number and a name into the window on that machine, and the first sign-in created whatever they
   had typed. A typo made a till, two machines could argue over one number, and the shop's list of
   tills was only ever a list of whatever had turned up.
+  - **`pos.clients.max` caps how many counters the shop may have**, not only how many may bill at
+    once (`ClientRegistry.roomForMoreCounters`, checked in `TerminalAdmin.create`). It used to cap
+    the sign-ins alone, so a shop licensed for one could create as many counters as it liked and
+    only find out at the till - with no error in between. One consequence worth knowing: with
+    creation capped, every counter that exists has a place, so the "shop is full, wait for one to
+    sign out" refusal is now a backstop rather than the usual path. It still fires for a shop whose
+    licence has been **cut** below the counters it already has.
+  - **A counter beyond the licence is kept and marked, never deleted** (`overLicenceLimit`, the red
+    row and "Licence limit exceeded" on the tills panel). A licence cut from three counters to one
+    leaves the other two rows and their bills, which are the shop's records; they simply cannot be
+    billed on. Which ones are covered goes by age - `counters()` is oldest first - so the line
+    between them does not move about as counters are renamed.
   - **The number is settled at creation and never changes.** It is stamped into every bill that
     till issues and those bills are what the shop files, so `Terminal.code` is
     `updatable = false` and nothing offers to edit it. The name and the floor are the editable part.

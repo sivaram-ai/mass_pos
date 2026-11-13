@@ -36,6 +36,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(properties = {
         "pos.data-dir=" + SettingsAndReportsApiIntegrationTest.DATA_DIR,
+        "pos.terminal.code=T1", "pos.terminal.name=Counter 1",
         "pos.backup.offsite-dir=" + SettingsAndReportsApiIntegrationTest.BACKUP_DIR,
         "pos.printer.type=FILE",
         "pos.terminal.name=Counter 1",

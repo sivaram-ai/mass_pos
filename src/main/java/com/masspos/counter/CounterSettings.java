@@ -87,7 +87,7 @@ final class CounterSettings {
         JComboBox<ServerFinder.Choice> counters = new JComboBox<>();
         counters.setEnabled(false);
         counters.setPrototypeDisplayValue(
-                new ServerFinder.Choice("", "T99", "A counter with a fairly long name", "", false, false));
+                new ServerFinder.Choice("", "T99", "A counter with a fairly long name", "", false, false, false));
         JLabel told = new JLabel(" ");
 
         JPanel fields = new JPanel();
@@ -158,6 +158,10 @@ final class CounterSettings {
             if (choice == null) {
                 return "Choose which of the shop's counters this machine is.";
             }
+            if (choice.overLimit()) {
+                return "Counter " + choice.code() + " is beyond what this shop's licence covers, so"
+                        + " nothing can bill on it. Choose another, or ask support to raise the limit.";
+            }
             if (choice.blocked()) {
                 return "Counter " + choice.code() + " has been blocked on the server. Choose another,"
                         + " or ask an admin to unblock it.";
@@ -168,7 +172,7 @@ final class CounterSettings {
         Runnable refresh = () -> {
             String wrong = problem.get();
             ServerFinder.Choice choice = picked.get();
-            boolean chosen = choice != null && !choice.blocked();
+            boolean chosen = choice != null && !choice.blocked() && !choice.overLimit();
             boolean ready = wrong == null && server[0] != null && chosen
                     && room[0] != null && room[0].canJoin();
             save.setEnabled(ready);

@@ -220,18 +220,20 @@ public final class ServerFinder {
 
     /** One of the shop's counters, as the server offers it to a machine choosing which it is. */
     public record Choice(String id, String code, String name, String section, boolean taken,
-                         boolean blocked) {
+                         boolean blocked, boolean overLimit) {
 
         /** What the picker shows: the number first, because that is what is written on the till. */
         @Override
         public String toString() {
             String where = section == null || section.isBlank() ? "" : " - " + section;
-            String state = blocked ? "  (blocked)" : taken ? "  (in use)" : "";
+            String state = overLimit ? "  (beyond the shop licence)"
+                    : blocked ? "  (blocked)"
+                    : taken ? "  (in use)" : "";
             return code + "  " + name + where + state;
         }
 
         public boolean free() {
-            return !taken && !blocked;
+            return !taken && !blocked && !overLimit;
         }
     }
 
@@ -258,7 +260,8 @@ public final class ServerFinder {
                 for (com.fasterxml.jackson.databind.JsonNode one : said.path("counters")) {
                     counters.add(new Choice(one.path("id").asText(""), one.path("code").asText(""),
                             one.path("name").asText(""), one.path("section").asText(""),
-                            one.path("taken").asBoolean(false), one.path("blocked").asBoolean(false)));
+                            one.path("taken").asBoolean(false), one.path("blocked").asBoolean(false),
+                            one.path("overLimit").asBoolean(false)));
                 }
                 return List.copyOf(counters);
             } finally {

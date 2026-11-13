@@ -115,10 +115,13 @@ class ClientsApiIntegrationTest {
         signIn("192.168.1.61", "TA").andExpect(status().isOk());
         signIn("192.168.1.62", "TB").andExpect(status().isOk());
 
-        signIn("192.168.1.63", "TC")
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.detail").value(containsString("set up for 2 counters")))
-                .andExpect(jsonPath("$.detail").value(containsString("TC")));
+        // A third counter cannot be created at all now - the licence covers two - so the machine
+        // after the last one is turned away where it asks to exist, not later at the till.
+        mvc.perform(asAdmin(post("/api/terminals")).content(newCounter("TC", "Counter C")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.code").value(containsString("Maximum counter limit reached")));
+        // The two the shop does have are both billing, so every place is taken.
+        assertThat(places("TA").get("free").asInt()).isZero();
     }
 
     /** Two machines on one series would reuse bill numbers, so the server's own code is refused. */
@@ -145,6 +148,61 @@ class ClientsApiIntegrationTest {
                 .andExpect(jsonPath("$.counterSetup").value(true));
         mvc.perform(login("not-an-id").with(from("192.168.1.83")))
                 .andExpect(status().isForbidden());
+    }
+
+    /**
+     * `pos.clients.max` is how many counters the shop may have, not only how many may bill at once.
+     * It used to cap the sign-ins alone, so a shop licensed for two could create ten counters and
+     * only find out at the till - with no error anywhere in between.
+     */
+    @Test
+    void willNotCreateMoreCountersThanTheLicenceCovers() throws Exception {
+        counterId("TM", "Counter M");
+        counterId("TN", "Counter N");
+
+        mvc.perform(asAdmin(post("/api/terminals")).content(newCounter("TO", "One too many")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.code")
+                        .value(containsString("Maximum counter limit reached")))
+                .andExpect(jsonPath("$.errors.code")
+                        .value(containsString("only 2 additional counters")));
+
+        // And nothing was created: the shop still has exactly the two it is licensed for.
+        assertThat(terminals.findByCode("TO")).isEmpty();
+        JsonNode tills = json.readTree(settingsSeenBy(adminToken, null).andReturn()
+                .getResponse().getContentAsString());
+        assertThat(tills.get("terminals").findValuesAsText("code")).doesNotContain("TO");
+    }
+
+    /**
+     * A shop can end up over its limit without doing anything wrong - a licence cut from three
+     * counters to one leaves the other two rows, and their bills. They are kept and marked rather
+     * than deleted, and nothing can bill on them: the oldest counters are the ones the licence
+     * covers, so which of them works does not move about as they are renamed.
+     */
+    @Test
+    void marksAndRefusesTheCountersBeyondTheLicence() throws Exception {
+        counterId("TP", "Counter P");
+        counterId("TQ", "Counter Q");
+        // A third, as a shop whose licence has been cut would already have. Created directly,
+        // because the endpoint now refuses to make one.
+        terminals.save(new com.masspos.terminal.Terminal("TR", "Counter R", "",
+                com.masspos.terminal.TerminalType.COUNTER));
+
+        JsonNode room = places("TR");
+        assertThat(room.get("canJoin").asBoolean()).isFalse();
+        assertThat(room.get("refusal").asText())
+                .contains("beyond what this shop's licence covers", "Maximum counter limit reached");
+
+        signIn("192.168.1.161", "TR")
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.counterSetup").value(true));
+
+        // The two it is licensed for still work, and the screen can tell the extras apart.
+        signIn("192.168.1.162", "TP").andExpect(status().isOk());
+        JsonNode till = tillSeenBy(adminToken, null, "TR");
+        assertThat(till.get("overLimit").asBoolean()).isTrue();
+        assertThat(tillSeenBy(adminToken, null, "TP").get("overLimit").asBoolean()).isFalse();
     }
 
     /**
@@ -291,13 +349,14 @@ class ClientsApiIntegrationTest {
     void loggingOutGivesTheCountersPlaceBackAtOnce() throws Exception {
         String leaving = tokenOf(signIn("192.168.1.101", "TH").andExpect(status().isOk()));
         signIn("192.168.1.102", "TI").andExpect(status().isOk());
-        signIn("192.168.1.103", "TJ")
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.detail").value(containsString("set up for 2 counters")));
+        assertThat(places("TH").get("free").asInt()).isZero();
 
         logOut(leaving);
 
-        signIn("192.168.1.103", "TJ").andExpect(status().isOk());
+        assertThat(places("TH").get("free").asInt()).isEqualTo(1);
+        JsonNode till = tillSeenBy(adminToken, null, "TH");
+        assertThat(till.get("signedIn").asBoolean()).isFalse();
+        assertThat(till.get("staff").isNull()).isTrue();
     }
 
     /**
@@ -311,14 +370,16 @@ class ClientsApiIntegrationTest {
     void aCounterThatHasBilledHereBeforeIsStillCountedAgainstTheLimit() throws Exception {
         String known = tokenOf(signIn("192.168.1.111", "TK").andExpect(status().isOk()));
         logOut(known);
-
         signIn("192.168.1.112", "TL").andExpect(status().isOk());
-        signIn("192.168.1.113", "TM").andExpect(status().isOk());
 
-        signIn("192.168.1.111", "TK")
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.detail").value(containsString("TL")))
-                .andExpect(jsonPath("$.counterSetup").value(true));
+        // A counter the shop has had for a while is one of its two, not a free extra on top: the
+        // cap used to be checked only the first time a machine ever signed in, so a shop licensed
+        // for two could end up with three billing as long as each had signed in at some point.
+        mvc.perform(asAdmin(post("/api/terminals")).content(newCounter("TM", "Counter M")))
+                .andExpect(status().isBadRequest());
+
+        // And it can still come back to its own place afterwards.
+        signIn("192.168.1.111", "TK").andExpect(status().isOk());
     }
 
     /**
@@ -334,19 +395,14 @@ class ClientsApiIntegrationTest {
         assertThat(room.get("free").asInt()).isEqualTo(2);
         assertThat(room.get("holdsPlace").asBoolean()).isFalse();
 
-        signIn("192.168.1.121", "TO").andExpect(status().isOk());
         String second = tokenOf(signIn("192.168.1.122", "TP").andExpect(status().isOk()));
 
-        JsonNode full = places("TN");
-        assertThat(full.get("free").asInt()).isZero();
-        assertThat(full.get("canJoin").asBoolean()).isFalse();
-        assertThat(full.get("refusal").asText()).contains("set up for 2 counters");
-
         // A counter already billing here is coming back to its own place, not asking for a new
-        // one, so a full shop must still let it in - otherwise a reboot locks a till out.
+        // one, so it is never counted against itself - otherwise a reboot locks a till out.
         JsonNode itsOwn = places("TP");
         assertThat(itsOwn.get("holdsPlace").asBoolean()).isTrue();
         assertThat(itsOwn.get("canJoin").asBoolean()).isTrue();
+        assertThat(itsOwn.get("free").asInt()).isEqualTo(1);
         assertThat(second).isNotNull();
     }
 
@@ -359,15 +415,21 @@ class ClientsApiIntegrationTest {
     @Test
     void onlyOneOfTwoCountersGetsTheLastPlace() throws Exception {
         signIn("192.168.1.131", "TQ").andExpect(status().isOk());
-        assertThat(places("TR").get("canJoin").asBoolean()).isTrue();
-        assertThat(places("TS").get("canJoin").asBoolean()).isTrue();
-
         signIn("192.168.1.132", "TR").andExpect(status().isOk());
+
+        /*
+         * With the licence capping how many counters the shop may have, every counter that exists
+         * has a place, so two machines can no longer race for one. The refusal is kept as a
+         * backstop for a shop whose licence has been cut below the counters it already has: that
+         * third counter exists, and nothing may bill on it.
+         */
+        terminals.save(new com.masspos.terminal.Terminal("TS", "Counter S", "",
+                com.masspos.terminal.TerminalType.COUNTER));
 
         signIn("192.168.1.133", "TS")
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.counterSetup").value(true))
-                .andExpect(jsonPath("$.detail").value(containsString("wait for one to sign out")));
+                .andExpect(jsonPath("$.detail").value(containsString("licence")));
     }
 
     /**
@@ -415,7 +477,7 @@ class ClientsApiIntegrationTest {
     void anAdminCanSignOutATillThatWasCarriedAway() throws Exception {
         signIn("192.168.1.151", "TW").andExpect(status().isOk());
         signIn("192.168.1.152", "TX").andExpect(status().isOk());
-        assertThat(places("TY").get("canJoin").asBoolean()).isFalse();
+        assertThat(places("TW").get("free").asInt()).isZero();
 
         mvc.perform(post("/api/clients/TW/release")
                         .header(LocalApiGuard.CLIENT_HEADER, "test")
@@ -423,9 +485,10 @@ class ClientsApiIntegrationTest {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
                 .andExpect(status().isNoContent());
 
-        assertThat(places("TY").get("canJoin").asBoolean()).isTrue();
+        assertThat(places("TW").get("free").asInt()).isEqualTo(1);
         assertThat(tillSeenBy(adminToken, null, "TW").get("signedIn").asBoolean()).isFalse();
-        signIn("192.168.1.153", "TY").andExpect(status().isOk());
+        // And it can come straight back: signing it out frees the place, it does not bar the till.
+        signIn("192.168.1.151", "TW").andExpect(status().isOk());
     }
 
     private JsonNode places(String code) throws Exception {

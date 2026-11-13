@@ -70,9 +70,14 @@ public class SettingsController {
      * @param signedIn somebody is signed in, answering or not: what holds the till's place
      * @param staff    who that is, or null when nobody is signed in
      */
+    /**
+     * @param active    false for a till an admin has blocked; it stays listed because its code is on bills
+     * @param overLimit the shop has more counters than its licence covers and this is one of the
+     *                  extras, so nothing can bill on it
+     */
     public record TerminalView(String id, String code, String name, String section, TerminalType type,
-                               boolean active, Instant lastSeenAt, boolean inUse, boolean signedIn,
-                               String staff) {
+                               boolean active, boolean overLimit, Instant lastSeenAt, boolean inUse,
+                               boolean signedIn, String staff) {
     }
 
     @GetMapping
@@ -86,7 +91,13 @@ public class SettingsController {
      * @param used   places a counter is signed in on
      * @param free   places another counter could still take
      */
-    public record TillsView(int places, int used, int free, List<TerminalView> tills) {
+    /**
+     * @param places  what pos.clients.max allows: how many counters besides this server
+     * @param counters how many the shop has, so the screen can stop offering to add another
+     * @param roomForMore how many more it may create
+     */
+    public record TillsView(int places, int used, int free, int counters, int roomForMore,
+                            List<TerminalView> tills) {
     }
 
     /**
@@ -100,6 +111,7 @@ public class SettingsController {
     public TillsView tills() {
         Map<String, Presence> present = presence.all();
         return new TillsView(clients.places(), clients.connected().size(), clients.free(),
+                clients.counters().size(), clients.roomForMoreCounters(),
                 terminals.findAllByOrderBySectionAscCodeAsc().stream()
                         .map(terminal -> viewOf(terminal, present))
                         .toList());
@@ -169,19 +181,20 @@ public class SettingsController {
             // The server's own till is described from its own pos.properties, so it has no row to
             // take an id from until it has registered itself; its id is never acted on anyway.
             return new TerminalView(terminals.findByCode(me.code()).map(row -> row.getId().toString())
-                    .orElse(""), me.code(), me.name(), me.section(), me.type(), true, Instant.now(),
-                    at.inUse(), at.signedIn(), at.staff());
+                    .orElse(""), me.code(), me.name(), me.section(), me.type(), true, false,
+                    Instant.now(), at.inUse(), at.signedIn(), at.staff());
         }
         return terminals.findByCode(here)
                 .map(terminal -> viewOf(terminal, present))
                 .orElseGet(() -> new TerminalView("", here, here, "", TerminalType.COUNTER, true,
-                        Instant.now(), at.inUse(), at.signedIn(), at.staff()));
+                        false, Instant.now(), at.inUse(), at.signedIn(), at.staff()));
     }
 
     private TerminalView viewOf(Terminal terminal, Map<String, Presence> present) {
         Presence at = presence.of(terminal.getCode(), present);
         return new TerminalView(terminal.getId().toString(), terminal.getCode(), terminal.getName(),
-                terminal.getSection(), terminal.getType(), terminal.isActive(), terminal.getLastSeenAt(),
+                terminal.getSection(), terminal.getType(), terminal.isActive(),
+                clients.overLicenceLimit(terminal), terminal.getLastSeenAt(),
                 at.inUse(), at.signedIn(), at.staff());
     }
 }

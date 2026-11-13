@@ -131,6 +131,10 @@ public class ClientRegistry {
             return "Counter " + code + " (" + counter.getName() + ") has been blocked on the server."
                     + " An admin can unblock it under Settings, Tills in this shop.";
         }
+        if (overLicenceLimit(counter)) {
+            return "Counter " + code + " (" + counter.getName() + ") is beyond what this shop's licence"
+                    + " covers, so it cannot bill. " + atTheLimit();
+        }
         List<Terminal> others = taken(code);
         if (others.size() >= clients.max()) {
             return "This shop is set up for " + clients.max() + " counter"
@@ -163,12 +167,61 @@ public class ClientRegistry {
      */
     @Transactional(readOnly = true)
     public List<Terminal> choices() {
+        return counters();
+    }
+
+    /**
+     * Every counter this shop has, oldest first, leaving out the server's own till.
+     *
+     * <p>Oldest first because that order decides which of them the licence covers when a shop has
+     * more counters than it is licensed for: the ones it had first keep working, and the extras
+     * are the ones put out of use. Any other order would move the line between them about as
+     * counters were renamed.
+     */
+    @Transactional(readOnly = true)
+    public List<Terminal> counters() {
         String own = pos.terminal().code();
-        return terminals.findAllByOrderBySectionAscCodeAsc().stream()
+        return terminals.findAll().stream()
                 .filter(terminal -> !terminal.getCode().equals(own))
                 .filter(terminal -> terminal.getType() == TerminalType.COUNTER)
-                .sorted(java.util.Comparator.comparing(Terminal::getCode))
+                .sorted(java.util.Comparator.comparing(Terminal::getCreatedAt)
+                        .thenComparing(Terminal::getCode))
                 .toList();
+    }
+
+    /** How many more counters this shop's licence has room for; 0 when it is at its limit. */
+    @Transactional(readOnly = true)
+    public int roomForMoreCounters() {
+        return Math.max(0, clients.max() - counters().size());
+    }
+
+    /**
+     * True for a counter the licence does not cover: it exists, but the shop has more counters than
+     * {@code pos.clients.max} allows and this is one of the extras.
+     *
+     * <p>It can happen without anybody doing anything wrong - a shop whose licence is cut from
+     * three counters to one still has the other two rows, and their bills. So they are kept and
+     * marked rather than deleted, and simply cannot be billed on.
+     */
+    @Transactional(readOnly = true)
+    public boolean overLicenceLimit(Terminal counter) {
+        List<Terminal> counters = counters();
+        int at = -1;
+        for (int i = 0; i < counters.size(); i++) {
+            if (counters.get(i).getCode().equals(counter.getCode())) {
+                at = i;
+                break;
+            }
+        }
+        return at >= clients.max();
+    }
+
+    /** What to tell somebody who has run out of counters, naming the number they are allowed. */
+    public String atTheLimit() {
+        int max = clients.max();
+        return "Maximum counter limit reached. Your current licence supports only " + max
+                + (max == 1 ? " additional counter" : " additional counters")
+                + ". Please contact support to add more counters.";
     }
 
     /** True when that till is one of the ones currently holding a place. */

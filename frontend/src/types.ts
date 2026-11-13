@@ -307,8 +307,10 @@ export interface TerminalView {
   name: string
   section: string
   type: 'MASTER' | 'COUNTER'
-  /** False for a till the shop has retired; it stays listed because its code is on bills. */
+  /** False for a till an admin has blocked; it stays listed because its code is on bills. */
   active: boolean
+  /** The shop has more counters than its licence covers and this is one of the extras. */
+  overLimit: boolean
   lastSeenAt: string | null
   /** Somebody is signed in on it and its screen has checked in within the last few minutes. */
   inUse: boolean
@@ -326,6 +328,10 @@ export interface TillsView {
   used: number
   /** Places another counter could still take. */
   free: number
+  /** How many counters the shop has, besides this server. */
+  counters: number
+  /** How many more it may create before its licence is at its limit. */
+  roomForMore: number
   tills: TerminalView[]
 }
 

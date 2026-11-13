@@ -1,5 +1,6 @@
 package com.masspos.terminal;
 
+import com.masspos.client.ClientRegistry;
 import com.masspos.config.PosProperties;
 import com.masspos.web.FieldRejectedException;
 import org.springframework.stereotype.Service;
@@ -33,10 +34,17 @@ public class TerminalAdmin {
 
     private final TerminalRepository terminals;
     private final PosProperties pos;
+    /**
+     * How many counters this shop is licensed for, and which of the ones it has are covered. The
+     * count belongs with the rest of the client rules rather than here: it is the same number that
+     * decides who may sign in, and two places working it out would eventually disagree.
+     */
+    private final ClientRegistry limit;
 
-    public TerminalAdmin(TerminalRepository terminals, PosProperties pos) {
+    public TerminalAdmin(TerminalRepository terminals, PosProperties pos, ClientRegistry limit) {
         this.terminals = terminals;
         this.pos = pos;
+        this.limit = limit;
     }
 
     /** @param section floor, hall or area; optional */
@@ -61,6 +69,11 @@ public class TerminalAdmin {
         if (name.isEmpty()) {
             throw new FieldRejectedException("name", "Give the counter a name - it is what staff see on"
                     + " every screen, e.g. Counter 2.");
+        }
+        // Checked here rather than only at sign-in: a counter nobody could ever bill on is not
+        // something to let a shop create and then find out about at the till.
+        if (limit.roomForMoreCounters() <= 0) {
+            throw new FieldRejectedException("code", limit.atTheLimit());
         }
         terminals.findByCode(code).ifPresent(clash -> {
             throw new FieldRejectedException("code", code + " is already " + clash.getName()

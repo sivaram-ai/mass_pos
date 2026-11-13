@@ -43,7 +43,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest(properties = {"pos.data-dir=" + HardwareApiIntegrationTest.DATA_DIR, "pos.printer.type=FILE"})
+@SpringBootTest(properties = {"pos.data-dir=" + HardwareApiIntegrationTest.DATA_DIR,
+        "pos.terminal.code=T1", "pos.terminal.name=Counter 1", "pos.printer.type=FILE"})
 @AutoConfigureMockMvc
 class HardwareApiIntegrationTest {
 

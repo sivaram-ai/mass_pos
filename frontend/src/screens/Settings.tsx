@@ -351,7 +351,7 @@ function TillsPanel({ tills, thisTill, canEdit, onToast }: {
   canEdit: boolean
   onToast: Toast
 }) {
-  const [shop, setShop] = useState<TillsView>({ places: 0, used: 0, free: 0, tills })
+  const [shop, setShop] = useState<TillsView>({ places: 0, used: 0, free: 0, counters: 0, roomForMore: 0, tills })
   const [releasing, setReleasing] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
   const [renaming, setRenaming] = useState<TerminalView | null>(null)
@@ -445,8 +445,18 @@ function TillsPanel({ tills, thisTill, canEdit, onToast }: {
         on it and its screen is still answering, and it holds one of the shop's places for exactly that long.
       </p>
       {canEdit && (
-        <div className="mb-3">
-          <Button tone="primary" onClick={() => setAdding(true)}>Add a counter</Button>
+        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+          {/* Off at the limit rather than lit and then refused: the server refuses it too, but a
+              button that cannot work should not look as though it can. */}
+          <Button tone="primary" disabled={shop.roomForMore <= 0} onClick={() => setAdding(true)}>
+            Add a counter
+          </Button>
+          <span className="text-sm text-slate-500">
+            {shop.roomForMore > 0
+              ? `${shop.counters} of ${shop.places} counters set up; room for ${shop.roomForMore} more.`
+              : `All ${shop.places} ${shop.places === 1 ? 'counter' : 'counters'} this shop's licence`
+                + ' covers are set up. Contact support to add more.'}
+          </span>
         </div>
       )}
       <table className="w-full text-sm">
@@ -464,7 +474,12 @@ function TillsPanel({ tills, thisTill, canEdit, onToast }: {
         </thead>
         <tbody>
           {shop.tills.map((terminal) => (
-            <tr key={terminal.code} className="border-t border-slate-100">
+            // A till nothing can bill on reads as one: the whole row goes red, not just a word in
+            // the status column, because the first question about a list like this is which rows
+            // are working.
+            <tr key={terminal.code}
+                className={`border-t border-slate-100 ${
+                  terminal.overLimit || !terminal.active ? 'bg-rose-50/60 text-rose-900' : ''}`}>
               <td className="num py-1.5 font-medium">
                 {terminal.code}
                 {terminal.code === thisTill && (
@@ -478,7 +493,22 @@ function TillsPanel({ tills, thisTill, canEdit, onToast }: {
                   shop's places even while its screen has gone quiet - and a list that called that
                   "Idle" would seem to contradict the count of free places above it. */}
               <td className="py-1.5">
-                {terminal.inUse ? (
+                {terminal.overLimit ? (
+                  <span
+                    title={"This shop's licence does not cover this counter, so nothing can bill on it."
+                      + ' Contact support to raise the limit.'}
+                    className="inline-flex items-center gap-1.5 font-semibold text-rose-700"
+                  >
+                    <span className="h-2 w-2 rounded-full bg-rose-500" aria-hidden />Licence limit exceeded
+                  </span>
+                ) : !terminal.active ? (
+                  <span
+                    title="Blocked on the server: it keeps every bill it took, but nobody can sign in on it."
+                    className="inline-flex items-center gap-1.5 font-semibold text-rose-700"
+                  >
+                    <span className="h-2 w-2 rounded-full bg-rose-500" aria-hidden />Blocked
+                  </span>
+                ) : terminal.inUse ? (
                   <span className="inline-flex items-center gap-1.5 font-medium text-emerald-700">
                     <span className="h-2 w-2 rounded-full bg-emerald-500" aria-hidden />Billing now
                   </span>
@@ -515,7 +545,7 @@ function TillsPanel({ tills, thisTill, canEdit, onToast }: {
                   )}
                   {/* The server's own till is not on this list of things to change: it is named in
                       its own pos.properties, and blocking it would stop the shop billing at all. */}
-                  {terminal.code !== thisTill && terminal.type === 'COUNTER' && (
+                  {terminal.code !== thisTill && terminal.type === 'COUNTER' && !terminal.overLimit && (
                     <>
                       <Button tone="ghost" onClick={() => setRenaming(terminal)}
                               title={`Change what ${terminal.code} is called. Its number cannot change:`

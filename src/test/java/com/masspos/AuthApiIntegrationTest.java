@@ -25,6 +25,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(properties = {"pos.data-dir=" + AuthApiIntegrationTest.DATA_DIR,
+        "pos.terminal.code=T1", "pos.terminal.name=Counter 1",
         "pos.auth.initial-admin-pin=481920", "pos.terminal.name=Counter 2", "pos.terminal.section=1st floor"})
 @AutoConfigureMockMvc
 class AuthApiIntegrationTest {

@@ -35,6 +35,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(properties = {
         "pos.data-dir=" + SaleApiIntegrationTest.DATA_DIR,
+        "pos.terminal.code=T1", "pos.terminal.name=Counter 1",
         "pos.printer.type=FILE",
         "pos.company.legal-name=Mass Retail Private Limited",
         "pos.company.trade-name=MASS MART",

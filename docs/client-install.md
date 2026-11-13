@@ -89,10 +89,18 @@ It holds the database and the licence, and it is the machine every other till ta
 counter** for each machine the shop will bill on. Give it a number - up to three characters, a
 letter first: `T2`, `T3` - and a name staff will recognise, e.g. Counter 2.
 
+**How many counters a shop may have is set by `pos.clients.max`** on the server. Add a counter is
+greyed out once that many exist, and the shop is told to contact support for more. The server's own
+till does not count against it: `pos.clients.max=1` means the server plus one counter.
+
 The number goes on every bill that counter takes, so **it is settled here and cannot be changed
 afterwards**: the shop's books are kept under it. The name can be corrected at any time with
 **Rename**, and a counter the shop has stopped using is put out of service with **Block** - it
 keeps every bill it ever took, it simply cannot be signed in on any more.
+
+A counter beyond what the licence covers - which happens when a licence is **cut** below the
+counters a shop already has - is shown in red as **Licence limit exceeded**. Its bills are kept, and
+nothing can bill on it until the limit is raised.
 
 1. Install `GoRockitPOS-Counter-<version>.exe`. No licence, no database, nothing to back up.
 2. Start **GO RockIt Counter**. It asks two things:

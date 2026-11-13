@@ -85,7 +85,16 @@ class CounterSettingsTest {
 
     private static ServerFinder.Choice choice(String id, String code, String name, String section,
                                               boolean taken, boolean blocked) {
-        return new ServerFinder.Choice(id, code, name, section, taken, blocked);
+        return new ServerFinder.Choice(id, code, name, section, taken, blocked, false);
+    }
+
+    /** A counter the shop has but its licence does not cover: listed, marked, and not pickable. */
+    @Test
+    void marksACounterTheLicenceDoesNotCover() {
+        ServerFinder.Choice over = new ServerFinder.Choice(FIRST, "T2", "Counter 2", "", false, false, true);
+
+        assertThat(over).hasToString("T2  Counter 2  (beyond the shop licence)");
+        assertThat(over.free()).isFalse();
     }
 
     private static JComboBox<ServerFinder.Choice> boxOf(List<ServerFinder.Choice> list) {
