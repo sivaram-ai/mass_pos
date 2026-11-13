@@ -215,8 +215,8 @@ public final class CounterApp {
      * sends it with everything it asks the server, which is how a bill gets this counter's series.
      */
     static String billingScreen(CounterConfig config, String server) {
-        return server + "/?counter=" + URLEncoder.encode(config.code(), StandardCharsets.UTF_8)
-                + "&counterName=" + URLEncoder.encode(config.name(), StandardCharsets.UTF_8)
+        return server + "/?counter=" + URLEncoder.encode(config.counterId(), StandardCharsets.UTF_8)
+                + "&counterCode=" + URLEncoder.encode(config.code(), StandardCharsets.UTF_8)
                 + "&agent=" + config.agentPort();
     }
 

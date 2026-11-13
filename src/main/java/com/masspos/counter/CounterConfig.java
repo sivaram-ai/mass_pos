@@ -47,6 +47,13 @@ public final class CounterConfig {
      */
     private Path folder = folder();
 
+    /**
+     * Which of the shop's counters this machine was told it is - the server's own id for that
+     * till, chosen from the list the server offers. It is the whole of this machine's claim to be
+     * a counter.
+     */
+    private String counterId = "";
+    /** The number and name that till had when it was chosen, kept only to show on screens. */
     private String code = "";
     private String name = "";
     private Find find = Find.AUTOMATIC;
@@ -55,7 +62,13 @@ public final class CounterConfig {
     /** Remembered from the last connection that worked, so one failed shout is not fatal. */
     private String lastServer = "";
 
-    private PrinterProperties.Type printerType = PrinterProperties.Type.WINDOWS;
+    /**
+     * A counter prints to a file until somebody chooses otherwise, on the printer page in the app
+     * itself. A new counter has no printer set up yet, and a bill saved to a file on this machine
+     * is something a shop can still print; bills quietly going to whatever Windows calls the
+     * default printer are not.
+     */
+    private PrinterProperties.Type printerType = PrinterProperties.Type.FILE;
     private String serialPort = "";
     private int serialBaudRate = 9600;
     private PrinterProperties.FlowControl serialFlowControl = PrinterProperties.FlowControl.NONE;
@@ -97,6 +110,7 @@ public final class CounterConfig {
                 return config;
             }
         }
+        config.counterId = saved.getProperty("counter.id", "").trim();
         config.code = saved.getProperty("counter.code", "").trim().toUpperCase(Locale.ROOT);
         config.name = saved.getProperty("counter.name", "").trim();
         config.find = readEnum(saved, "server.find", Find.class, Find.AUTOMATIC);
@@ -104,7 +118,7 @@ public final class CounterConfig {
         config.url = saved.getProperty("server.url", "").trim();
         config.lastServer = saved.getProperty("server.last", "").trim();
         config.printerType = readEnum(saved, "printer.type", PrinterProperties.Type.class,
-                PrinterProperties.Type.WINDOWS);
+                PrinterProperties.Type.FILE);
         config.serialPort = saved.getProperty("printer.serial.port", "").trim();
         config.serialBaudRate = readInt(saved, "printer.serial.baud-rate", 9600);
         config.serialFlowControl = readEnum(saved, "printer.serial.flow-control",
@@ -124,6 +138,7 @@ public final class CounterConfig {
 
     public void save() throws IOException {
         Properties out = new Properties();
+        out.setProperty("counter.id", counterId);
         out.setProperty("counter.code", code);
         out.setProperty("counter.name", name);
         out.setProperty("server.find", find.name());
@@ -150,26 +165,9 @@ public final class CounterConfig {
         }
     }
 
-    /**
-     * Why a counter number would be refused at sign-in, or null if it is usable. The server holds
-     * counters to this shape (it lands in bill numbers), and the settings window says so while the
-     * number is being set, not later at the sign-in screen where the cause is out of sight.
-     */
-    public static String codeProblem(String code) {
-        String value = code == null ? "" : code.trim().toUpperCase(Locale.ROOT);
-        if (value.isEmpty()) {
-            return "Give this counter a number first - it goes on every bill it takes.";
-        }
-        if (!value.matches("[A-Z][A-Z0-9]{0,2}")) {
-            return "\"" + value + "\" is not a usable counter number: up to three characters,"
-                    + " a letter first, e.g. T2. (A name like MAIN goes in the Name box.)";
-        }
-        return null;
-    }
-
-    /** Enough to start: a counter number, and somewhere to look for a server. */
+    /** Enough to start: a counter chosen from the shop's list, and somewhere to look for a server. */
     public boolean readyToConnect() {
-        return !code.isBlank() && switch (find) {
+        return !counterId.isBlank() && switch (find) {
             case AUTOMATIC -> true;
             case ADDRESS -> !address.isBlank();
             case URL -> !url.isBlank();
@@ -231,29 +229,23 @@ public final class CounterConfig {
         }
     }
 
+    public String counterId() {
+        return counterId;
+    }
+
+    /** Taken together: a counter is told which till it is, and what that till is called today. */
+    public void counter(String id, String code, String name) {
+        this.counterId = id == null ? "" : id.trim();
+        this.code = code == null ? "" : code.trim().toUpperCase(Locale.ROOT);
+        this.name = name == null ? "" : name.trim();
+    }
+
     public String code() {
         return code;
     }
 
-    public void code(String value) {
-        this.code = value == null ? "" : value.trim().toUpperCase(Locale.ROOT);
-    }
-
     public String name() {
         return name.isBlank() ? code : name;
-    }
-
-    /**
-     * What was actually typed, which is not the same question as what to show: {@link #name()}
-     * falls back to the counter's number so no screen is ever blank, and the settings window has
-     * to be able to tell a name that was given from one that was not.
-     */
-    public String rawName() {
-        return name;
-    }
-
-    public void name(String value) {
-        this.name = value == null ? "" : value.trim();
     }
 
     public Find find() {

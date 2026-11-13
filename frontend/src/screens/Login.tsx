@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, ApiError, messageOfFailure, postBinary, saveToken } from '../api'
-import { askForCounterSettings, counterName } from '../counter'
+import { askForCounterSettings, counterId } from '../counter'
 import type { BackupCandidate, Principal, SetupView } from '../types'
 import { Banner, Button, Field, inputClass } from '../components/ui'
 
@@ -69,10 +69,11 @@ export function Login({ onSignedIn }: { onSignedIn: (user: Principal) => void })
     setBusy(true)
     setError(null)
     try {
-      // The counter's own name goes with the sign-in: the server keeps it against this counter's
-      // till, and every screen afterwards names the machine the person is actually standing at.
+      // Which of the shop's counters this machine was told it is. The server decides what that
+      // means - the till's number, its name, whether it may bill at all - because the shop's
+      // counters are the shop's to keep, not something a machine makes up about itself.
       const result = await api.post<{ token: string; user: Principal }>('/api/auth/login',
-        { username, pin, counterName: counterName() })
+        { username, pin, counterId: counterId() })
       saveToken(result.token)
       onSignedIn(result.user)
     } catch (failure) {

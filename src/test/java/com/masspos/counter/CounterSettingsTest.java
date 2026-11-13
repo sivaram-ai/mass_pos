@@ -1,101 +1,94 @@
 package com.masspos.counter;
 
-import com.masspos.hardware.PrinterProperties;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
-import java.nio.file.Path;
+import javax.swing.JComboBox;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * What the counter's settings window will and will not let somebody save.
+ * Choosing which of the shop's counters this machine is.
  *
- * <p>"Save and start billing" is a promise that this machine can start billing, and a promise this
- * window cannot keep ends with somebody standing at a sign-in screen that turns them away. So the
- * button is off until every one of these is answered. Only what the machine can judge by itself is
- * here; whether the shop has a place left is the server's answer, asked over the network.
+ * <p>The window used to ask somebody to type a number and a name, and the first sign-in created
+ * whatever they had typed. The counters are the shop's now - an admin keeps them on the server -
+ * so all this window does is offer the list and remember the choice.
  */
 class CounterSettingsTest {
 
-    @TempDir
-    Path folder;
+    private static final String FIRST = "01a1cb62-d9d7-75cd-be17-fa6db596caa3";
+    private static final String SECOND = "01a1cb63-aaaa-75cd-be17-fa6db596caa4";
 
+    /** The number first, because that is what is written on the till somebody is standing at. */
     @Test
-    void wantsACounterNumberThatCouldGoOnABill() {
-        assertThat(CounterSettings.problemWith(counter(settings -> settings.code(""))))
-                .contains("Give this counter a number");
-        assertThat(CounterSettings.problemWith(counter(settings -> settings.code("COUNTER-TWO"))))
-                .contains("not a usable counter number");
-        assertThat(CounterSettings.problemWith(counter(settings -> settings.code("2T"))))
-                .contains("not a usable counter number");
+    void showsACounterTheWayItIsWrittenOnTheTill() {
+        assertThat(choice(FIRST, "T2", "Counter 2", "", false, false)).hasToString("T2  Counter 2");
+        assertThat(choice(FIRST, "T2", "Counter 2", "1st floor", false, false))
+                .hasToString("T2  Counter 2 - 1st floor");
+        assertThat(choice(FIRST, "T2", "Counter 2", "", true, false)).hasToString("T2  Counter 2  (in use)");
+        assertThat(choice(FIRST, "T2", "Counter 2", "", false, true)).hasToString("T2  Counter 2  (blocked)");
     }
 
-    /** The name is what staff read on every screen in the shop, so it is asked for, not guessed. */
+    /** Only a counter nobody is on, and that nobody has blocked, is one this machine could be. */
     @Test
-    void wantsANameSomebodyChose() {
-        assertThat(CounterSettings.problemWith(counter(settings -> settings.name(""))))
-                .contains("Give this counter a name");
-        assertThat(CounterSettings.problemWith(counter(settings -> settings.name("  ")))).isNotNull();
+    void countsACounterAsFreeOnlyWhenItIsBothUnusedAndUnblocked() {
+        assertThat(choice(FIRST, "T2", "Counter 2", "", false, false).free()).isTrue();
+        assertThat(choice(FIRST, "T2", "Counter 2", "", true, false).free()).isFalse();
+        assertThat(choice(FIRST, "T2", "Counter 2", "", false, true).free()).isFalse();
     }
 
+    /**
+     * A counter that is already set up comes back to the same till, even when another one is free
+     * - this machine has been billing as that counter and its bills are filed under that number.
+     */
     @Test
-    void wantsSomewhereToLookForTheServer() {
-        assertThat(CounterSettings.problemWith(counter(settings -> {
-            settings.find(CounterConfig.Find.ADDRESS);
-            settings.address("");
-        }))).contains("Type the server's name or IP address");
-        assertThat(CounterSettings.problemWith(counter(settings -> {
-            settings.find(CounterConfig.Find.URL);
-            settings.url("");
-        }))).contains("full address");
-        // Finding it on the network needs nothing typed at all, which is the usual case.
-        assertThat(CounterSettings.problemWith(counter(settings -> settings.find(CounterConfig.Find.AUTOMATIC))))
-                .isNull();
+    void comesBackToTheCounterThisMachineAlreadyIs() {
+        List<ServerFinder.Choice> list = List.of(
+                choice(FIRST, "T2", "Counter 2", "", false, false),
+                choice(SECOND, "T3", "Counter 3", "", false, false));
+        JComboBox<ServerFinder.Choice> box = boxOf(list);
+
+        CounterSettings.select(box, list, SECOND);
+
+        assertThat(box.getSelectedItem()).isEqualTo(list.get(1));
     }
 
-    /** The same ranges the agent holds a saved printer to, asked before anything is written. */
+    /** A machine being set up for the first time lands on a counter nobody else is on. */
     @Test
-    void wantsAPrinterThatCouldBeOpened() {
-        assertThat(CounterSettings.problemWith(counter(settings -> {
-            settings.printerType(PrinterProperties.Type.SERIAL);
-            settings.serialPort("");
-        }))).contains("COM port");
-        assertThat(CounterSettings.problemWith(counter(settings -> {
-            settings.printerType(PrinterProperties.Type.TCP);
-            settings.tcpHost("");
-        }))).contains("network printer");
-        assertThat(CounterSettings.problemWith(counter(settings -> {
-            settings.printerType(PrinterProperties.Type.TCP);
-            settings.tcpHost("192.168.1.90");
-            settings.tcpPort(0);
-        }))).contains("between 1 and 65535");
-        assertThat(CounterSettings.problemWith(counter(settings -> settings.columns(4))))
-                .contains("Characters per line");
-        assertThat(CounterSettings.problemWith(counter(settings -> settings.columns(200)))).isNotNull();
+    void offersTheFirstFreeCounterToAMachineThatHasNoneYet() {
+        List<ServerFinder.Choice> list = List.of(
+                choice(FIRST, "T2", "Counter 2", "", true, false),
+                choice(SECOND, "T3", "Counter 3", "", false, false));
+        JComboBox<ServerFinder.Choice> box = boxOf(list);
+
+        CounterSettings.select(box, list, "");
+
+        assertThat(box.getSelectedItem()).isEqualTo(list.get(1));
     }
 
-    /** A counter that is set up properly has nothing standing in its way here. */
+    /**
+     * Every counter taken or blocked: nothing is chosen for the person, so the window asks rather
+     * than quietly offering a counter that cannot be used.
+     */
     @Test
-    void letsAFinishedCounterThrough() {
-        assertThat(CounterSettings.problemWith(counter(settings -> {
-        }))).isNull();
-        assertThat(CounterSettings.problemWith(counter(settings -> {
-            settings.find(CounterConfig.Find.ADDRESS);
-            settings.address("192.168.1.10");
-        }))).isNull();
+    void choosesNothingWhenNoCounterIsFree() {
+        List<ServerFinder.Choice> list = List.of(
+                choice(FIRST, "T2", "Counter 2", "", true, false),
+                choice(SECOND, "T3", "Counter 3", "", false, true));
+        JComboBox<ServerFinder.Choice> box = boxOf(list);
+        box.setSelectedItem(null);
+
+        CounterSettings.select(box, list, "");
+
+        assertThat(box.getSelectedItem()).isNull();
     }
 
-    /** A counter as somebody would have filled it in, with one thing changed per test. */
-    private CounterConfig counter(java.util.function.Consumer<CounterConfig> change) {
-        CounterConfig config = CounterConfig.loadFrom(folder);
-        config.code("T2");
-        config.name("Counter 2");
-        config.find(CounterConfig.Find.AUTOMATIC);
-        config.printerType(PrinterProperties.Type.FILE);
-        config.columns(48);
-        config.tcpPort(9100);
-        change.accept(config);
-        return config;
+    private static ServerFinder.Choice choice(String id, String code, String name, String section,
+                                              boolean taken, boolean blocked) {
+        return new ServerFinder.Choice(id, code, name, section, taken, blocked);
+    }
+
+    private static JComboBox<ServerFinder.Choice> boxOf(List<ServerFinder.Choice> list) {
+        return new JComboBox<>(list.toArray(new ServerFinder.Choice[0]));
     }
 }

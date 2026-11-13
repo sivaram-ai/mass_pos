@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, downloadCsv, fieldErrorsOf, messageOfFailure, uploadCsv } from '../api'
 import type { Role, SettingsView, ShopSettingsForm, TerminalView, TillsView } from '../types'
-import { Banner, Button, Empty, errorFor, Field, inputClass, Panel } from '../components/ui'
+import { Banner, Button, Empty, errorFor, Field, inputClass, Modal, Panel } from '../components/ui'
 import PrinterPanel from '../components/PrinterPanel'
 import DatabasePanel from '../components/DatabasePanel'
 
@@ -353,6 +353,26 @@ function TillsPanel({ tills, thisTill, canEdit, onToast }: {
 }) {
   const [shop, setShop] = useState<TillsView>({ places: 0, used: 0, free: 0, tills })
   const [releasing, setReleasing] = useState<string | null>(null)
+  const [adding, setAdding] = useState(false)
+  const [renaming, setRenaming] = useState<TerminalView | null>(null)
+
+  const reload = async () => setShop(await api.get<TillsView>('/api/settings/tills'))
+
+  /** Blocked, or let back in. A blocked counter keeps its bills; it just cannot be signed in on. */
+  const block = async (till: TerminalView, blocked: boolean) => {
+    try {
+      await api.put(`/api/terminals/${till.id}/blocked`, { blocked })
+      await reload()
+      onToast({
+        tone: 'good',
+        text: blocked
+          ? `${till.code} is blocked. Nobody can sign in on it until it is let back in.`
+          : `${till.code} can be signed in on again.`,
+      })
+    } catch (failure) {
+      onToast({ tone: 'bad', text: messageOfFailure(failure, `Could not change ${till.code}`) })
+    }
+  }
 
   /*
    * A machine switched off or carried away without anybody logging out keeps its session open,
@@ -419,11 +439,16 @@ function TillsPanel({ tills, thisTill, canEdit, onToast }: {
         )}
       </div>
       <p className="mb-3 text-xs text-slate-400">
-        The server registers itself from its own pos.properties; a counter registers itself when somebody
-        signs in on it, under the number and name set in its own settings window. The one you are using is
-        marked. A till is billing while somebody is signed in on it and its screen is still answering, and
-        it holds one of the shop's places for exactly that long.
+        The server registers itself from its own pos.properties. Every other counter is added here, and a
+        counter machine does nothing but choose which of them it is - so a number is never typed twice and
+        never typed wrong. The one you are using is marked. A till is billing while somebody is signed in
+        on it and its screen is still answering, and it holds one of the shop's places for exactly that long.
       </p>
+      {canEdit && (
+        <div className="mb-3">
+          <Button tone="primary" onClick={() => setAdding(true)}>Add a counter</Button>
+        </div>
+      )}
       <table className="w-full text-sm">
         <thead className="text-xs uppercase tracking-wide text-slate-400">
           <tr>
@@ -476,7 +501,7 @@ function TillsPanel({ tills, thisTill, canEdit, onToast }: {
                 {terminal.lastSeenAt ? new Date(terminal.lastSeenAt).toLocaleString() : '—'}
               </td>
               {canEdit && (
-                <td className="py-1.5 text-right">
+                <td className="py-1.5 text-right whitespace-nowrap">
                   {terminal.signedIn && terminal.code !== thisTill && (
                     <Button
                       tone="ghost"
@@ -488,12 +513,133 @@ function TillsPanel({ tills, thisTill, canEdit, onToast }: {
                       {releasing === terminal.code ? 'Signing out…' : 'Sign out'}
                     </Button>
                   )}
+                  {/* The server's own till is not on this list of things to change: it is named in
+                      its own pos.properties, and blocking it would stop the shop billing at all. */}
+                  {terminal.code !== thisTill && terminal.type === 'COUNTER' && (
+                    <>
+                      <Button tone="ghost" onClick={() => setRenaming(terminal)}
+                              title={`Change what ${terminal.code} is called. Its number cannot change:`
+                                + ' it is on every bill that counter has issued.'}>
+                        Rename
+                      </Button>
+                      <Button
+                        tone="ghost"
+                        onClick={() => block(terminal, terminal.active)}
+                        title={terminal.active
+                          ? `Stop anybody signing in on ${terminal.code}. Its bills are kept.`
+                          : `Let ${terminal.code} be signed in on again.`}
+                      >
+                        {terminal.active ? 'Block' : 'Unblock'}
+                      </Button>
+                    </>
+                  )}
                 </td>
               )}
             </tr>
           ))}
         </tbody>
       </table>
+
+      {adding && (
+        <CounterDialog
+          title="Add a counter"
+          onClose={() => setAdding(false)}
+          onSaved={async (message) => {
+            setAdding(false)
+            await reload()
+            onToast({ tone: 'good', text: message })
+          }}
+        />
+      )}
+      {renaming && (
+        <CounterDialog
+          title={`Rename ${renaming.code}`}
+          counter={renaming}
+          onClose={() => setRenaming(null)}
+          onSaved={async (message) => {
+            setRenaming(null)
+            await reload()
+            onToast({ tone: 'good', text: message })
+          }}
+        />
+      )}
     </Panel>
+  )
+}
+
+/**
+ * Adding a counter to the shop, or correcting what one is called.
+ *
+ * <p>The number is asked for once and never again. It is stamped into every bill that counter
+ * issues, and those bills are what the shop files: a counter that changed its number would leave
+ * the books describing a till that no longer exists. The name is only ever shown on a screen, so
+ * that is the part worth being able to put right.
+ */
+function CounterDialog({ title, counter, onClose, onSaved }: {
+  title: string
+  counter?: TerminalView
+  onClose: () => void
+  onSaved: (message: string) => Promise<void>
+}) {
+  const [code, setCode] = useState(counter?.code ?? '')
+  const [name, setName] = useState(counter?.name ?? '')
+  const [section, setSection] = useState(counter?.section ?? '')
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [refused, setRefused] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const first = useRef<HTMLInputElement>(null)
+
+  useEffect(() => first.current?.focus(), [])
+
+  const save = async () => {
+    setBusy(true)
+    setErrors({})
+    setRefused(null)
+    try {
+      if (counter) {
+        await api.put(`/api/terminals/${counter.id}`, { name, section })
+        await onSaved(`${counter.code} is now ${name}.`)
+      } else {
+        const made = await api.post<{ code: string; name: string }>('/api/terminals',
+          { code, name, section })
+        await onSaved(`${made.code} ${made.name} is ready. Set a counter machine up and choose it there.`)
+      }
+    } catch (failure) {
+      // Inside the dialog, never as a toast: a toast renders behind the backdrop, where the
+      // person who caused it cannot read it.
+      setErrors(fieldErrorsOf(failure))
+      setRefused(messageOfFailure(failure, 'Could not save this counter'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title={title} onClose={onClose}>
+      <div className="space-y-3">
+        {refused && <Banner tone="bad">{refused}</Banner>}
+        <Field label="Counter number" error={errorFor(errors, 'code')}
+               hint={counter
+                 ? 'Fixed when the counter was created: it is on every bill this counter has issued.'
+                 : 'Up to three characters, a letter first, e.g. T2. It goes on every bill this counter takes.'}>
+          <input ref={counter ? undefined : first} className={inputClass} value={code} disabled={Boolean(counter)}
+                 onChange={(event) => setCode(event.target.value.toUpperCase())} />
+        </Field>
+        <Field label="Name" error={errorFor(errors, 'name')} hint="What staff call it, e.g. Counter 2.">
+          <input ref={counter ? first : undefined} className={inputClass} value={name}
+                 onChange={(event) => setName(event.target.value)} />
+        </Field>
+        <Field label="Floor or area" hint="Optional, e.g. 1st floor.">
+          <input className={inputClass} value={section} onChange={(event) => setSection(event.target.value)} />
+        </Field>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button tone="primary" disabled={busy || !name.trim() || (!counter && !code.trim())}
+                  onClick={save}>
+            {busy ? 'Saving…' : counter ? 'Save' : 'Add counter'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   )
 }

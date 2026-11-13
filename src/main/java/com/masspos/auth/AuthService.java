@@ -54,7 +54,7 @@ public class AuthService {
     /** Signing in on this machine itself, which is what a shop with one till always does. */
     @Transactional
     public LoginResult signIn(String username, String pin) {
-        return signIn(username, pin, null, null, false);
+        return signIn(username, pin, null, false);
     }
 
     /**
@@ -65,21 +65,20 @@ public class AuthService {
      * <p>The machine is admitted before the PIN is checked against nothing, but after the user is
      * found, so a counter with no place left says so plainly rather than "wrong username or PIN".
      *
-     * @param counterCode     what the machine calls itself; blank from the browser on the server
-     * @param counterName     what staff call it, from its own settings window; blank is fine
+     * @param counterId       which of the shop's counters this machine was told it is; blank from
+     *                        the browser on the server
      * @param overTheNetwork  false when the request came in over loopback, i.e. the server's own till
      */
     @Transactional
-    public LoginResult signIn(String username, String pin, String counterCode, String counterName,
-                              boolean overTheNetwork) {
+    public LoginResult signIn(String username, String pin, String counterId, boolean overTheNetwork) {
         User user = users.findByUsernameIgnoreCase(username == null ? "" : username.trim())
                 .filter(User::isActive)
                 .orElseThrow(() -> new AuthException("Wrong username or PIN"));
         if (!encoder.matches(pin == null ? "" : pin, user.getPinHash())) {
-            log.warn("Failed sign-in for {} on {}", user.getUsername(), counterCode);
+            log.warn("Failed sign-in for {} on counter {}", user.getUsername(), counterId);
             throw new AuthException("Wrong username or PIN");
         }
-        String counter = clients.admit(counterCode, counterName, overTheNetwork);
+        String counter = clients.admit(counterId, overTheNetwork);
         if (overTheNetwork) {
             endEarlierSessionsOn(counter);
         }

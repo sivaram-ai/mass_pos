@@ -14,6 +14,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
@@ -62,46 +63,49 @@ public class ClientRegistry {
      * @param overTheNetwork false for the browser on the server machine, which needs no permission
      */
     @Transactional
-    public String admit(String counterCode, String name, boolean overTheNetwork) {
+    public String admit(String counterId, boolean overTheNetwork) {
         String own = pos.terminal().code();
-        String code = normalise(counterCode);
-        if (!overTheNetwork && code.isEmpty()) {
-            return own;
-        }
         if (!overTheNetwork) {
-            // The server's own browser may name a counter, but only its own: its bills come off
-            // the server's own series and its printer is the server's printer.
-            if (!code.equals(own)) {
-                throw new ClientRefusedException("This browser is on the server itself, which bills as "
-                        + own + ". Counter " + code + " has to sign in from its own machine.");
-            }
+            // The browser on the server bills as the server, whatever it was told to be: its bills
+            // come off the server's own series and its printer is the server's printer.
             return own;
         }
-        // Every sign-in, not only the first one this machine ever made. A counter used to be let in
-        // for good once it had a row in the table, so a shop set up for two could have three
-        // counters billing at once as long as each had signed in some time in the past.
-        String refusal = whyNot(code);
+        Terminal counter = counterFor(counterId);
+        String refusal = whyNot(counter);
         if (refusal != null) {
             throw new ClientRefusedException(refusal);
         }
-        String called = readableName(name);
-        Terminal known = terminals.findByCode(code).orElse(null);
-        if (known == null) {
-            known = terminals.save(new Terminal(code, called.isEmpty() ? code : called, "", TerminalType.COUNTER));
-            log.info("Counter {} joined the shop; {} of {} places now taken", code, taken().size() + 1,
-                    clients.max());
-        }
-        // The name travels on every sign-in, not only the first: a shop that renames a machine in
-        // its own settings window should see the new name on its screens, which is the only place
-        // the name is ever shown.
-        known.describe(called.isEmpty() ? known.getName() : called, known.getSection(), TerminalType.COUNTER,
-                Instant.now());
-        return code;
+        // Heard from, and nothing more. The name and the code belong to the shop's own list of
+        // counters, which an admin keeps on the server; a machine signing in has no say in either.
+        counter.seen(Instant.now());
+        return counter.getCode();
     }
 
     /**
-     * Why a counter calling itself {@code counterCode} could not bill against this server right
-     * now, in a sentence somebody standing at the counter can act on - or null if it could.
+     * The till a machine says it is, or null for anything this shop does not have: no id at all,
+     * something that is not an id, or an id that is not one of these counters. All three are the
+     * same answer to the machine asking - a refusal with a sentence - rather than a crash.
+     */
+    private Terminal counterFor(String counterId) {
+        if (counterId == null || counterId.isBlank()) {
+            return null;
+        }
+        try {
+            return terminals.findById(UUID.fromString(counterId.trim())).orElse(null);
+        } catch (IllegalArgumentException notAnId) {
+            return null;
+        }
+    }
+
+    /** The same question asked by id, which is how a counter machine names the till it is. */
+    @Transactional(readOnly = true)
+    public String whyNot(String counterId) {
+        return whyNot(counterFor(counterId));
+    }
+
+    /**
+     * Why this counter could not bill against this server right now, in a sentence somebody
+     * standing at it can act on - or null if it could.
      *
      * <p>The settings window on a counter asks this before it will let anybody press "Save and
      * start billing", and {@link #admit} asks it again at the sign-in itself. Same question, same
@@ -110,23 +114,22 @@ public class ClientRegistry {
      * last place, and only the sign-in happens inside the transaction that settles who got it.
      */
     @Transactional(readOnly = true)
-    public String whyNot(String counterCode) {
-        String code = normalise(counterCode);
-        if (code.isEmpty()) {
-            return "This machine has not been given a counter number yet."
-                    + " Open GO RockIt Counter settings and set one.";
+    public String whyNot(Terminal counter) {
+        if (counter == null) {
+            return "This machine has not been given a counter yet. Open GO RockIt Counter settings,"
+                    + " look for the server, and choose which counter this machine is.";
         }
-        if (!CODE.matcher(code).matches()) {
-            return "\"" + code + "\" is not a usable counter number:"
-                    + " up to three characters, a letter first, e.g. T2.";
-        }
+        String code = counter.getCode();
         if (!clients.serving()) {
             return "This till does not take other machines. Set pos.clients.max"
                     + " on the server to the number of counters it should serve.";
         }
         if (code.equals(pos.terminal().code())) {
-            return "Counter " + code + " is the server itself. Give this machine a"
-                    + " counter number of its own.";
+            return "Counter " + code + " is the server itself. Choose one of the shop's other counters.";
+        }
+        if (!counter.isActive()) {
+            return "Counter " + code + " (" + counter.getName() + ") has been blocked on the server."
+                    + " An admin can unblock it under Settings, Tills in this shop.";
         }
         List<Terminal> others = taken(code);
         if (others.size() >= clients.max()) {
@@ -148,9 +151,30 @@ public class ClientRegistry {
 
     /** True while this counter holds one of the shop's places, i.e. somebody is signed in on it. */
     @Transactional(readOnly = true)
-    public boolean holdsPlace(String counterCode) {
-        String code = normalise(counterCode);
-        return !code.isEmpty() && taken().stream().anyMatch(terminal -> terminal.getCode().equals(code));
+    public boolean holdsPlace(String counterId) {
+        Terminal counter = counterFor(counterId);
+        return counter != null && holds(counter);
+    }
+
+    /**
+     * The counters a machine may choose to be: the shop's own list, minus the server itself.
+     * Blocked ones come too, marked, because a counter that cannot find itself on the list has no
+     * way of telling whether it was blocked or never created.
+     */
+    @Transactional(readOnly = true)
+    public List<Terminal> choices() {
+        String own = pos.terminal().code();
+        return terminals.findAllByOrderBySectionAscCodeAsc().stream()
+                .filter(terminal -> !terminal.getCode().equals(own))
+                .filter(terminal -> terminal.getType() == TerminalType.COUNTER)
+                .sorted(java.util.Comparator.comparing(Terminal::getCode))
+                .toList();
+    }
+
+    /** True when that till is one of the ones currently holding a place. */
+    @Transactional(readOnly = true)
+    public boolean holds(Terminal counter) {
+        return taken().stream().anyMatch(held -> held.getCode().equals(counter.getCode()));
     }
 
     /**

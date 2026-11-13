@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, fieldErrorsOf, messageOfFailure } from '../api'
-import { agentRequest, counterCode, counterName, forgetCounterPrinter, hasPrintAgent } from '../counter'
+import { agentRequest, counterCode, forgetCounterPrinter, hasPrintAgent } from '../counter'
 import type { PrinterSettingsForm, PrinterSetupView, PrinterStatus, PrinterType } from '../types'
 import { Banner, Button, Empty, errorFor, Field, inputClass, Panel } from './ui'
 import type { Toast } from '../App'
@@ -47,9 +47,8 @@ export default function PrinterPanel({ canEdit, shopName, onToast }:
 
   /** True on a counter: this machine prints for itself, so it owns its printer settings too. */
   const onCounter = hasPrintAgent()
-  const whose = onCounter
-    ? `${counterName() || counterCode()}${counterCode() ? ` (${counterCode()})` : ''}`
-    : ''
+  // The counter's own number, as the server gave it when this machine was told which till it is.
+  const whose = onCounter ? counterCode() : ''
 
   const load = () => {
     (onCounter

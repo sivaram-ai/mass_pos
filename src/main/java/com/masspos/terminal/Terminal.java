@@ -61,12 +61,45 @@ public class Terminal extends BaseEntity {
         this.type = type;
     }
 
-    /** Applies this machine's own settings; called on every start by {@code TerminalRegistry}. */
+    /**
+     * Applies this machine's own settings; called on every start by {@code TerminalRegistry}.
+     * Only the server's own till describes itself this way - a counter is created and named on
+     * the server, and has nothing to say about what it is called.
+     */
     public void describe(String name, String section, TerminalType type, Instant seenAt) {
         this.name = name;
         this.section = section;
         this.type = type;
         this.lastSeenAt = seenAt;
+        this.active = true;
+    }
+
+    /**
+     * Heard from, and nothing more.
+     *
+     * <p>Signing in used to go through {@link #describe}, which also set {@code active} - so a
+     * counter the shop had blocked let itself back in simply by signing in. A sign-in says only
+     * that the machine is there.
+     */
+    public void seen(Instant at) {
+        this.lastSeenAt = at;
+    }
+
+    /**
+     * What an admin may change afterwards. The code is not on the list and never can be: it is
+     * stamped into every bill this till has ever issued, and those bills are what the shop files.
+     */
+    public void rename(String name, String section) {
+        this.name = name;
+        this.section = section;
+    }
+
+    /** Blocked: it keeps its bills and its history, but nobody can sign in on it any more. */
+    public void block() {
+        this.active = false;
+    }
+
+    public void unblock() {
         this.active = true;
     }
 

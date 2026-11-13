@@ -20,12 +20,14 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.util.FileSystemUtils;
 
 import java.io.File;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -129,18 +131,68 @@ class ClientsApiIntegrationTest {
 
     /** A machine nobody has set up yet is told what to go and do. */
     @Test
-    void aMachineWithNoCounterNumberIsToldToSetOne() throws Exception {
+    void aMachineWithNoCounterIsToldToChooseOne() throws Exception {
         signIn("192.168.1.81", null)
                 .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.detail").value(containsString("has not been given a counter number")));
+                .andExpect(jsonPath("$.detail").value(containsString("has not been given a counter yet")));
     }
 
-    /** Nonsense in the counter box is refused before it can reach a bill number. */
+    /** A machine claiming a till this shop does not have gets the same answer, not a stack trace. */
     @Test
-    void aCounterNumberThatCouldNotGoOnABillIsRefused() throws Exception {
-        signIn("192.168.1.91", "COUNTER-TWO")
+    void aMachineClaimingATillThisShopDoesNotHaveIsRefused() throws Exception {
+        mvc.perform(login("01a1cb62-dead-75cd-be17-fa6db596caa3").with(from("192.168.1.82")))
                 .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.detail").value(containsString("not a usable counter number")));
+                .andExpect(jsonPath("$.counterSetup").value(true));
+        mvc.perform(login("not-an-id").with(from("192.168.1.83")))
+                .andExpect(status().isForbidden());
+    }
+
+    /**
+     * The counter's number is settled when it is created and never again: it is stamped into every
+     * bill that till has issued, and those bills are what the shop files.
+     */
+    @Test
+    void refusesACounterNumberThatCouldNotGoOnABill() throws Exception {
+        for (String bad : List.of("COUNTER-TWO", "2T", "")) {
+            mvc.perform(asAdmin(post("/api/terminals")).content(newCounter(bad, "Counter")))
+                    .andExpect(status().isBadRequest());
+        }
+        // And no two tills may share one: both would number their bills the same.
+        counterId("TZ", "Counter Z");
+        mvc.perform(asAdmin(post("/api/terminals")).content(newCounter("TZ", "Another")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.code").value(containsString("already")));
+    }
+
+    /**
+     * What a machine choosing which counter it is gets to choose from. Blocked counters are listed
+     * too, and marked: a machine that simply could not find itself on the list would have no way
+     * of telling whether it had been blocked or had never been created.
+     */
+    @Test
+    void offersTheShopsCountersToAMachineChoosingWhichItIs() throws Exception {
+        String blocked = counterId("TH", "Counter H");
+        counterId("TI", "Counter I");
+        mvc.perform(asAdmin(put("/api/terminals/" + blocked + "/blocked")).content("{\"blocked\":true}"))
+                .andExpect(status().isNoContent());
+
+        JsonNode list = json.readTree(mvc.perform(get("/api/clients/counters")
+                        .header(LocalApiGuard.CLIENT_HEADER, "test")
+                        .header(HttpHeaders.HOST, "localhost"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString());
+
+        // The server's own till is not on it: no counter may be the server.
+        assertThat(list.get("counters").findValuesAsText("code")).contains("TH", "TI").doesNotContain("T1");
+        for (JsonNode counter : list.get("counters")) {
+            if (counter.get("code").asText().equals("TH")) {
+                assertThat(counter.get("blocked").asBoolean()).isTrue();
+            }
+        }
+        signIn("192.168.1.58", "TH")
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.detail").value(containsString("blocked")));
+        signIn("192.168.1.59", "TI").andExpect(status().isOk());
     }
 
     /**
@@ -169,17 +221,23 @@ class ClientsApiIntegrationTest {
     }
 
     /**
-     * A machine renamed in its own settings window says so at the next sign-in, and the name
-     * follows it onto every screen. Keeping the first name it ever gave would mean a shop could
-     * never correct a typo without somebody editing the database.
+     * A counter is renamed on the server, and the new name follows it onto every screen. The
+     * machine standing at that counter has no say in it: a name typed on one machine was a name
+     * only that machine could correct, and the shop had no list of its own tills worth the name.
      */
     @Test
-    void takesTheNameACounterWasGivenEachTimeItSignsIn() throws Exception {
-        signIn("192.168.1.56", "TF", "Coutner 2").andExpect(status().isOk());
+    void takesTheNameAnAdminGaveTheCounterOnTheServer() throws Exception {
+        String counter = counterId("TF", "Coutner 2");
+        String token = tokenOf(signIn("192.168.1.56", "TF").andExpect(status().isOk()));
+        settingsSeenBy(token, "TF").andExpect(jsonPath("$.thisTerminal.name").value("Coutner 2"));
 
-        String token = tokenOf(signIn("192.168.1.56", "TF", "Counter 2").andExpect(status().isOk()));
+        mvc.perform(asAdmin(put("/api/terminals/" + counter))
+                        .content("{\"name\":\"Counter 2\",\"section\":\"1st floor\"}"))
+                .andExpect(status().isNoContent());
 
-        settingsSeenBy(token, "TF").andExpect(jsonPath("$.thisTerminal.name").value("Counter 2"));
+        settingsSeenBy(token, "TF")
+                .andExpect(jsonPath("$.thisTerminal.name").value("Counter 2"))
+                .andExpect(jsonPath("$.thisTerminal.section").value("1st floor"));
     }
 
     /**
@@ -370,7 +428,8 @@ class ClientsApiIntegrationTest {
         signIn("192.168.1.153", "TY").andExpect(status().isOk());
     }
 
-    private JsonNode places(String counter) throws Exception {
+    private JsonNode places(String code) throws Exception {
+        String counter = counterId(code, "Counter " + code);
         String body = mvc.perform(get("/api/clients/places?counter=" + counter)
                         .header(LocalApiGuard.CLIENT_HEADER, "test")
                         .header(HttpHeaders.HOST, "localhost"))
@@ -435,27 +494,54 @@ class ClientsApiIntegrationTest {
         return signIn(fromAddress, counter, null);
     }
 
-    private ResultActions signIn(String fromAddress, String counter, String name) throws Exception {
-        MockHttpServletRequestBuilder request = login(name).with(from(fromAddress));
-        if (counter != null) {
-            request = request.header(LocalApiGuard.COUNTER_HEADER, counter);
+    /**
+     * A machine signing in as one of the shop's counters. The counter is created on the server
+     * first, the way an admin creates one, because a machine can no longer make a counter up: it
+     * is told which of the shop's tills it is, and sends that till's id.
+     */
+    private ResultActions signIn(String fromAddress, String code, String name) throws Exception {
+        String id = code == null ? "" : counterId(code, name == null ? "Counter " + code : name);
+        return mvc.perform(login(id).with(from(fromAddress)));
+    }
+
+    /** That counter's id, created through the admin's own endpoint if the shop has not got it. */
+    private String counterId(String code, String name) throws Exception {
+        java.util.Optional<String> known = terminals.findByCode(code)
+                .map(terminal -> terminal.getId().toString());
+        if (known.isPresent()) {
+            return known.get();
         }
-        return mvc.perform(request);
+        String body = mvc.perform(asAdmin(post("/api/terminals")).content(newCounter(code, name)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        return json.readTree(body).get("id").asText();
     }
 
     private MockHttpServletRequestBuilder login() {
-        return login(null);
+        return login("");
     }
 
-    private MockHttpServletRequestBuilder login(String counterName) {
+    private MockHttpServletRequestBuilder login(String counterId) {
         return post("/api/auth/login")
                 .header(LocalApiGuard.CLIENT_HEADER, "test")
                 .header(HttpHeaders.HOST, "localhost")
                 .contentType(APPLICATION_JSON)
-                .content(counterName == null
+                .content(counterId == null || counterId.isEmpty()
                         ? "{\"username\":\"asha\",\"pin\":\"%s\"}".formatted(TestAccounts.CHOSEN_PIN)
-                        : "{\"username\":\"asha\",\"pin\":\"%s\",\"counterName\":\"%s\"}"
-                                .formatted(TestAccounts.CHOSEN_PIN, counterName));
+                        : "{\"username\":\"asha\",\"pin\":\"%s\",\"counterId\":\"%s\"}"
+                                .formatted(TestAccounts.CHOSEN_PIN, counterId));
+    }
+
+    private static String newCounter(String code, String name) {
+        return "{\"code\":\"%s\",\"name\":\"%s\",\"section\":\"\"}".formatted(code, name);
+    }
+
+    /** The admin's own request, with the headers every call through the guard needs. */
+    private MockHttpServletRequestBuilder asAdmin(MockHttpServletRequestBuilder request) {
+        return request.header(LocalApiGuard.CLIENT_HEADER, "test")
+                .header(HttpHeaders.HOST, "localhost")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                .contentType(APPLICATION_JSON);
     }
 
     /** MockMvc speaks from loopback unless told otherwise, which is the server's own browser. */

@@ -218,6 +218,57 @@ public final class ServerFinder {
         }
     }
 
+    /** One of the shop's counters, as the server offers it to a machine choosing which it is. */
+    public record Choice(String id, String code, String name, String section, boolean taken,
+                         boolean blocked) {
+
+        /** What the picker shows: the number first, because that is what is written on the till. */
+        @Override
+        public String toString() {
+            String where = section == null || section.isBlank() ? "" : " - " + section;
+            String state = blocked ? "  (blocked)" : taken ? "  (in use)" : "";
+            return code + "  " + name + where + state;
+        }
+
+        public boolean free() {
+            return !taken && !blocked;
+        }
+    }
+
+    /**
+     * The counters this shop has, for a machine deciding which of them it is. Empty when the
+     * server does not answer or is too old to offer a list - the caller turns that into a
+     * sentence rather than an empty box with no explanation.
+     */
+    public static List<Choice> countersAt(String url) {
+        try {
+            HttpURLConnection http = (HttpURLConnection) new URI(url + "/api/clients/counters")
+                    .toURL().openConnection();
+            http.setRequestProperty("X-POS-Client", "go-rockit-counter");
+            http.setConnectTimeout((int) REACHABLE.toMillis());
+            http.setReadTimeout((int) REACHABLE.toMillis());
+            if (http.getResponseCode() != 200) {
+                http.disconnect();
+                return List.of();
+            }
+            try (java.io.InputStream answer = http.getInputStream()) {
+                com.fasterxml.jackson.databind.JsonNode said =
+                        new com.fasterxml.jackson.databind.ObjectMapper().readTree(answer.readAllBytes());
+                List<Choice> counters = new ArrayList<>();
+                for (com.fasterxml.jackson.databind.JsonNode one : said.path("counters")) {
+                    counters.add(new Choice(one.path("id").asText(""), one.path("code").asText(""),
+                            one.path("name").asText(""), one.path("section").asText(""),
+                            one.path("taken").asBoolean(false), one.path("blocked").asBoolean(false)));
+                }
+                return List.copyOf(counters);
+            } finally {
+                http.disconnect();
+            }
+        } catch (URISyntaxException | IOException | RuntimeException notATill) {
+            return List.of();
+        }
+    }
+
     /**
      * Asks the server whether it is one, and how full. Done over HTTP after the port answers,
      * because a port that opens could be anything.

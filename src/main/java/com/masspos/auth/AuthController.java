@@ -32,8 +32,15 @@ public class AuthController {
      *                    is text somebody typed: a name in Devanagari or Tamil cannot go through a
      *                    header at all, and it is only ever acted on here.
      */
+    /**
+     * @param counterId which of the shop's counters this machine was told it is, from its own
+     *                  settings window. Empty from the browser on the server, which bills as the
+     *                  server. It is an id rather than a number because the number is the shop's
+     *                  to set and to correct, and a machine that had kept a copy of it would go on
+     *                  claiming to be a counter that no longer exists.
+     */
     public record LoginRequest(@NotBlank String username, @NotBlank String pin,
-                               @Size(max = 60) String counterName) {
+                               @Size(max = 36) String counterId) {
     }
 
     public record LoginResponse(String token, Principal user) {
@@ -52,7 +59,7 @@ public class AuthController {
     @PostMapping("/login")
     public LoginResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest http) {
         AuthService.LoginResult result = auth.signIn(request.username(), request.pin(),
-                http.getHeader(LocalApiGuard.COUNTER_HEADER), request.counterName(), overTheNetwork(http));
+                request.counterId(), overTheNetwork(http));
         return new LoginResponse(result.token(), result.principal());
     }
 

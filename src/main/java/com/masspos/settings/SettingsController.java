@@ -70,8 +70,9 @@ public class SettingsController {
      * @param signedIn somebody is signed in, answering or not: what holds the till's place
      * @param staff    who that is, or null when nobody is signed in
      */
-    public record TerminalView(String code, String name, String section, TerminalType type, boolean active,
-                               Instant lastSeenAt, boolean inUse, boolean signedIn, String staff) {
+    public record TerminalView(String id, String code, String name, String section, TerminalType type,
+                               boolean active, Instant lastSeenAt, boolean inUse, boolean signedIn,
+                               String staff) {
     }
 
     @GetMapping
@@ -165,18 +166,22 @@ public class SettingsController {
         String here = counter.code();
         Presence at = presence.of(here, present);
         if (here.equals(me.code())) {
-            return new TerminalView(me.code(), me.name(), me.section(), me.type(), true, Instant.now(),
+            // The server's own till is described from its own pos.properties, so it has no row to
+            // take an id from until it has registered itself; its id is never acted on anyway.
+            return new TerminalView(terminals.findByCode(me.code()).map(row -> row.getId().toString())
+                    .orElse(""), me.code(), me.name(), me.section(), me.type(), true, Instant.now(),
                     at.inUse(), at.signedIn(), at.staff());
         }
         return terminals.findByCode(here)
                 .map(terminal -> viewOf(terminal, present))
-                .orElseGet(() -> new TerminalView(here, here, "", TerminalType.COUNTER, true, Instant.now(),
-                        at.inUse(), at.signedIn(), at.staff()));
+                .orElseGet(() -> new TerminalView("", here, here, "", TerminalType.COUNTER, true,
+                        Instant.now(), at.inUse(), at.signedIn(), at.staff()));
     }
 
     private TerminalView viewOf(Terminal terminal, Map<String, Presence> present) {
         Presence at = presence.of(terminal.getCode(), present);
-        return new TerminalView(terminal.getCode(), terminal.getName(), terminal.getSection(), terminal.getType(),
-                terminal.isActive(), terminal.getLastSeenAt(), at.inUse(), at.signedIn(), at.staff());
+        return new TerminalView(terminal.getId().toString(), terminal.getCode(), terminal.getName(),
+                terminal.getSection(), terminal.getType(), terminal.isActive(), terminal.getLastSeenAt(),
+                at.inUse(), at.signedIn(), at.staff());
     }
 }

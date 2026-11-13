@@ -35,18 +35,19 @@ class CounterAppTest {
     }
 
     /**
-     * The counter number travels on the address, which is the only way the page can learn which
-     * machine it is open on. It has to survive a name with a space in it.
+     * Which of the shop's counters this machine is travels on the address, as the till's id: that
+     * is the only way the page can learn which counter it is open on, and it is an id because the
+     * number and the name belong to the shop's own list, not to this machine.
      */
     @Test
     void tellsTheBillingScreenWhichCounterIsLookingAtIt() {
         CounterConfig config = new CounterConfig();
-        config.code("t2");
-        config.name("Counter 2");
+        config.counter("01a1cb62-d9d7-75cd-be17-fa6db596caa3", "t2", "Counter 2");
 
         String url = CounterApp.billingScreen(config, "http://192.168.1.10:8765");
 
-        assertThat(url).isEqualTo("http://192.168.1.10:8765/?counter=T2&counterName=Counter+2&agent=8767");
+        assertThat(url).isEqualTo("http://192.168.1.10:8765/?counter=01a1cb62-d9d7-75cd-be17-fa6db596caa3"
+                + "&counterCode=T2&agent=8767");
     }
 
     /**
@@ -58,8 +59,7 @@ class CounterAppTest {
     @Test
     void opensAWindowOnTheCounterAlreadyRunningInsteadOfStartingASecond() throws Exception {
         CounterConfig config = new CounterConfig();
-        config.code("T2");
-        config.name("Counter 2");
+        config.counter("01a1cb62-d9d7-75cd-be17-fa6db596caa3", "T2", "Counter 2");
         config.agentPort(freePort());
 
         assertThat(CounterApp.windowOfRunningCounter(config))
@@ -70,8 +70,8 @@ class CounterAppTest {
             running.serving("http://192.168.1.10:8765");
 
             assertThat(CounterApp.windowOfRunningCounter(config))
-                    .contains("http://192.168.1.10:8765/?counter=T2&counterName=Counter+2&agent="
-                            + config.agentPort());
+                    .contains("http://192.168.1.10:8765/?counter=01a1cb62-d9d7-75cd-be17-fa6db596caa3"
+                            + "&counterCode=T2&agent=" + config.agentPort());
         }
     }
 
@@ -79,7 +79,7 @@ class CounterAppTest {
     @Test
     void saysSoWhenTheCounterAlreadyRunningHasNotReachedAServerYet() throws Exception {
         CounterConfig config = new CounterConfig();
-        config.code("T2");
+        config.counter("01a1cb62-d9d7-75cd-be17-fa6db596caa3", "T2", "Counter 2");
         config.agentPort(freePort());
 
         try (PrintAgent running = new PrintAgent(config, Path.of("target", "test-data", "counter-spool"))) {
@@ -95,13 +95,13 @@ class CounterAppTest {
         }
     }
 
-    /** A counter with nothing filled in asks rather than guessing at a server. */
+    /** A counter that has not been told which till it is asks rather than guessing at a server. */
     @Test
     void willNotTryToConnectUntilItKnowsWhichCounterItIs() {
         CounterConfig config = new CounterConfig();
         assertThat(config.readyToConnect()).isFalse();
 
-        config.code("T2");
+        config.counter("01a1cb62-d9d7-75cd-be17-fa6db596caa3", "T2", "Counter 2");
         assertThat(config.readyToConnect()).as("finding the server on the network needs nothing typed").isTrue();
 
         config.find(CounterConfig.Find.ADDRESS);

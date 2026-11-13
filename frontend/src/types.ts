@@ -301,6 +301,8 @@ export interface ShopSettingsForm {
 }
 
 export interface TerminalView {
+  /** The shop server's own id for this till: what a counter machine is told it is. */
+  id: string
   code: string
   name: string
   section: string

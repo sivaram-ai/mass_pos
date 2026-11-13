@@ -56,6 +56,38 @@ public class ClientsController {
                          String refusal) {
     }
 
+    /**
+     * One of the counters a machine may choose to be.
+     *
+     * @param id      what the machine keeps and sends; the code and the name are only ever shown
+     * @param taken   somebody is signed in on it, so this machine cannot be it right now
+     * @param blocked an admin has stopped it being used; it is listed so a counter that cannot
+     *                find itself knows which of the two happened
+     */
+    public record Choice(String id, String code, String name, String section, boolean taken,
+                         boolean blocked) {
+    }
+
+    /** @param counters the shop's counters, for the picker on a counter's settings window */
+    public record Counters(String shop, int places, int free, List<Choice> counters) {
+    }
+
+    /**
+     * The counters this shop has, for a machine deciding which of them it is. No token, for the
+     * same reason {@code /places} needs none: it is asked before anybody can sign in. It says what
+     * discovery already broadcasts to the whole LAN, plus the counters' names - which is what the
+     * person standing at the machine has to recognise to pick the right one.
+     */
+    @GetMapping("/counters")
+    public Counters counters() {
+        return new Counters(shop.currentOrEmpty().getTradeName(), registry.places(), registry.free(),
+                registry.choices().stream()
+                        .map(counter -> new Choice(counter.getId().toString(), counter.getCode(),
+                                counter.getName(), counter.getSection(), registry.holds(counter),
+                                !counter.isActive()))
+                        .toList());
+    }
+
     public record ConnectedCounter(String code, String name, String section, Instant lastSeenAt) {
 
         static ConnectedCounter of(Terminal terminal) {
@@ -82,6 +114,7 @@ public class ClientsController {
      */
     @GetMapping("/places")
     public Places places(@RequestParam(required = false) String counter) {
+        // `counter` is the till's id: a counter is told which till it is, it does not name one.
         String refusal = registry.whyNot(counter);
         List<Terminal> connected = registry.connected();
         return new Places(shop.currentOrEmpty().getTradeName(), registry.places(), connected.size(),

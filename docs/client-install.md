@@ -85,22 +85,35 @@ It holds the database and the licence, and it is the machine every other till ta
 
 **On each counter**
 
+**First, add the counters on the server.** Open Settings > **Tills in this shop** and press **Add a
+counter** for each machine the shop will bill on. Give it a number - up to three characters, a
+letter first: `T2`, `T3` - and a name staff will recognise, e.g. Counter 2.
+
+The number goes on every bill that counter takes, so **it is settled here and cannot be changed
+afterwards**: the shop's books are kept under it. The name can be corrected at any time with
+**Rename**, and a counter the shop has stopped using is put out of service with **Block** - it
+keeps every bill it ever took, it simply cannot be signed in on any more.
+
 1. Install `GoRockitPOS-Counter-<version>.exe`. No licence, no database, nothing to back up.
 2. Start **GO RockIt Counter**. It asks two things:
-   - **Counter number** - up to three characters, a letter first: `T2`, `T3`. It goes on every
-     bill that counter takes, and no two machines may share one.
-   - **Name** - what staff call it, e.g. Counter 2. It is what every screen in the shop shows.
    - **Where the server is** - leave it on *Find the server on this network* and press **Look for
-     the server**. It names the shop and says how many places are free. If nothing answers (some
-     networks do not pass the broadcast), type the server's address instead.
+     the server**. If nothing answers (some networks do not pass the broadcast), type the server's
+     address instead.
+   - **Which counter is this machine** - a list of the counters added on the server. Pick the one
+     this machine is standing at. Counters somebody else is already on, and any that are blocked,
+     are marked. Nothing is typed, so no machine can invent a counter or claim another's number.
 
    **Save and start billing stays grey until all of that is right** and the shop has a place for
    this counter, so a counter can never reach a sign-in screen that would turn it away. The line
-   above the buttons says what is still missing.
-3. Set the printer standing on that counter. Each counter prints its own bills on its own printer
-   and opens its own drawer; the server never prints another machine's bill.
-4. Press **Save and start billing**. Staff sign in with the same username and PIN they use
+   above the buttons says what is still missing. If the shop is full, leave the window open: it
+   keeps looking, and lights up by itself when a place comes free.
+3. Press **Save and start billing**. Staff sign in with the same username and PIN they use
    anywhere in the shop.
+4. **Set the printer** on the counter's own screen, under Settings > Printer. Until somebody does,
+   a new counter saves each bill as a file in `%LOCALAPPDATA%\GoRockitPOS-Counter\printer-out` on
+   that machine - so nothing is lost while the printer is being sorted out, and no bill quietly
+   goes to whatever Windows happens to call the default printer. Each counter prints its own bills
+   on its own printer and opens its own drawer; the server never prints another machine's bill.
 
 **Worth knowing before you sell this**
 

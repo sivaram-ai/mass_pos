@@ -36,7 +36,8 @@ public class AuthFilter extends OncePerRequestFilter {
      * network when a counter looks for it: the shop's name and how many places are free.
      */
     private static final Set<String> PUBLIC_PATHS = Set.of("/api/auth/login",
-            "/api/setup", "/api/setup/restore", "/api/setup/upload", "/api/clients/places");
+            "/api/setup", "/api/setup/restore", "/api/setup/upload",
+            "/api/clients/places", "/api/clients/counters");
     /** All a user may do while their account still carries a forced PIN change. */
     private static final Set<String> PIN_CHANGE_PATHS =
             Set.of("/api/auth/change-pin", "/api/auth/logout", "/api/auth/me");

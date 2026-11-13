@@ -11,26 +11,26 @@ import { api } from './api'
  */
 
 const COUNTER_KEY = 'masspos.counter'
-const COUNTER_NAME_KEY = 'masspos.counter.name'
+const COUNTER_ID_KEY = 'masspos.counter.id'
 const AGENT_KEY = 'masspos.counter.agent'
 
 /** Reads `?counter=` once when the counter app opens the window, then keeps it. */
 export function rememberCounterFromUrl(): void {
   try {
     const params = new URLSearchParams(window.location.search)
-    const code = params.get('counter')
-    const name = params.get('counterName')
+    const id = params.get('counter')
+    const code = params.get('counterCode')
     const agent = params.get('agent')
+    if (id) {
+      localStorage.setItem(COUNTER_ID_KEY, id)
+    }
     if (code) {
       localStorage.setItem(COUNTER_KEY, code.toUpperCase())
-    }
-    if (name) {
-      localStorage.setItem(COUNTER_NAME_KEY, name)
     }
     if (agent) {
       localStorage.setItem(AGENT_KEY, agent)
     }
-    if (code || name || agent) {
+    if (id || code || agent) {
       // Out of the address bar, so a reload or a shared link cannot carry it somewhere else.
       window.history.replaceState({}, '', window.location.pathname)
     }
@@ -49,12 +49,17 @@ export function counterCode(): string {
 }
 
 /**
- * What this machine is called on its own settings window, e.g. "Counter 2". Sent once, at sign-in,
- * so the server can keep it against this counter's till and show it on every screen afterwards.
+ * Which of the shop's counters this machine was told it is, as the server's own id for that till.
+ * Sent once, at sign-in, and that is the whole of how a machine claims a counter.
+ *
+ * <p>An id rather than the counter's number because the number belongs to the shop: an admin sets
+ * it when the counter is created and the books are kept under it. A machine holding a copy of the
+ * number would go on claiming to be a counter that may since have been blocked or replaced, and
+ * nothing would notice.
  */
-export function counterName(): string {
+export function counterId(): string {
   try {
-    return localStorage.getItem(COUNTER_NAME_KEY) ?? ''
+    return localStorage.getItem(COUNTER_ID_KEY) ?? ''
   } catch {
     return ''
   }
