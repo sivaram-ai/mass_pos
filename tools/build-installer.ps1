@@ -79,6 +79,20 @@ if (-not $page -or -not $bundle) {
         + " the UI build and the resource copy overlapped. Run .\mvnw.cmd clean package again and build the installer from that."
 }
 
+# The counter has exactly one screen, and it is a resource inside this jar rather than a folder
+# beside it. 0.4.16 shipped without it: CounterSetup.page() threw reading a resource that was not
+# there, the exception escaped the agent's handler, and HttpServer closed the connection without a
+# byte - so a counter and the server machine both showed a blank "didn't send any data" browser
+# page, with nothing in it to say what was wrong. Counted here for the same reason the server's
+# screen is.
+$counterJar = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path target\mass-pos-counter.jar))
+$setupPage = $counterJar.Entries | Where-Object { $_.FullName -eq "com/masspos/counter/setup.html" -and $_.Length -gt 0 }
+$counterJar.Dispose()
+if (-not $setupPage) {
+    throw "target\mass-pos-counter.jar has no setup page in it (com/masspos/counter/setup.html is missing or empty):" `
+        + " a counter built from this could not be set up at all. Run .\mvnw.cmd clean package again and build the installer from that."
+}
+
 Step "2/5 Building the trimmed Java runtimes"
 jlink --add-modules java.base,java.compiler,java.desktop,java.instrument,java.management,java.net.http,java.prefs,java.rmi,java.scripting,java.security.jgss,java.sql.rowset,jdk.jfr,jdk.unsupported,jdk.crypto.ec,jdk.localedata,jdk.charsets `
       --include-locales=en,hi --strip-debug --no-man-pages --no-header-files --compress=zip-6 `

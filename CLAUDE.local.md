@@ -640,7 +640,24 @@ folder and everything under it, so that is the only copy that survives one.
   The print agent is a web server on that machine which starts before anything has been found and
   whether or not the shop is reachable, so the page comes from there and the whole product is one
   kind of thing. Consequences:
-  - **The agent must start even with nothing configured.** It is the only screen a counter that
+  - **A request the agent does not answer is a blank page, and the counter has no second screen**
+  (`PrintAgent.answering`). `HttpServer` answers an escaped exception by closing the connection
+  with nothing in it, which a browser shows as `ERR_EMPTY_RESPONSE`: a Refresh button and no words
+  at all. 0.4.16 shipped a counter jar without `setup.html`, so `CounterSetup.page()` threw an
+  `IOException`, `onSetup` caught only `RuntimeException`, and setting up a counter was a blank
+  browser error on the counter machine *and* on the server machine, with nothing in any log.
+  Every handler is now wrapped: anything that escapes is written to `counter.log`, and the
+  connection gets a sentence - HTML when the caller asked for a page, JSON otherwise.
+  **A new context is registered through `answering`, never raw.**
+  - **The page is a resource inside the jar, so nothing fails to compile when it goes missing.**
+    Three things catch it now: `forceCreation` on the counter jar execution (the plugin can
+    otherwise keep a jar it believes is up to date), `build-installer.ps1` counting
+    `com/masspos/counter/setup.html` inside the jar it is about to ship, the way it already counts
+    the server's `index.html`, and `PrintAgentTest.servesTheSetupPageWithoutAShopServerAnywhere`,
+    which fetches it from a live agent. The tests run against `target/classes`, so **only the
+    installer check sees the artifact a shop actually gets** - which is why it is there and not
+    just a test.
+- **The agent must start even with nothing configured.** It is the only screen a counter that
     cannot reach its shop has. `CounterApp.listening` tries the agent port and the ten after it,
     because a counter with no agent has no printer *and* no way to be set up.
   - **Setup requests are same-origin only** (`notThisMachine`): they are the only ones that change

@@ -9,6 +9,7 @@ import com.masspos.hardware.SerialPrinterConnection;
 import com.masspos.hardware.TcpPrinterConnection;
 import com.masspos.hardware.WindowsPrinterConnection;
 import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 
 import java.io.IOException;
@@ -126,12 +127,12 @@ public final class PrintAgent implements AutoCloseable {
     /** Starts listening. The port is the counter's own setting, so two tills can share a machine. */
     public void start() throws IOException {
         http = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), config.agentPort()), BACKLOG);
-        http.createContext("/print", this::onPrint);
-        http.createContext("/hello", this::onHello);
-        http.createContext("/settings", this::onSettings);
-        http.createContext("/setup", this::onSetup);
-        http.createContext("/status", this::onStatus);
-        http.createContext("/test-page", this::onTestPage);
+        http.createContext("/print", answering(this::onPrint));
+        http.createContext("/hello", answering(this::onHello));
+        http.createContext("/settings", answering(this::onSettings));
+        http.createContext("/setup", answering(this::onSetup));
+        http.createContext("/status", answering(this::onStatus));
+        http.createContext("/test-page", answering(this::onTestPage));
         // A handful of threads, not the listener's own: asking the printer how it is waits for the
         // printer thread, and on the listener's thread that wait would hold up the next bill.
         requests = Executors.newFixedThreadPool(3, runnable -> {
@@ -145,6 +146,64 @@ public final class PrintAgent implements AutoCloseable {
         worker.setDaemon(true);
         worker.start();
         http.start();
+    }
+
+    /**
+     * Makes sure every request gets an answer, whatever happens inside the handler.
+     *
+     * <p>{@link HttpServer} closes the connection without a word when a handler throws, and a
+     * browser shows that as {@code ERR_EMPTY_RESPONSE}: a blank page with a Refresh button and
+     * nothing to go on. That is how a counter whose build was missing {@code setup.html} looked -
+     * the one screen it had answered with nothing at all, on the machine and on the counter, with
+     * no way to tell a missing page from a dead agent or a wrong port.
+     *
+     * <p>Each handler already catches what it expects. This is for what it does not: an
+     * {@link IOException} reading a resource, a bug, an {@link Error}. The connection is answered
+     * with a sentence, the whole failure goes to {@code counter.log}, and the agent stays up -
+     * which matters more here than anywhere else in the product, because this process is the only
+     * screen a counter that cannot reach its shop still has.
+     */
+    static HttpHandler answering(HttpHandler handler) {
+        return exchange -> {
+            try {
+                handler.handle(exchange);
+            } catch (Exception | StackOverflowError failed) {
+                CounterApp.note("The counter's " + exchange.getRequestURI().getPath()
+                        + " request failed: " + failed);
+                // -1 means nothing has been sent yet. Past that the headers are gone and the only
+                // honest thing left is to let the connection close.
+                if (exchange.getResponseCode() == -1) {
+                    sayItFailed(exchange);
+                }
+            } finally {
+                exchange.close();
+            }
+        };
+    }
+
+    /** In the shape the caller asked for: a page for a browser, JSON for the screens. */
+    private static void sayItFailed(HttpExchange exchange) throws IOException {
+        String sentence = "This counter hit a problem it could not get past."
+                + " Close this window, start GO RockIt Counter again, and if it keeps happening"
+                + " call service.";
+        if (wantsHtml(exchange)) {
+            byte[] html = ("<!doctype html><meta charset=utf-8><title>GO RockIt Counter</title>"
+                    + "<body style=\"font:16px/1.5 system-ui,sans-serif;margin:3rem auto;max-width:34rem\">"
+                    + "<h1 style=\"font-size:1.4rem\">GO RockIt Counter</h1><p>" + sentence + "</p>")
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "text/html; charset=utf-8");
+            exchange.sendResponseHeaders(500, html.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(html);
+            }
+            return;
+        }
+        respond(exchange, 500, CounterPrinter.json(Map.of("error", sentence)));
+    }
+
+    private static boolean wantsHtml(HttpExchange exchange) {
+        String accept = exchange.getRequestHeaders().getFirst("Accept");
+        return accept != null && accept.contains("text/html");
     }
 
     /** The one page allowed to send this counter a bill: the shop server it is connected to. */
