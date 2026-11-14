@@ -29,6 +29,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3Q | Signing in where that account is already open on another till stops and says where - counter, number, floor and when - and offers Go back or sign that one out and carry on here, chosen with the arrow keys and Enter | Done: 368 tests green, driven in the browser |
 | 3R | Nothing from inside the program reaches a counter's screen: every refusal is a sentence written for a shop, and the exception, its stack, the SQL, the paths and the ids go to the log. `ApiExceptionHandler.forTheScreen` is the gate; `api.ts` guards the browser end | Done: 377 tests green, refusals driven against a running till |
 | 3S | A counter's settings are reachable while nobody is signed in: the sign-in screen opens, from its corner, the very page the counter serves itself at first start, so the connection mode, the server's address and which of the shop's counters this machine is can all be changed without closing the program. A counter that is already billing is given a way back that changes nothing | Done: 385 tests green, driven in the browser |
+| 3U | One bill per counter, not one per address: the bill on screen is kept by the print agent on that machine, so moving a counter from the cable to Wi-Fi comes back to the same bill instead of to a separate one the browser kept against each address | Done: 389 tests green, driven across two addresses in the browser |
 | 3T | A till that cannot reach its shop keeps its screen: a bar says so, the bill stays where it is, Refresh asks instead of reloading, and Counter settings is on the bar - and it clears itself when the cable goes back in. The bill on screen survives a reload, and Log out asks first, holding a bill in progress rather than losing it | Done: 387 tests green, driven in the browser |
 | L1 | Offline subscription licence per till: Ed25519-signed key bound to a hardware machine ID, warn/grace days, billing lock, Licence screen + banner, vendor `tools/license/LicenseTool.java` | Done: 172 tests green, real key verified on this PC |
 | 5A | Windows installer: jpackage + WiX 3.14, trimmed JDK 21 runtime, one file, `tools/build-installer.ps1` | Done: installed and run from the exe on this PC |
@@ -128,13 +129,34 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
     answer: it proves the cable is in.
   - **The way out is on the bar**: Counter settings, on a counter, which is served by the print
     agent on that machine and so answers whatever the network is doing. See the counter notes.
-- **The bill on screen survives a reload** (`billDraft.ts`). It is written to `localStorage` on
-  every change and read back when the grid mounts. Not a held bill - that one is the shop's, named
-  and on the server - but this machine's note of its own screen, dropped as soon as the bill is
-  taken, held, cleared or signed out from. Stamped with the till's day and this counter's code,
-  and ignored after 12 hours, so yesterday's abandoned screen is never billed to this morning's
-  customer. Sale mode only: half an edit or a return brought back out of storage, against a bill
-  that may since have been returned against, is worse than none.
+- **The bill on screen survives a reload** (`billDraft.ts`). It is written back on every change and
+  read when the grid opens. Not a held bill - that one is the shop's, named and on the server - but
+  this machine's note of its own screen, dropped as soon as the bill is taken, held, cleared or
+  signed out from. Stamped with the till's day and ignored after 12 hours, so yesterday's abandoned
+  screen is never billed to this morning's customer. Sale mode only: half an edit or a return
+  brought back out of storage, against a bill that may since have been returned against, is worse
+  than none.
+  - **On a counter it is kept by the print agent, not in `localStorage`** (`/bill-draft` on the
+    agent; `billHere` / `keepBillHere` / `forgetBillHere` in `counter.ts`). `localStorage` belongs
+    to the **address** a page came from, not to the machine it is running on. A counter moved from
+    the cable to Wi-Fi reaches its shop at a different address, so the browser hands it a
+    different, empty store - and gives the first one back when it moves to the cable again. A
+    cashier watched the bill they were ringing up disappear and an abandoned one take its place,
+    and the two sets took turns with the connection. The machine is the thing that does not change
+    when the network does. **The server's own browser keeps using `localStorage`**: it has no
+    agent, and its own address never changes.
+  - **So the restore is a request, and the grid opens empty for a moment.** Billing holds
+    `restored`, and **the save effect must not run before it** - an empty grid would write over the
+    bill it is about to show. Anything typed in the meantime wins (`linesRef.current.length > 0`),
+    and the cursor is sent to the start of the bill again once the lines land, because it was put
+    at the start of an *empty* one a moment earlier.
+  - **The agent writes through a temporary file and moves it into place**, so a counter switched
+    off mid-write leaves either the bill before it or the bill after it, never half of each. It has
+    its own lock: the bill on screen has nothing to do with which printer the counter has.
+  - **A counter clears any `localStorage` draft it finds**, so one left under an address the
+    counter used to use cannot come back.
+  - **The sign-in token is per address too**, and deliberately left that way: reaching the shop at
+    a new address means signing in again, which is a new session on that till.
 - **Log out is asked, never done on one click** (`ConfirmSignOut` in `App.tsx`). It sits at the
   foot of the menu one keystroke from the screens above it. With a bill on screen the only two
   answers are "Back to the bill" and "Hold the bill, then log out" - deliberately no "log out

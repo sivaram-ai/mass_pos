@@ -112,6 +112,50 @@ class PrintAgentTest {
     }
 
     /**
+     * The bill on screen belongs to this machine, not to the address it reaches its shop at.
+     *
+     * <p>It was in the browser's own storage, which belongs to the address a page came from. A
+     * counter moved from the cable to Wi-Fi reaches its shop at a different address, so the
+     * browser handed it a different, empty store - and gave the first one back on moving to the
+     * cable again. The cashier watched the bill they were ringing up disappear and an abandoned
+     * one take its place. The agent is on the machine, and the machine does not change.
+     */
+    @Test
+    void keepsTheBillOnScreenForThisMachine() throws Exception {
+        assertThat(json.readTree(get("/bill-draft").body()).isEmpty())
+                .as("nothing rung up yet").isTrue();
+
+        String bill = """
+                {"at":1,"day":"2026-11-14","counter":"T2","lines":[{"sku":"101","name":"APPLE"}]}""";
+        assertThat(send("PUT", "/bill-draft", bill).statusCode()).isEqualTo(200);
+
+        JsonNode kept = json.readTree(get("/bill-draft").body());
+        assertThat(kept.at("/lines/0/name").asText()).isEqualTo("APPLE");
+        assertThat(kept.get("day").asText()).isEqualTo("2026-11-14");
+        assertThat(folder.resolve("bill-draft.json"))
+                .as("on this machine, where a different address cannot hide it").exists();
+
+        // Taken, held or cleared: the note goes, and the next screen opens on nothing.
+        assertThat(send("DELETE", "/bill-draft", "").statusCode()).isEqualTo(200);
+        assertThat(json.readTree(get("/bill-draft").body()).isEmpty()).isTrue();
+        assertThat(folder.resolve("bill-draft.json")).doesNotExist();
+    }
+
+    /** A second bill replaces the first whole, rather than being written over the top of it. */
+    @Test
+    void keepsOnlyTheBillThatIsOnScreenNow() throws Exception {
+        send("PUT", "/bill-draft", """
+                {"day":"2026-11-14","lines":[{"sku":"101"},{"sku":"102"},{"sku":"103"}]}""");
+        send("PUT", "/bill-draft", """
+                {"day":"2026-11-14","lines":[{"sku":"999"}]}""");
+
+        JsonNode kept = json.readTree(get("/bill-draft").body());
+
+        assertThat(kept.get("lines")).hasSize(1);
+        assertThat(kept.at("/lines/0/sku").asText()).isEqualTo("999");
+    }
+
+    /**
      * The page is also opened from the sign-in screen, by somebody changing a counter that is
      * already billing rather than setting a new one up, so it has to be told what this machine is
      * set to before anybody touches a field.

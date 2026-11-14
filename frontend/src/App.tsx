@@ -311,7 +311,7 @@ export default function App() {
       // exactly where somebody needs to get off this account and on with their evening. The
       // session is settled at the server's end by the next sign-in on this counter.
     } finally {
-      forgetBillDraft()
+      void forgetBillDraft()
       saveToken(null)
       setUser(null)
       setSettings(null)

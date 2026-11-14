@@ -192,17 +192,13 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
   onHeldForSignOut?: (outcome: { held: boolean; says: string }) => void
 }) {
   /**
-   * The bill this machine had on screen when it was last open. A refresh, or the browser's own
-   * error page after the network dropped, is a reload, and a reload used to empty the grid - with
-   * no way back, because nothing on it had been sent anywhere yet. Re-keyed on the way in so the
-   * row keys stay this run's own.
+   * False until the bill this machine had on screen has been asked for and answered. On a counter
+   * that answer comes from the print agent on this machine, so it arrives a moment after the
+   * screen does - and nothing may be written back over it before it has been read.
    */
-  const [resumed] = useState(() => {
-    const draft = savedBillDraft<Row>(localToday())
-    return draft ? { ...draft, lines: draft.lines.map((line, at) => ({ ...line, key: at + 1 })) } : null
-  })
-  const [lines, setLines] = useState<Row[]>(() => resumed?.lines ?? [])
-  const [customer, setCustomer] = useState<Customer>(() => resumed?.customer ?? NO_CUSTOMER)
+  const [restored, setRestored] = useState(false)
+  const [lines, setLines] = useState<Row[]>([])
+  const [customer, setCustomer] = useState<Customer>(NO_CUSTOMER)
   const [quote, setQuote] = useState<QuotedCart | null>(null)
   const [edit, setEdit] = useState<Edit>({ row: 0, col: 'code', text: '', dirty: false })
   const [found, setFound] = useState<Found | null>(null)
@@ -226,11 +222,9 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
   const [shortcuts, setShortcuts] = useState(loadShortcuts)
   const [showShortcuts, setShowShortcuts] = useState(loadShowShortcuts)
   const [askCashReceived, setAskCashReceived] = useState(loadAskCashReceived)
-  const [billInfo, setBillInfo] = useState<BillInfo>(() => resumed
-    ? { tableNo: resumed.tableNo, supplierId: resumed.supplierId }
-    : NO_BILL_INFO)
+  const [billInfo, setBillInfo] = useState<BillInfo>(NO_BILL_INFO)
   /** What is typed in the supplier box, which is not the committed supplier until it resolves. */
-  const [supplierText, setSupplierText] = useState(() => resumed?.supplierText ?? '')
+  const [supplierText, setSupplierText] = useState('')
   const [supplierOpen, setSupplierOpen] = useState(false)
   const [supplierHighlight, setSupplierHighlight] = useState(0)
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
@@ -239,7 +233,7 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
 
   const cells = useRef(new Map<string, HTMLInputElement>())
   const listItems = useRef(new Map<number, HTMLTableRowElement>())
-  const nextKey = useRef((resumed?.lines.length ?? 0) + 1)
+  const nextKey = useRef(1)
   /** The hold-before-signing-out this screen has already answered; see the effect that uses it. */
   const handledHold = useRef(holdRequest ?? 0)
   // Handlers read these rather than render-time state: a key press can change the bill and move on
@@ -1199,25 +1193,68 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
   }
 
   /**
-   * The bill on screen is written to this machine whenever it changes, so a reload opens on it
-   * again. Only a sale: an edit or a return is a document the server already has open, and half of
-   * one brought back out of storage - against a bill that may since have been returned against -
-   * is worse than none. An empty grid forgets the note, which is what makes taking, holding or
-   * clearing a bill the end of it.
+   * The bill this machine had on screen when it was last open, asked for once as the screen opens.
+   *
+   * <p>On a counter it is the print agent on this machine that is holding it, which is a request
+   * rather than a value already in hand - so the grid draws empty for a moment and fills in. That
+   * is the price of the bill being the machine's rather than the address's: a counter moved from
+   * the cable to Wi-Fi reaches its shop at a different address, and the browser keeps a separate
+   * store for each one.
    */
   useEffect(() => {
-    if (mode.kind !== 'sale' || lines.length === 0) {
-      forgetBillDraft()
+    let gone = false
+    savedBillDraft<Row>(localToday())
+      .then((draft) => {
+        // Somebody started ringing up while this was being asked for: what they typed wins.
+        if (gone || !draft || linesRef.current.length > 0 || modeRef.current.kind !== 'sale') {
+          return
+        }
+        replaceLines(draft.lines.map((line, at) => ({ ...line, key: at + 1 })))
+        nextKey.current = draft.lines.length + 1
+        setCustomer(draft.customer ?? NO_CUSTOMER)
+        const asked: BillInfo = { tableNo: draft.tableNo ?? '', supplierId: draft.supplierId ?? '' }
+        setBillInfo(asked)
+        billInfoRef.current = asked
+        setSupplierText(draft.supplierText ?? '')
+        // The cursor was put at the start of an empty bill a moment ago; this bill is not empty.
+        focusBillStart()
+      })
+      .finally(() => {
+        if (!gone) {
+          setRestored(true)
+        }
+      })
+    return () => {
+      gone = true
+    }
+    // Once, as the screen opens. Everything it touches is read through a ref or a setter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /**
+   * The bill on screen is written back whenever it changes, so a reload opens on it again. Only a
+   * sale: an edit or a return is a document the server already has open, and half of one brought
+   * back out of storage - against a bill that may since have been returned against - is worse than
+   * none. An empty grid forgets the note, which is what makes taking, holding or clearing a bill
+   * the end of it.
+   */
+  useEffect(() => {
+    // Never before the answer is in, or an empty grid would wipe the bill it is about to show.
+    if (!restored) {
       return
     }
-    saveBillDraft<Row>(localToday(), {
+    if (mode.kind !== 'sale' || lines.length === 0) {
+      void forgetBillDraft()
+      return
+    }
+    void saveBillDraft<Row>(localToday(), {
       lines,
       customer,
       tableNo: billInfo.tableNo,
       supplierId: billInfo.supplierId,
       supplierText,
     })
-  }, [lines, customer, billInfo, supplierText, mode])
+  }, [restored, lines, customer, billInfo, supplierText, mode])
 
   /** The shell asks before it signs anybody out, so it has to know whether there is a bill. */
   useEffect(() => {

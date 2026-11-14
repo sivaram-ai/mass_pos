@@ -246,7 +246,10 @@ screen or open its cash drawer.
 **When the network drops**, nothing on the screen is lost. A red bar says the shop cannot be
 reached and billing carries on where it left off the moment it answers — the till keeps asking, so
 nobody has to press anything after pushing the cable back in. The bill being rung up stays on the
-grid, and survives a refresh or a restart of the browser window as well. While the shop is out,
+grid, and survives a refresh or a restart of the browser window as well. It also survives a change
+of connection: a counter moved from the cable to Wi‑Fi comes back to the same bill, because the
+bill is kept on that machine rather than against the address it reaches the shop at. You will be
+asked to sign in again, as that is a new session on the till, and the bill will be there. While the shop is out,
 Refresh asks the shop before it reloads anything, and will not reload while it cannot be reached —
 reloading then lands on the browser's own error page, where the screen and the bill are gone. The
 bar carries a **Counter settings** button, so a counter can be moved from the cable to Wi-Fi, or

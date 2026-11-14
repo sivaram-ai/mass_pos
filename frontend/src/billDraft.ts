@@ -1,8 +1,8 @@
-import { counterCode } from './counter'
+import { billHere, counterCode, forgetBillHere, hasPrintAgent, keepBillHere } from './counter'
 import type { Customer } from './types'
 
 /**
- * The bill on screen, kept on this machine so a reload does not throw it away.
+ * The bill on screen, kept so a reload does not throw it away.
  *
  * <p>Refreshing is a page reload, and a page reload used to empty the grid. That is a worse
  * accident here than almost anywhere else: the cashier has rung up twenty items from a trolley
@@ -10,10 +10,18 @@ import type { Customer } from './types'
  * anywhere, so no server has them and no undo can reach them. The browser's own error page counts
  * as a reload too, which is how a pulled network cable came to cost a bill.
  *
- * <p>So the grid is written here on every change, and read back when the screen next opens. This
- * is <em>not</em> a held bill: a held bill is the shop's, kept on the server, named, and listed
- * for any till to resume. This is one machine's note of what was on its own screen a moment ago,
- * and it is thrown away as soon as the bill is taken, held, cleared or signed out from.
+ * <p>This is <em>not</em> a held bill: a held bill is the shop's, kept on the server, named, and
+ * listed for any till to resume. This is one machine's note of what was on its own screen a moment
+ * ago, and it is thrown away as soon as the bill is taken, held, cleared or signed out from.
+ *
+ * <p><b>Where it is kept matters.</b> On a counter it goes to the print agent on that machine, and
+ * on the server's own browser to `localStorage`. The obvious thing - `localStorage` everywhere -
+ * is what was here first, and it was wrong: that storage belongs to the *address* the page came
+ * from. A counter moved from the cable to Wi-Fi reaches its shop at a different address, so the
+ * browser hands it a different, empty store, and gives the first one back when it moves to the
+ * cable again. The cashier watched the bill they were ringing up disappear and an older one they
+ * had abandoned take its place. The machine is the thing that does not change when the network
+ * does; the server's own browser has no agent, and its address never changes either.
  */
 
 const DRAFT_KEY = 'masspos.bill.draft'
@@ -31,7 +39,7 @@ export interface BillDraft<Line> {
   at: number
   /** The till's calendar day, so a bill never crosses one. */
   day: string
-  /** Which counter wrote it: a machine that has since become another till starts clean. */
+  /** Which counter wrote it: only read back where the browser is the one keeping it. */
   counter: string
   lines: Line[]
   customer: Customer
@@ -45,13 +53,21 @@ export interface BillDraft<Line> {
 type Writing<Line> = Pick<BillDraft<Line>,
   'lines' | 'customer' | 'tableNo' | 'supplierId' | 'supplierText'>
 
-export function saveBillDraft<Line>(day: string, bill: Writing<Line>): void {
+export async function saveBillDraft<Line>(day: string, bill: Writing<Line>): Promise<void> {
+  const draft: BillDraft<Line> = { at: Date.now(), day, counter: counterCode(), ...bill }
+  if (hasPrintAgent()) {
+    try {
+      await keepBillHere(draft)
+    } catch {
+      // The agent on this machine is not answering, which is its own trouble and already on
+      // screen. The bill itself is untouched; it simply will not survive a reload.
+    }
+    return
+  }
   try {
-    const draft: BillDraft<Line> = { at: Date.now(), day, counter: counterCode(), ...bill }
     localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
   } catch {
-    // A locked-down browser profile, or a quota that is full. The bill on screen is unaffected;
-    // it simply will not survive a reload, which is where this started.
+    // A locked-down browser profile, or a quota that is full. Same bargain as above.
   }
 }
 
@@ -60,36 +76,63 @@ export function saveBillDraft<Line>(day: string, bill: Writing<Line>): void {
  *
  * @param day the till's calendar day, as the screen writes bill dates
  */
-export function savedBillDraft<Line>(day: string): BillDraft<Line> | null {
+export async function savedBillDraft<Line>(day: string): Promise<BillDraft<Line> | null> {
+  if (hasPrintAgent()) {
+    // Anything this browser kept under an address this counter used to reach its shop at. It is
+    // the wrong bill by definition now, and leaving it would let it come back.
+    forgetLocalDraft()
+    try {
+      // No counter check: the agent answering is this counter, which is the whole point of it.
+      return stillThisBill(await billHere<BillDraft<Line>>(), day, true)
+    } catch {
+      return null
+    }
+  }
   try {
     const saved = localStorage.getItem(DRAFT_KEY)
-    if (!saved) {
-      return null
+    const draft = saved ? JSON.parse(saved) as BillDraft<Line> | null : null
+    const keep = stillThisBill(draft, day, false)
+    if (!keep && saved) {
+      forgetLocalDraft()
     }
-    const draft = JSON.parse(saved) as BillDraft<Line> | null
-    if (!draft || !Array.isArray(draft.lines) || draft.lines.length === 0) {
-      return null
-    }
-    if (draft.day !== day || Date.now() - draft.at > WHILE_IT_IS_STILL_THIS_BILL_MS) {
-      forgetBillDraft()
-      return null
-    }
-    if (draft.counter !== counterCode()) {
-      forgetBillDraft()
-      return null
-    }
-    return draft
+    return keep
   } catch {
-    // Anything unreadable is treated as nothing: an empty grid is always a safe thing to open on.
-    forgetBillDraft()
+    // Anything unreadable is treated as nothing: an empty grid is always safe to open on.
+    forgetLocalDraft()
     return null
   }
 }
 
-export function forgetBillDraft(): void {
+function stillThisBill<Line>(draft: BillDraft<Line> | null, day: string,
+                             thisMachineKeptIt: boolean): BillDraft<Line> | null {
+  if (!draft || !Array.isArray(draft.lines) || draft.lines.length === 0) {
+    return null
+  }
+  if (draft.day !== day || Date.now() - draft.at > WHILE_IT_IS_STILL_THIS_BILL_MS) {
+    return null
+  }
+  if (!thisMachineKeptIt && draft.counter !== counterCode()) {
+    return null
+  }
+  return draft
+}
+
+export async function forgetBillDraft(): Promise<void> {
+  forgetLocalDraft()
+  if (!hasPrintAgent()) {
+    return
+  }
+  try {
+    await forgetBillHere()
+  } catch {
+    // Nothing to do, and nothing that depends on it: the next bill overwrites it anyway.
+  }
+}
+
+function forgetLocalDraft(): void {
   try {
     localStorage.removeItem(DRAFT_KEY)
   } catch {
-    // Nothing to do: there is no screen to tell and nothing that depends on it.
+    // There is no screen to tell and nothing that depends on it.
   }
 }

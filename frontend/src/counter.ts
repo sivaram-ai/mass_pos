@@ -120,6 +120,30 @@ export function openCounterSetup(): boolean {
   return true
 }
 
+/**
+ * The bill on screen, kept by the print agent on this machine rather than in the browser.
+ *
+ * <p>The browser's own storage belongs to the address a page came from, not to the machine it is
+ * running on. A counter moved from the cable to Wi-Fi reaches its shop at a different address, so
+ * the browser hands it a different, empty store - and gives the first one back when it moves to
+ * the cable again. The bill being rung up disappeared, and an abandoned one took its place.
+ *
+ * <p>This machine does not change when the network does, and the agent is what it keeps.
+ */
+export async function billHere<T>(): Promise<T | null> {
+  const saved = await agentRequest<T>('GET', '/bill-draft')
+  // The agent answers an empty object when it is holding nothing.
+  return saved && Object.keys(saved).length > 0 ? saved : null
+}
+
+export async function keepBillHere(bill: unknown): Promise<void> {
+  await agentRequest('PUT', '/bill-draft', bill)
+}
+
+export async function forgetBillHere(): Promise<void> {
+  await agentRequest('DELETE', '/bill-draft')
+}
+
 /** A bill the server laid out, in the two shapes a printer might want it. */
 export interface PrintJob {
   escpos: string
@@ -144,7 +168,8 @@ let paper: CounterPrinter | null = null
  * server's page alone, so nothing here can reach another counter - which is the whole point: the
  * printer being read or set is the one the paper comes out of, beside the person asking.
  */
-export async function agentRequest<T>(method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown): Promise<T> {
+export async function agentRequest<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string,
+                                      body?: unknown): Promise<T> {
   const response = await fetch(`${agentUrl()}${path}`, {
     method,
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },

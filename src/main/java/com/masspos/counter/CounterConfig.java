@@ -91,6 +91,15 @@ public final class CounterConfig {
         return folder().resolve(FILE);
     }
 
+    /**
+     * The folder these settings were loaded from, which is where this counter's own files go.
+     * Not {@link #folder()}: a test exercising a counter must write under its own temporary
+     * directory and never into a developer's real one.
+     */
+    Path ownFolder() {
+        return folder;
+    }
+
     /** Whatever is on disk, with sensible answers for anything missing or unreadable. */
     public static CounterConfig load() {
         return loadFrom(folder());

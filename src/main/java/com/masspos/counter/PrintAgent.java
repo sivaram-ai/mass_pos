@@ -19,7 +19,9 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
@@ -71,6 +73,14 @@ public final class PrintAgent implements AutoCloseable {
     private static final int MAX_JOB_BYTES = 2 * 1024 * 1024;
     /** Settings and a shop name are a few hundred bytes; anything else is not one of those. */
     private static final int MAX_SETTINGS_BYTES = 8 * 1024;
+
+    /** A trolley-load of items, with room to spare. It is a note of a screen, not a document. */
+    private static final int MAX_DRAFT_BYTES = 512 * 1024;
+
+    private static final String DRAFT_FILE = "bill-draft.json";
+
+    /** Its own lock: the bill on screen has nothing to do with which printer this counter has. */
+    private final Object drafts = new Object();
     private static final Duration STATUS_TIMEOUT = Duration.ofMillis(500);
     /** Room for a status round trip and a bill queued ahead of it, as the server allows. */
     private static final Duration AWAIT_MARGIN = Duration.ofSeconds(3);
@@ -132,6 +142,7 @@ public final class PrintAgent implements AutoCloseable {
         http.createContext("/settings", answering(this::onSettings));
         http.createContext("/setup", answering(this::onSetup));
         http.createContext("/status", answering(this::onStatus));
+        http.createContext("/bill-draft", answering(this::onBillDraft));
         http.createContext("/test-page", answering(this::onTestPage));
         // A handful of threads, not the listener's own: asking the printer how it is waits for the
         // printer thread, and on the listener's thread that wait would hold up the next bill.
@@ -358,6 +369,55 @@ public final class PrintAgent implements AutoCloseable {
     }
 
     /**
+     * The bill on screen, kept on this machine instead of in the browser.
+     *
+     * <p>It was in the browser's own storage, which sounds like the same thing and is not: that
+     * storage belongs to the <em>address</em> the page came from. A counter moved from the cable
+     * to Wi-Fi reaches its shop at a different address, so the browser handed it a different,
+     * empty store - and gave the first one back on moving to the cable again. A cashier saw the
+     * bill they were ringing up vanish, and an older one they had abandoned reappear.
+     *
+     * <p>This machine is the one thing that does not change when the network does, and the agent
+     * is what it keeps. One bill, whichever way the counter is talking to the shop.
+     *
+     * <p>Written through a temporary file and moved into place, so a counter switched off
+     * mid-write leaves either the bill before it or the bill after it, never half of each.
+     */
+    private void onBillDraft(HttpExchange exchange) throws IOException {
+        if (cors(exchange)) {
+            return;
+        }
+        String asked = exchange.getRequestMethod();
+        // Read before taking the lock: this waits on the browser, and the printer settings screen
+        // must not queue behind a cashier's keystrokes.
+        byte[] body = "PUT".equalsIgnoreCase(asked) || "POST".equalsIgnoreCase(asked)
+                ? exchange.getRequestBody().readNBytes(MAX_DRAFT_BYTES)
+                : new byte[0];
+        Path file = config.ownFolder().resolve(DRAFT_FILE);
+        synchronized (drafts) {
+            if ("GET".equalsIgnoreCase(asked)) {
+                byte[] saved = Files.isRegularFile(file) ? Files.readAllBytes(file) : new byte[0];
+                respond(exchange, 200, saved.length == 0 ? "{}".getBytes(StandardCharsets.UTF_8) : saved);
+                return;
+            }
+            if ("DELETE".equalsIgnoreCase(asked)) {
+                Files.deleteIfExists(file);
+                respond(exchange, 200, "{}");
+                return;
+            }
+            if (body.length == 0) {
+                respond(exchange, 400, "{\"error\":\"there was no bill in that\"}");
+                return;
+            }
+            Path writing = file.resolveSibling(DRAFT_FILE + ".writing");
+            Files.createDirectories(file.getParent());
+            Files.write(writing, body);
+            Files.move(writing, file, StandardCopyOption.REPLACE_EXISTING);
+            respond(exchange, 200, "{}");
+        }
+    }
+
+    /**
      * "This shop will not have me." The sign-in screen calls this when the server refuses the
      * machine rather than the person - no counter number, a number that is the server's own, or a
      * shop with every place taken, which is what the counter that loses a race for the last one
@@ -559,7 +619,8 @@ public final class PrintAgent implements AutoCloseable {
             exchange.getResponseHeaders().add("Access-Control-Allow-Headers", "content-type");
             // PUT is not one of the methods a browser will send cross-origin unless it is named
             // here, and saving the printer is a PUT: without this the settings page cannot save.
-            exchange.getResponseHeaders().add("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
+            exchange.getResponseHeaders().add("Access-Control-Allow-Methods",
+                    "GET, POST, PUT, DELETE, OPTIONS");
             exchange.getResponseHeaders().add("Access-Control-Max-Age", "600");
         }
         if ("OPTIONS".equalsIgnoreCase(exchange.getRequestMethod())) {
