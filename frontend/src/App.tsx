@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  api, ApiError, billDate, clockTime, LICENSE_CHANGED, saveToken, savedToken,
+  api, ApiError, askTheShop, billDate, clockTime, LICENSE_CHANGED, saveToken, savedToken,
   SHOP_ANSWERED, SHOP_UNREACHABLE, shopIsAnswering,
 } from './api'
 import { forgetBillDraft } from './billDraft'
@@ -97,6 +97,8 @@ export default function App() {
   const [holdRequest, setHoldRequest] = useState(0)
   const [holding, setHolding] = useState(false)
   const [holdFailed, setHoldFailed] = useState<string | null>(null)
+  /** True while a button is waiting on the shop's answer, so it can say so rather than sit dead. */
+  const [checking, setChecking] = useState(false)
   const onCartChanged = useCallback((items: number) => setBillItems(items), [])
   const lastEscape = useRef(0)
   // The billing screen puts its bill details into the header through this slot.
@@ -147,26 +149,31 @@ export default function App() {
     }
   }, [])
 
-  /** Asks the shop something cheap that needs no sign-in, which is also how the bar goes away. */
-  const askTheShop = useCallback(() => {
-    api.get('/api/clients/places').catch(() => {
-      // Still out. The bar is already saying so and the next ask is three seconds away.
-    })
+  /** The same ask, with the button that asked saying so while it waits. */
+  const askNow = useCallback(async () => {
+    setChecking(true)
+    try {
+      return await askTheShop()
+    } finally {
+      setChecking(false)
+    }
   }, [])
 
   // While the shop is out, keep asking. Nothing on screen moves and nothing is cleared: the first
-  // request that gets through puts the bar away by itself, mid-bill, with the bill still there.
+  // ask that gets through puts the bar away by itself, mid-bill, with the bill still there. The
+  // quiet one, so the buttons do not blink every three seconds at somebody who is not watching.
   useEffect(() => {
     if (reachable) {
       return
     }
-    const timer = setInterval(askTheShop, ASK_AGAIN_MS)
-    window.addEventListener('focus', askTheShop)
+    const keepAsking = () => { void askTheShop() }
+    const timer = setInterval(keepAsking, ASK_AGAIN_MS)
+    window.addEventListener('focus', keepAsking)
     return () => {
       clearInterval(timer)
-      window.removeEventListener('focus', askTheShop)
+      window.removeEventListener('focus', keepAsking)
     }
-  }, [reachable, askTheShop])
+  }, [reachable])
 
   // Back again. The sign-in this browser still holds a token for is picked up without anybody
   // typing a PIN: being unable to reach the shop for a minute is not a reason to sign out.
@@ -220,18 +227,23 @@ export default function App() {
   }, [signedIn])
 
   /**
-   * Reloading while the shop is unreachable is how somebody ends up on the browser's own error
-   * page, with the screen they were on gone and no way back to this counter's settings. So while
-   * the shop is out, refreshing asks it instead of reloading: the screen stays, and it comes back
-   * on its own the moment the shop answers.
+   * Refresh asks the shop before it reloads anything, and reloads only if it answers.
+   *
+   * <p>Reloading while the shop is unreachable is how somebody ends up on the browser's own error
+   * page: the screen they were on is gone, the bill with it, and there is no way back to this
+   * counter's settings from a cloud and a Refresh button. Asking first is what makes that
+   * impossible rather than merely unlikely - the bar going up is not enough on its own, because
+   * the cable can come out between two requests and the first thing anybody does when a screen
+   * stops responding is press Refresh, before anything has had the chance to fail.
+   *
+   * <p>If it does not answer, the ask that just failed has raised the bar, and the screen - with
+   * the bill on it, and Counter settings on the bar - stays exactly where it was.
    */
-  const refresh = useCallback(() => {
-    if (shopIsAnswering()) {
+  const refresh = useCallback(async () => {
+    if (await askNow()) {
       window.location.reload()
-    } else {
-      askTheShop()
     }
-  }, [askTheShop])
+  }, [askNow])
 
   // F5 is the key everyone reaches for to refresh, so it reloads - except on the billing grid,
   // where it has long been "remove this line" and the cart is live anyway.
@@ -242,7 +254,7 @@ export default function App() {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'F5' && !event.repeat) {
         event.preventDefault()
-        refresh()
+        void refresh()
       }
     }
     window.addEventListener('keydown', onKey)
@@ -317,6 +329,10 @@ export default function App() {
    */
   const askToSignOut = () => {
     setHoldFailed(null)
+    // The menu goes with it. It is not only tidier: the drawer listens for keys on the window in
+    // the capture phase, before anything else sees them, so left open behind this dialog it took
+    // the arrows and moved the focus ring down its own list instead.
+    setMenuOpen(false)
     setLeaving(true)
   }
 
@@ -342,7 +358,7 @@ export default function App() {
   // message telling somebody to go to it.
   const troubleAtTheFoot = !reachable && (
     <div className="fixed inset-x-0 bottom-0 z-40">
-      <ShopUnreachable onTryAgain={askTheShop} />
+      <ShopUnreachable busy={checking} onTryAgain={() => void askNow()} />
     </div>
   )
 
@@ -382,17 +398,19 @@ export default function App() {
         </button>
         <button
           type="button"
-          onClick={refresh}
+          onClick={() => void refresh()}
+          disabled={checking}
           title={!reachable
-            ? 'Ask the shop again. Reloading now would lose this screen.'
+            ? 'Asks the shop again. It will not reload while the shop cannot be reached, because'
+              + ' that would lose this screen.'
             : current === 'billing'
               ? 'Reload the till'
               : 'Reload this screen, and come back to it'}
-          className="flex shrink-0 items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-slate-800"
+          className="flex shrink-0 items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-slate-800 disabled:opacity-60"
         >
           <RefreshIcon />
-          <span className="hidden sm:inline">Refresh</span>
-          {current !== 'billing' && <kbd>F5</kbd>}
+          <span className="hidden sm:inline">{checking ? 'Checking…' : 'Refresh'}</span>
+          {current !== 'billing' && !checking && <kbd>F5</kbd>}
         </button>
         {/* A long shop name gives way first: it is cut, rather than pushing the rest off the row. */}
         <div className="flex min-w-0 shrink items-baseline gap-2">
@@ -422,7 +440,7 @@ export default function App() {
         )}
       </header>
 
-      {!reachable && <ShopUnreachable onTryAgain={askTheShop} />}
+      {!reachable && <ShopUnreachable busy={checking} onTryAgain={() => void askNow()} />}
 
       {license && (license.state !== 'ACTIVE' || license.clockBehind) && (
         <LicenseBanner
@@ -478,7 +496,11 @@ export default function App() {
               settings={settings}
               onToast={setToast}
               active={current === 'billing'}
-              blocked={menuOpen}
+              // Blocked by the log-out question as well as by the menu, so the grid behind it
+              // neither answers the arrows nor keeps the cursor - and so that closing it puts the
+              // cursor back in the cell it was in, which is what `blocked` going false already
+              // does for the menu.
+              blocked={menuOpen || leaving}
               headerSlot={headerSlot}
               role={user.role}
               request={billingRequest}
@@ -542,7 +564,7 @@ const TROUBLE_BUTTON = 'rounded-md border border-[#be123c] bg-white px-3 py-1.5 
  * <p>Fixed colours: the status scales flip on a dark theme, and a warning that turns into pale
  * text on a pale bar is not a warning.
  */
-function ShopUnreachable({ onTryAgain }: { onTryAgain: () => void }) {
+function ShopUnreachable({ busy, onTryAgain }: { busy: boolean; onTryAgain: () => void }) {
   return (
     <div className="shrink-0 border-y-2 border-[#be123c] bg-[#fff1f2] px-4 py-3 text-[#881337] shadow-lg">
       <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-4 gap-y-2">
@@ -554,7 +576,10 @@ function ShopUnreachable({ onTryAgain }: { onTryAgain: () => void }) {
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <button type="button" onClick={onTryAgain} className={TROUBLE_BUTTON}>Try now</button>
+          <button type="button" onClick={onTryAgain} disabled={busy}
+                  className={`${TROUBLE_BUTTON} disabled:opacity-60`}>
+            {busy ? 'Asking…' : 'Try now'}
+          </button>
           {hasPrintAgent() && (
             <button
               type="button"
@@ -618,6 +643,12 @@ function ConfirmSignOut({ items, busy, failed, onHold, onSignOut, onBack }: {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
       setAt((now) => (now + (event.key === 'ArrowDown' ? 1 : choices.length - 1)) % choices.length)
+      return
+    }
+    // Nothing here is reached by tabbing to it, so Tab only ever takes the cursor somewhere it
+    // cannot be used - the bill behind, or the browser's own chrome. It stays on the list.
+    if (event.key === 'Tab') {
+      event.preventDefault()
       return
     }
     // The in-app browser pane does not activate a focused button on Enter, and this list is a div

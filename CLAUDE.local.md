@@ -113,9 +113,19 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
     clear the token, so a dropped cable became "sign in again" - with the shop unreachable, so
     nobody could. The token is kept for status 0 and tried again when the shop answers; the same
     goes for `/api/settings`, which keeps the last shop name rather than blanking the header.
-  - **Refresh does not reload while the shop is out.** Reloading then lands on the browser's own
-    error page, where the screen is gone and nothing of this program is left to go back to. The
-    header's Refresh button and F5 ask the shop instead (`refresh()` in `App.tsx`).
+  - **Refresh asks the shop before it reloads anything, and reloads only if it answers**
+    (`refresh()` in `App.tsx` → `askTheShop()`). Reloading while the shop is out lands on the
+    browser's own error page, where the screen is gone and nothing of this program is left to go
+    back to. Checking the bar is up first is **not** enough: the cable comes out between two
+    requests, and pressing Refresh is the first thing anybody does when a screen stops responding
+    - before anything has had the chance to fail. So the ask is the thing that gates the reload,
+    and the ask that fails is what raises the bar.
+  - **The ask is bounded, at 2.5 s** (`askTheShop`, an `AbortController`). A cable pulled out of a
+    switch does not refuse a connection, it swallows it: nothing comes back and the browser waits
+    twenty seconds or more before admitting it - `ERR_CONNECTION_TIMED_OUT`, the very page this
+    exists to keep a till off. Refresh cannot stand there that long with a bill on screen, and a
+    till asking every three seconds must not stack up twenty-second waits. A refusal counts as an
+    answer: it proves the cable is in.
   - **The way out is on the bar**: Counter settings, on a counter, which is served by the print
     agent on that machine and so answers whatever the network is doing. See the counter notes.
 - **The bill on screen survives a reload** (`billDraft.ts`). It is written to `localStorage` on
@@ -135,6 +145,17 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
     at every sign-out, so a request left over from the last person re-ran on mount, held nothing,
     and signed the next person straight back out - 200 on login, 204 on logout, in the same second.
     Any new request-counter prop to a screen that remounts needs the same guard.
+  - **The menu closes when the dialog opens**, and that is not tidiness. `MenuDrawer` listens for
+    keys on the *window in the capture phase* (`addEventListener('keydown', onKey, true)`), before
+    anything else sees them, so left open behind the dialog it took the arrows and walked the focus
+    ring down its own list. **A dialog opened from the menu closes the menu**, or it has no keys.
+  - **The grid is `blocked` by the dialog as well as by the menu** (`blocked={menuOpen || leaving}`).
+    Two things come free: the bill behind stops answering arrows and Enter, and closing the dialog
+    puts the cursor back in the cell it was in - the `[active, blocked]` effect in `Billing.tsx`
+    already does that for the menu, and it is the same return as Esc Esc. **Any new full-screen
+    dialog in `App` belongs in `blocked` for the same two reasons.**
+  - **Tab is swallowed inside the dialog.** Nothing in it is reached by tabbing, so Tab only ever
+    takes the cursor somewhere it cannot be used: the bill behind, or the browser's own chrome.
 - **Refreshing is a page reload, and the screen survives it.** `App` keeps the current screen in
   `localStorage` (`masspos.screen`) and comes back to it, instead of dropping a manager reading a
   report back onto the billing grid. The header has a Refresh button on every screen; **F5 reloads

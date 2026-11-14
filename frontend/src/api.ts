@@ -41,6 +41,34 @@ function couldNotReach() {
   }
 }
 
+/**
+ * Asks the shop whether it is there, within a bounded wait, and says so through the two events
+ * above. `/api/clients/places` needs no sign-in, so this works on the sign-in screen too.
+ *
+ * <p>Bounded, because the answer is wanted now and the browser's own is far too slow. A cable
+ * pulled out of a switch does not refuse a connection, it swallows it: nothing comes back and the
+ * browser waits twenty seconds or more before admitting it - `ERR_CONNECTION_TIMED_OUT`, which is
+ * exactly the page this is here to keep a till off. Refresh cannot stand there that long with a
+ * bill on screen, and a till asking every three seconds must not stack up twenty-second waits.
+ *
+ * @return true when the shop answered at all; a refusal is an answer, and proves the cable is in
+ */
+export async function askTheShop(withinMs = 2500): Promise<boolean> {
+  const giveUp = new AbortController()
+  const timer = setTimeout(() => giveUp.abort(), withinMs)
+  try {
+    await fetch('/api/clients/places', { headers: authHeaders(), signal: giveUp.signal })
+    reached()
+    return true
+  } catch {
+    // Refused, unreachable, or too slow to be any use: all the same thing at a counter.
+    couldNotReach()
+    return false
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /** The till an account is already signed in on, as the server describes it. */
 export interface ActiveSessionDetails {
   counterCode: string
