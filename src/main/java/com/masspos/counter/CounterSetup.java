@@ -64,7 +64,30 @@ final class CounterSetup {
         state.put("url", config.url());
         state.put("counterId", config.counterId());
         state.put("counterCode", config.code());
+        state.put("billing", wayBack(config));
         return bytes(state);
+    }
+
+    /**
+     * Where to go on changing nothing, or empty for a counter that has never reached a shop.
+     *
+     * <p>This page used to be somewhere a counter arrived and could not leave: the only way off it
+     * was Save, because the only way on to it was a server that had already refused the machine.
+     * It is now also opened from the sign-in screen by somebody who may only want to read what
+     * this counter is set to, or who thinks better of changing it - so there has to be a way back
+     * that touches nothing.
+     *
+     * <p>It is the billing screen on the server this counter last used, which is the same address
+     * the counter app opens on its own: a shop nobody is signed in on answers it with the sign-in
+     * screen, so one address serves both. A counter with no till of its own and no server it has
+     * ever reached has nowhere to go back to, and the page offers it nothing rather than a button
+     * that leads somewhere empty.
+     */
+    private static String wayBack(CounterConfig config) {
+        if (config.counterId().isBlank() || config.lastServer().isBlank()) {
+            return "";
+        }
+        return CounterApp.billingScreen(config, config.lastServer());
     }
 
     /**

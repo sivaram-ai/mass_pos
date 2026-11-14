@@ -28,6 +28,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3P | A counter shows no desktop windows at all: the Swing settings dialog is gone and setting a counter up is a page the counter serves itself from its print agent, found before any shop server has been, with every refusal shown in full on it | Done: 365 tests green, driven end to end in the browser |
 | 3Q | Signing in where that account is already open on another till stops and says where - counter, number, floor and when - and offers Go back or sign that one out and carry on here, chosen with the arrow keys and Enter | Done: 368 tests green, driven in the browser |
 | 3R | Nothing from inside the program reaches a counter's screen: every refusal is a sentence written for a shop, and the exception, its stack, the SQL, the paths and the ids go to the log. `ApiExceptionHandler.forTheScreen` is the gate; `api.ts` guards the browser end | Done: 377 tests green, refusals driven against a running till |
+| 3S | A counter's settings are reachable while nobody is signed in: the sign-in screen opens, from its corner, the very page the counter serves itself at first start, so the connection mode, the server's address and which of the shop's counters this machine is can all be changed without closing the program. A counter that is already billing is given a way back that changes nothing | Done: 385 tests green, driven in the browser |
 | L1 | Offline subscription licence per till: Ed25519-signed key bound to a hardware machine ID, warn/grace days, billing lock, Licence screen + banner, vendor `tools/license/LicenseTool.java` | Done: 172 tests green, real key verified on this PC |
 | 5A | Windows installer: jpackage + WiX 3.14, trimmed JDK 21 runtime, one file, `tools/build-installer.ps1` | Done: installed and run from the exe on this PC |
 | 5B | One folder per till, `%LOCALAPPDATA%\GoRockitPOS`, data in `data\`, with an automatic move from the old `MassPOS` folder | Done: 235 tests green, this PC's own till migrated |
@@ -668,6 +669,24 @@ folder and everything under it, so that is the only copy that survives one.
     across processes any more, so the agent's settings-request queue is gone.
   - **The one thing with no screen left** is an agent that cannot bind any port at all. That goes
     to `counter.log` in the counter's folder, because there is genuinely nowhere else.
+  - **The page is reached from the sign-in screen, not only from a refusal.** It used to open one
+    way: the shop turned the machine away and `goToCounterSetup` sent the browser there with the
+    reason on it. So a counter pointed at the wrong shop, or carried to another one, could only be
+    put right by closing GO RockIt Counter and starting it again - and nothing about changing one
+    of those settings needed a restart, it only needed a door. The sign-in screen has one in the
+    corner (`CounterSettingsCorner` in `Login.tsx` → `openCounterSetup`), drawn only where
+    `hasPrintAgent()` is true: the server's own browser has no agent to ask and no counter settings
+    to show. Signing out is exactly when somebody changes one of these things, and the sign-in
+    screen is what they are looking at while they do.
+  - **It is the same page, deliberately - not a counter settings screen in the React app.** A
+    second screen asking the same two questions is a second set of words to keep in step, and the
+    one inside the app would be the one that cannot be reached when the shop's server is down,
+    which is exactly when it is wanted. So the corner button opens `/setup` on this machine's own
+    agent: the page a counter serves itself at first start, unchanged. A counter that is already
+    billing gets one thing a new one does not - `CounterSetup.state` carries `billing`, the screen
+    it came from, and the page shows "Back, changing nothing", which Escape also does. A counter
+    with no till of its own and no server it has ever reached gets no such button, because there is
+    nowhere to send it and this page is the only screen that machine has.
 - **A counter turned away watches for a place** (`CounterSettings`, a 4 s Swing `Timer`). Somebody
   logging out across the room frees a place at once, and the only thing between this machine and
   billing is asking again - so it asks itself, quietly (the last answer stays on screen rather than

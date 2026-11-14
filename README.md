@@ -243,6 +243,15 @@ shops' data, is in [docs/multi-terminal-and-rbac.md](docs/multi-terminal-and-rba
 The UI port stays on loopback even on the master, so nobody on the network can drive a till's
 screen or open its cash drawer.
 
+**A counter's own settings** — how it finds the shop's server, that server's address, and which of
+the shop's counters this machine is — are on a page the counter serves itself, so it opens whether
+or not the shop's server can be reached. Open it from **Counter settings**, in the top-left corner
+of the sign-in screen: it is the same page a counter shows when it is first installed, with the
+settings that counter is running on already filled in. Nothing on the machine changes until you
+press Save, and **Back, changing nothing** (or Esc) returns you to the sign-in screen. There is
+nothing to restart either way. The button is only on a counter — the server's own screen has no
+counter settings, and its printer, number and folder are its own under Settings.
+
 ## Receipt printer and cash drawer
 
 **Set the printer on screen: Settings → Printer.** It lists the COM ports and the printers this

@@ -97,6 +97,29 @@ export function goToCounterSetup(reason: string): boolean {
   return true
 }
 
+/**
+ * Opens this machine's own counter settings because somebody asked for them, rather than because
+ * the shop turned the machine away.
+ *
+ * <p>The same page, with no reason on it: how this counter finds the shop's server, the address
+ * when it is typed rather than found, and which of the shop's counters this machine is. All three
+ * have to be settled before any shop server can serve a page, which is why the page comes from the
+ * print agent on this machine and not from the shop.
+ *
+ * <p>Until this, the only way on to it was a refusal - so a counter pointed at the wrong shop, or
+ * carried to another one, had to be closed and started again to be put right. Nothing about that
+ * needed a restart; it only needed a door.
+ *
+ * @return true when this machine has settings of its own to show, i.e. it is a counter
+ */
+export function openCounterSetup(): boolean {
+  if (!hasPrintAgent()) {
+    return false
+  }
+  window.location.href = `${agentUrl()}/setup`
+  return true
+}
+
 /** A bill the server laid out, in the two shapes a printer might want it. */
 export interface PrintJob {
   escpos: string

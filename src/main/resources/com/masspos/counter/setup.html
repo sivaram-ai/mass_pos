@@ -37,6 +37,8 @@
   #said ol { margin: 8px 0 0; padding-left: 20px; }
   #said li { margin: 4px 0; }
   .buttons { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
+  /* Away from the two that change something, at the end a sentence is read from. */
+  #back { margin-right: auto; }
   button {
     font: inherit; padding: 10px 18px; border-radius: 8px; border: 1px solid #cbd5e1;
     background: #fff; cursor: pointer;
@@ -79,6 +81,7 @@
   <div id="said" class="info">Press “Look for the server” to see this shop's counters.</div>
 
   <div class="buttons">
+    <button id="back" type="button" hidden>Back, changing nothing</button>
     <button id="look" type="button">Look for the server</button>
     <button id="save" type="button" class="primary" disabled>Save and start billing</button>
   </div>
@@ -93,8 +96,10 @@
   var url = document.getElementById('url');
   var look = document.getElementById('look');
   var save = document.getElementById('save');
+  var back = document.getElementById('back');
   var found = null;      // what the last look turned up, or null
   var looking = false;
+  var wayBack = '';      // the screen this counter came from, or '' before it has ever billed
 
   function find() {
     return document.querySelector('input[name=find]:checked').value;
@@ -218,9 +223,21 @@
       if (event.key === 'Enter') { doLook(); }
     });
   });
+  // Somebody who opened this page from the sign-in screen may only want to read what this counter
+  // is set to, or may think better of changing it. Nothing here is written until Save, so leaving
+  // is simply going back - and Escape does it too, because that is what a page that changes
+  // nothing should answer to.
+  function goBack() {
+    if (wayBack) { window.location = wayBack; }
+  }
+
   counters.addEventListener('change', refresh);
   look.addEventListener('click', doLook);
   save.addEventListener('click', doSave);
+  back.addEventListener('click', goBack);
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') { goBack(); }
+  });
 
   // What this machine already had, and why it is here if the server turned it away.
   var why = new URLSearchParams(window.location.search).get('reason');
@@ -228,6 +245,12 @@
     document.querySelector('input[name=find][value=' + state.find + ']').checked = true;
     address.value = state.address || '';
     url.value = state.url || '';
+    // One page, whether this counter is being set up for the first time or changed a year later:
+    // the same two questions, the same fields, the same words. The only thing a counter that is
+    // already billing gets that a new one does not is a way back, because it has somewhere to go
+    // back to and whoever opened it may well leave without changing a thing.
+    wayBack = state.billing || '';
+    back.hidden = !wayBack;
     refresh();
     if (why) { say('bad', why); }
     // A counter that was set up before only has to be told whether its server is still there.

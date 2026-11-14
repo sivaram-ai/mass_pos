@@ -111,6 +111,22 @@ class PrintAgentTest {
         assertThat(page.body()).contains("Set this counter up", "Which counter is this machine?");
     }
 
+    /**
+     * The page is also opened from the sign-in screen, by somebody changing a counter that is
+     * already billing rather than setting a new one up, so it has to be told what this machine is
+     * set to before anybody touches a field.
+     */
+    @Test
+    void tellsTheSettingsPageWhatThisCounterIsSetTo() throws Exception {
+        JsonNode state = json.readTree(get("/setup/state").body());
+
+        assertThat(state.get("counterCode").asText()).isEqualTo("T2");
+        assertThat(state.get("find").asText()).isEqualTo("AUTOMATIC");
+        // This counter has never reached a shop, so there is nowhere to go back to and the page
+        // offers nothing rather than a button that leads somewhere empty.
+        assertThat(state.get("billing").asText()).isEmpty();
+    }
+
     /** The page opens on the settings this machine already has, rather than empty. */
     @Test
     void tellsTheSetupPageWhatThisCounterAlreadyIs() throws Exception {

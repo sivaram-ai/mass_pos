@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, ApiError, messageOfFailure, postBinary, saveToken } from '../api'
-import { counterId, goToCounterSetup } from '../counter'
+import { counterId, goToCounterSetup, hasPrintAgent, openCounterSetup } from '../counter'
 import type { BackupCandidate, Principal, SetupView } from '../types'
 import { Banner, Button, Field, inputClass } from '../components/ui'
 
@@ -44,6 +44,54 @@ const BACKDROP = "grid min-h-screen place-items-center bg-[#081830] bg-[url('/lo
 
 const signInField = 'w-full rounded-lg border border-transparent bg-slate-100 px-4 py-3 text-base '
   + 'outline-none transition focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-100'
+
+/** Glass on the dark circuit board, so it reads as part of the screen and not as part of the form. */
+const CORNER_BUTTON = 'fixed left-4 top-4 z-10 flex items-center gap-2 rounded-lg border '
+  + 'border-white/25 bg-white/10 px-3 py-2 text-sm font-medium text-white/90 backdrop-blur '
+  + 'transition hover:border-white/40 hover:bg-white/20 hover:text-white '
+  + 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 '
+  + 'focus-visible:outline-white/70'
+
+/**
+ * This machine's own counter settings, in the corner of the screen that is up when nobody is
+ * billing.
+ *
+ * <p>Everything that makes a counter a counter - how it finds the shop's server, that server's
+ * address when it is typed rather than found, and which of the shop's counters this machine is -
+ * is set on a page the print agent here serves, because all of it has to be settled before any
+ * shop server can serve a page. The only way on to that page used to be the shop refusing the
+ * machine, so a counter pointed at the wrong shop had to be closed and started again. Signing out
+ * is exactly the moment somebody changes one of those things, and the sign-in screen is what they
+ * are looking at when they do.
+ *
+ * <p>Only on a counter. The server's own browser has no agent to ask and no counter settings to
+ * show: its printer, its number and its folder are its own, on the Settings screen.
+ */
+function CounterSettingsCorner() {
+  if (!hasPrintAgent()) {
+    return null
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => { openCounterSetup() }}
+      title="Where the shop's server is, and which of its counters this machine is"
+      className={CORNER_BUTTON}
+    >
+      <CogIcon />
+      Counter settings
+    </button>
+  )
+}
+
+function CogIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+      <path fillRule="evenodd" clipRule="evenodd"
+            d="M7.84 1.804A1 1 0 0 1 8.82 1h2.36a1 1 0 0 1 .98.804l.331 1.652a6.993 6.993 0 0 1 1.929 1.115l1.598-.54a1 1 0 0 1 1.186.447l1.18 2.044a1 1 0 0 1-.205 1.251l-1.267 1.113a7.047 7.047 0 0 1 0 2.228l1.267 1.113a1 1 0 0 1 .206 1.25l-1.18 2.045a1 1 0 0 1-1.187.447l-1.598-.54a6.993 6.993 0 0 1-1.929 1.115l-.33 1.652a1 1 0 0 1-.98.804H8.82a1 1 0 0 1-.98-.804l-.331-1.652a6.993 6.993 0 0 1-1.929-1.115l-1.598.54a1 1 0 0 1-1.186-.447l-1.18-2.044a1 1 0 0 1 .205-1.251l1.267-1.114a7.05 7.05 0 0 1 0-2.227L1.821 7.773a1 1 0 0 1-.206-1.25l1.18-2.045a1 1 0 0 1 1.187-.447l1.598.54A6.993 6.993 0 0 1 7.51 3.456l.33-1.652ZM10 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+    </svg>
+  )
+}
 
 /**
  * Signing in is per shift, not per hour: the token that comes back never expires, so a cashier
@@ -112,6 +160,7 @@ export function Login({ onSignedIn }: { onSignedIn: (user: Principal) => void })
 
   return (
     <div className={BACKDROP}>
+      <CounterSettingsCorner />
       <form onSubmit={submit} className="w-full max-w-md rounded-2xl bg-white p-8 shadow-2xl">
         <LogoPart crop={WORDMARK} width={200} label="GoGo Digital Services" className="ml-auto" />
 
