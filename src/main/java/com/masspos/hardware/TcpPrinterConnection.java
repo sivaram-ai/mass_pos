@@ -31,7 +31,7 @@ public class TcpPrinterConnection implements PrinterConnection {
             out.write(document.toBytes());
             out.flush();
         } catch (IOException e) {
-            throw new PrinterException("Cannot print to " + describe() + ": " + e.getMessage(), e);
+            throw new PrinterException("The bill could not be sent to the printer at " + describe() + ". Check it is switched on and on the same network.", e);
         }
     }
 
@@ -41,7 +41,7 @@ public class TcpPrinterConnection implements PrinterConnection {
         try {
             socket = connect();
         } catch (IOException e) {
-            throw new PrinterException("Cannot reach printer at " + describe() + ": " + e.getMessage(), e);
+            throw new PrinterException("The printer at " + describe() + " did not answer. Check it is switched on and on the same network.", e);
         }
         try (socket) {
             socket.setSoTimeout((int) timeout.toMillis());
@@ -68,7 +68,7 @@ public class TcpPrinterConnection implements PrinterConnection {
 
     private Socket connect() throws IOException {
         if (host == null || host.isBlank()) {
-            throw new PrinterException("No printer host configured: set pos.printer.tcp.host");
+            throw new PrinterException("No address has been set for the network printer yet. Set it under Settings, Printer.");
         }
         Socket socket = new Socket();
         try {

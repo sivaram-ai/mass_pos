@@ -72,7 +72,7 @@ public class WindowsPrinterConnection implements PrinterConnection {
                     job.validatePage(job.defaultPage()));
             job.print();
         } catch (java.awt.print.PrinterException e) {
-            throw new PrinterException("Printing on %s failed: %s".formatted(describe(), e.getMessage()), e);
+            throw new PrinterException("The bill could not be sent to %s. Check it is switched on, has paper, and is not showing an error in Windows.".formatted(describe()), e);
         }
     }
 
@@ -95,7 +95,9 @@ public class WindowsPrinterConnection implements PrinterConnection {
         if (name.isEmpty()) {
             PrintService fallback = PrintServiceLookup.lookupDefaultPrintService();
             if (fallback == null) {
-                throw new PrinterException("No default printer is set in Windows. Installed: " + installed());
+                log.warn("No printer chosen, and no Windows default. Installed here: {}", installed());
+                throw new PrinterException("No printer has been chosen for this till yet. Choose one"
+                        + " under Settings, Printer: the printers on this machine are listed there.");
             }
             return fallback;
         }

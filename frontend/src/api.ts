@@ -83,11 +83,19 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     headers['Content-Type'] = 'application/json'
   }
 
-  const response = await fetch(path, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
+  let response: Response
+  try {
+    response = await fetch(path, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  } catch {
+    // The browser's own wording here is "Failed to fetch" or "NetworkError when attempting to
+    // fetch resource": true, and no use to anybody at a counter. Status 0 is never a reply.
+    throw new ApiError(0, 'The till could not be reached. Check that it is switched on and on this'
+      + ' network, then try again.')
+  }
 
   if (response.status === 204) {
     return undefined as T
@@ -113,11 +121,16 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return payload as T
 }
 
+/**
+ * Every refusal this server makes is JSON. Anything else is a page the web server wrote on its
+ * own - a stack trace, an HTML error page - and showing it whole is how a cashier ends up reading
+ * the inside of the program. It is dropped, and the status decides the sentence instead.
+ */
 function safeParse(text: string): unknown {
   try {
     return JSON.parse(text)
   } catch {
-    return { detail: text }
+    return null
   }
 }
 
@@ -125,18 +138,29 @@ function messageOf(payload: unknown, status: number): string {
   const problem = payload as { detail?: string; message?: string; title?: string } | null
   // Spring's own "Bad Request" / "Internal Server Error" titles tell a cashier nothing; the detail does.
   const detail = problem?.detail ?? problem?.message
-  if (detail) {
+  if (detail && !looksInternal(detail)) {
     return detail
   }
+  // No status numbers and no framework wording: whoever reads this is at a till with a customer
+  // in front of them, and a number they cannot act on is worse than a sentence they can.
   if (status === 401) {
-    return 'Please sign in again'
+    return 'You have been signed out. Sign in again to carry on.'
   }
   if (status === 403) {
-    return 'Your role is not allowed to do this'
+    return 'Your account is not allowed to do this. Ask a manager.'
   }
   return status >= 500
-    ? `Something went wrong on this till (${status}). Try again; if it keeps happening, call service.`
-    : `The request was refused (${status})`
+    ? 'Something went wrong on this till. Try again, and if it keeps happening call service.'
+    : 'That could not be done. Reload the screen and try again.'
+}
+
+/**
+ * A last guard on wording nobody wrote. Every message this server sends is written for a shop, so
+ * anything carrying a package name, a stack frame, SQL or a URL came from a layer underneath it -
+ * a filter, the servlet container, a library - and the status sentence below is better than it.
+ */
+function looksInternal(detail: string): boolean {
+  return /com\.masspos|java\.|jakarta\.|org\.springframework|SQLITE|jdbc:|\bat [a-z]+\.[a-z]+\./.test(detail)
 }
 
 export const api = {

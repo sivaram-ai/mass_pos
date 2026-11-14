@@ -47,7 +47,7 @@ public final class CounterApp {
             if (agent == null) {
                 // No port to serve the setup page from, so there is nothing to show and nowhere to
                 // show it. The log is the only honest place left.
-                note(config, "Could not start this counter's print service on port "
+                note("Could not start this counter's print service on port "
                         + config.agentPort() + " or the " + PORTS_TO_TRY + " after it."
                         + " Close whatever is using those ports and start GO RockIt Counter again.");
                 return;
@@ -65,7 +65,7 @@ public final class CounterApp {
             // but the printer belongs to this program, and closing it would take the printer away.
             keepRunning();
         } catch (Exception unexpected) {
-            note(config, "This counter could not start: " + unexpected);
+            note("This counter could not start: " + unexpected);
         }
     }
 
@@ -148,16 +148,17 @@ public final class CounterApp {
             config.save();
         } catch (IOException cannotRemember) {
             // Not worth stopping for: the counter works, it just re-discovers next time.
-            note(config, "Could not remember where the server is: " + cannotRemember.getMessage());
+            note("Could not remember where the server is: " + cannotRemember.getMessage());
         }
     }
 
     /**
      * The last place left to say something, for the few failures that leave no screen to say it
      * on. Everything a person is meant to read is on the setup page; this is for the engineer who
-     * comes afterwards.
+     * comes afterwards. The print agent writes here too, for a printer that fails with nothing to
+     * say: a class name on a manager's screen is not a message, but it is worth keeping.
      */
-    private static void note(CounterConfig config, String what) {
+    static void note(String what) {
         try {
             Path log = CounterConfig.folder().resolve("counter.log");
             Files.createDirectories(log.getParent());

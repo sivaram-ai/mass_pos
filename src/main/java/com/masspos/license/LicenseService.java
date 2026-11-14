@@ -169,7 +169,9 @@ public class LicenseService {
         } catch (InvalidLicenseException e) {
             return new Installed(null, e.getMessage());
         } catch (IOException e) {
-            return new Installed(null, "could not be read (%s)".formatted(e.getMessage()));
+            // Which file and why is a service question; the shop is told to paste the key again.
+            log.warn("Could not read the licence file {}", file, e);
+            return new Installed(null, "could not be read");
         }
     }
 }

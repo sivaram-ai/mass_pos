@@ -428,7 +428,7 @@ docs/                    multi-terminal and RBAC design
 | Garbled printing | Baud rate or flow control does not match the printer |
 | Drawer does not open | Check the cable into the printer's DK port; try `PIN_5` and a longer pulse |
 | App closes at startup | An invalid value in `pos.properties`; `logs\pos.log` names it |
-| `403 Host not allowed` | Open the app as `http://127.0.0.1:8765` |
+| "Open the till from its own GO RockIt shortcut" | The address being used is not one this till answers to; open it as `http://127.0.0.1:8765` |
 
 ## Roadmap
 

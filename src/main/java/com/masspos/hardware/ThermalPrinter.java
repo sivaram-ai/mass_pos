@@ -74,12 +74,12 @@ public class ThermalPrinter implements DisposableBean {
             if (e.getCause() instanceof PrinterException printerException) {
                 throw printerException;
             }
-            throw new PrinterException("Printing failed: " + e.getCause(), e.getCause());
+            throw new PrinterException("The bill did not print. Check the printer, then print it again from the Bills screen.", e.getCause());
         } catch (TimeoutException e) {
-            throw new PrinterException("Printer " + target() + " did not finish within " + limit.toSeconds() + " s", e);
+            throw new PrinterException("The printer took too long to answer. Check it is switched on and has paper, then print the bill again from the Bills screen.", e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new PrinterException("Interrupted while waiting for the printer", e);
+            throw new PrinterException("The bill did not finish printing. Print it again from the Bills screen.", e);
         }
     }
 

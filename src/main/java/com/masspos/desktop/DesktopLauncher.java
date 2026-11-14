@@ -55,9 +55,13 @@ public final class DesktopLauncher {
                 waitUntilUp(port);
             }
             open("http://127.0.0.1:" + port + "/");
+        } catch (Refusal written) {
+            say(written.getMessage());
         } catch (Exception e) {
-            JOptionPane.showMessageDialog(null, e.getMessage(), "GO RockIt", JOptionPane.ERROR_MESSAGE);
-            System.exit(1);
+            // Nobody wrote this one, so nobody checked what is in it. It goes to the console the
+            // installer's log captures; the person double-clicking a shortcut gets a sentence.
+            e.printStackTrace();
+            say("GO RockIt could not be started. Try again, and if it keeps happening call service.");
         }
     }
 
@@ -99,18 +103,17 @@ public final class DesktopLauncher {
     }
 
 
-    static void refuseIfStartedAsTheServer(String marker) throws IOException {
+    static void refuseIfStartedAsTheServer(String marker) throws Refusal {
         if (marker != null) {
-            throw new IOException("GO RockIt is not installed properly: " + SERVER_EXE
-                    + " is running the desktop launcher instead of the till itself."
-                    + " Install it again from the GO RockIt installer.");
+            throw new Refusal("GO RockIt is not installed properly. Install it again from the"
+                    + " GO RockIt installer.");
         }
     }
-    private static void startServer() throws IOException {
+    private static void startServer() throws IOException, Refusal {
         Path server = appDir().resolve(SERVER_EXE);
         if (Files.notExists(server)) {
-            throw new IOException("GO RockIt is not installed properly: " + server + " is missing."
-                    + " Install it again from the GO RockIt installer.");
+            throw new Refusal("GO RockIt is not installed properly. Install it again from the"
+                    + " GO RockIt installer.");
         }
         ProcessBuilder till = new ProcessBuilder(server.toString())
                 .directory(appDir().toFile())
@@ -120,7 +123,7 @@ public final class DesktopLauncher {
         till.start();
     }
 
-    private static void waitUntilUp(int port) throws InterruptedException, IOException {
+    private static void waitUntilUp(int port) throws InterruptedException, Refusal {
         long deadline = System.nanoTime() + START_TIMEOUT.toNanos();
         while (System.nanoTime() < deadline) {
             if (isUp(port)) {
@@ -128,14 +131,27 @@ public final class DesktopLauncher {
             }
             Thread.sleep(500);
         }
-        throw new IOException("GO RockIt did not start within " + START_TIMEOUT.toSeconds()
-                + " seconds. Look in " + PosPaths.dataDir().resolve("logs").resolve("pos.log")
-                + " for the reason.");
+        System.err.println("The till did not answer on port " + port + " within "
+                + START_TIMEOUT.toSeconds() + "s. See " + PosPaths.dataDir().resolve("logs"));
+        throw new Refusal("GO RockIt did not start. Try again, and if it keeps happening call"
+                + " service.");
     }
 
     /** Opens the till's screen in a window with no browser furniture around it. */
     private static void open(String url) throws IOException {
         Browser.openApp(url);
+    }
+
+    /** A message written for whoever double-clicked the shortcut, shown to them as it is. */
+    static final class Refusal extends Exception {
+        Refusal(String message) {
+            super(message);
+        }
+    }
+
+    private static void say(String message) {
+        JOptionPane.showMessageDialog(null, message, "GO RockIt", JOptionPane.ERROR_MESSAGE);
+        System.exit(1);
     }
 
     private static Path appDir() {

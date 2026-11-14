@@ -98,8 +98,11 @@ final class CounterPrinter {
             config.save();
         } catch (IOException cannotWrite) {
             config.applyPrinter(was);
-            throw new UncheckedIOException("Could not save the printer on this counter: "
-                    + cannotWrite.getMessage(), cannotWrite);
+            // The agent's answer is the whole of the message out here: there is no log on screen
+            // and no page behind it, so it says what happened and what the counter is still set to.
+            throw new UncheckedIOException("The printer could not be saved on this counter, so it is"
+                    + " still set the way it was. Try again, and if it keeps happening call service.",
+                    cannotWrite);
         }
         return setupOf(config, spoolFolder);
     }

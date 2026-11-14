@@ -27,6 +27,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3O | `pos.clients.max` caps how many counters a shop may have, not only how many may bill at once: creating one past the limit is refused with the licence message, Add a counter goes grey, and a counter beyond the limit (a licence cut below the counters a shop already has) is red and marked "Licence limit exceeded", as blocked ones now are | Done: 368 tests green, driven over the LAN and in the browser |
 | 3P | A counter shows no desktop windows at all: the Swing settings dialog is gone and setting a counter up is a page the counter serves itself from its print agent, found before any shop server has been, with every refusal shown in full on it | Done: 365 tests green, driven end to end in the browser |
 | 3Q | Signing in where that account is already open on another till stops and says where - counter, number, floor and when - and offers Go back or sign that one out and carry on here, chosen with the arrow keys and Enter | Done: 368 tests green, driven in the browser |
+| 3R | Nothing from inside the program reaches a counter's screen: every refusal is a sentence written for a shop, and the exception, its stack, the SQL, the paths and the ids go to the log. `ApiExceptionHandler.forTheScreen` is the gate; `api.ts` guards the browser end | Done: 377 tests green, refusals driven against a running till |
 | L1 | Offline subscription licence per till: Ed25519-signed key bound to a hardware machine ID, warn/grace days, billing lock, Licence screen + banner, vendor `tools/license/LicenseTool.java` | Done: 172 tests green, real key verified on this PC |
 | 5A | Windows installer: jpackage + WiX 3.14, trimmed JDK 21 runtime, one file, `tools/build-installer.ps1` | Done: installed and run from the exe on this PC |
 | 5B | One folder per till, `%LOCALAPPDATA%\GoRockitPOS`, data in `data\`, with an automatic move from the old `MassPOS` folder | Done: 235 tests green, this PC's own till migrated |
@@ -284,6 +285,76 @@ folder and everything under it, so that is the only copy that survives one.
   So `pos.receipt.footer[0]` in `pos.properties` replaces the default footer entirely.
 
 ## Invariants: do not break these
+
+### What a till is allowed to say
+
+- **A refusal on a screen is a sentence written for a shop; everything else goes to the log.** The
+  person reading it is standing at a counter with a customer waiting. They cannot act on a class
+  name, cannot repeat a stack frame down the phone, and should never be shown one. So every message
+  says what happened in the shop's own words and what to do next - "Try again, and if it keeps
+  happening call service", "Choose one under Settings, Printer" - and the exception, its stack, the
+  SQL, the file paths, the ids, the property names, the ports and the status numbers go to
+  `log.error`/`log.warn`, where whoever is called out will look.
+- **`ApiExceptionHandler.forTheScreen` is the gate, and it is one place on purpose.** Every refusal
+  the API makes passes through that class, so the check lives there rather than at twenty throw
+  sites: a message matching `INTERNAL` (our own package, a JDK or Spring class, `SQLITE`,
+  `constraint failed`, `jdbc:`, a `C:\` path, a UUID, a `pos.*` property, a stack frame) is logged
+  in full and replaced with a written sentence. Wording that slips in later is caught without
+  anybody remembering to look for it. **Add to the pattern rather than to a checklist.**
+  - `@ExceptionHandler(Exception.class)` catches what nobody saw coming. Before it, an unexpected
+    failure fell through to the framework's own error page, which answers a cashier with the word
+    "Internal" and a number. It keeps the status of anything that is already an `ErrorResponse` - a
+    page that is not there is a 404, not "something went wrong on this till" - and logs the rest at
+    `error`.
+  - **`IllegalArgumentException` is a 400 carrying its own message and `IllegalStateException` a
+    409**, which is why the guard matters: those two are thrown both by code written for a shop
+    (`SaleService`, `ThemeRules`) and by invariants only ever meant to fail in a test (`UuidV7`,
+    `LedgerEventType`, `AuditTrailGuard`).
+- **A commit failure never shows what the database said.** `commitFailed` logs the cause and says
+  "That could not be saved." A unique-constraint clash is named by its *field* through
+  `FieldLabels`, never by its column: `product.barcode` means nothing to a cashier.
+- **Not found means "not here any more", not an id.** Roughly twenty `EntityNotFoundException`
+  messages used to carry the UUID that was looked up. They say "That is not on this till any more.
+  Refresh the screen and try again." The two lookups *by number* keep the number, because that is
+  what the cashier typed and the thing they can correct.
+- **`api.ts` guards the browser end too**, for the refusals no Java handler wrote:
+  - A failed `fetch` is caught and becomes an `ApiError` with status 0 and a written sentence. The
+    browser's own wording is "Failed to fetch" or "NetworkError when attempting to fetch resource".
+  - A response body that is not JSON is **dropped** (`safeParse` returns null). Every refusal this
+    server makes is JSON, so anything else is a page the servlet container wrote on its own, and
+    showing it whole is how a stack trace ends up in front of a cashier.
+  - `looksInternal()` is the same check as the server's, for a `detail` that came from a filter or a
+    library underneath it. Below both, the status decides the sentence - and **no status numbers**:
+    a number a cashier cannot act on is worse than a sentence they can.
+- **A filter cannot throw its refusal, and `sendError` loses it** (`web/Refusals`). `AuthFilter` and
+  `LocalApiGuard` run before any controller, so `ApiExceptionHandler` never sees them.
+  `response.sendError(status, message)` looks like the answer and is not: Boot's
+  `server.error.include-message` defaults to `never`, so the message is dropped and what the screen
+  receives is the container's own error body - `{"status":401,"error":"Unauthorized","path":
+  "/api/products","timestamp":"…"}`. The sentence somebody wrote never arrived. Both filters now
+  write a `ProblemDetail` themselves, with a `detail` and nothing else in it; the real reason - a
+  token that is not ours, a Host that is not this machine's - goes to the filter's log, because a
+  refusal is also the one answer an attacker gets. **A new filter writes its answer through
+  `Refusals`, never `sendError`.**
+- **The machine ID and the licence dates stay on screen.** They look technical and they are not
+  optional: the shop reads the machine ID to its supplier to get a key, so `LicensePolicy` prints
+  it deliberately. What came out of it - `reg.exe`, a registry path, an IO message - does not
+  (`OsMachineIdentity` logs those and throws a clause like "Windows would not answer", which reads
+  inside the Licence screen's sentence).
+- **A counter has nowhere else to look, so its wording has to carry more.** The print agent's
+  `{"error": …}` and its `lastError` are the whole of what the printer screen shows, with no log on
+  screen behind them: `PrintAgent.wordsFor` writes to `counter.log` and substitutes a sentence when
+  an exception has no message, rather than letting `toString()` put a class name on a manager's
+  screen. Same for the setup page - every `catch` in `setup.html` has its own sentence.
+- **The desktop shortcut tells the two apart by type.** `DesktopLauncher.Refusal` is a message
+  written for whoever double-clicked, shown as it is; anything else prints its stack to stderr and
+  gets one sentence in the dialog. The log folder is not named on screen - it is named to the
+  engineer, on stderr.
+- **Tests pin this, not review.** `ApiExceptionHandlerTest` feeds the handler SQL, a stack frame, a
+  UUID and a Windows path and asserts none of it reaches `getDetail()`;
+  `PrintAgentTest.sendsTheNextBillToThePrinterJustChosen` asserts the printer screen's message has
+  no `Exception`, `java.` or `com.masspos` in it; `SerialPrinterConnectionTest` asserts the
+  unconfigured-port message names the screen to go to and not the property.
 
 ### Data and compliance
 

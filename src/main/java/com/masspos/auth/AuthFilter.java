@@ -59,13 +59,13 @@ public class AuthFilter extends OncePerRequestFilter {
 
         Principal principal = auth.resolve(bearerToken(request)).orElse(null);
         if (principal == null) {
-            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Sign in first");
+            com.masspos.web.Refusals.unauthenticated(response);
             return;
         }
         // A new or reset account cannot bill until its owner picks their own PIN, otherwise the
         // handover PIN would keep signing invoices in that person's name.
         if (principal.mustChangePin() && !PIN_CHANGE_PATHS.contains(path)) {
-            response.sendError(HttpServletResponse.SC_FORBIDDEN, "Change your PIN first");
+            com.masspos.web.Refusals.pinChangeFirst(response);
             return;
         }
         AuthContext.bind(principal);

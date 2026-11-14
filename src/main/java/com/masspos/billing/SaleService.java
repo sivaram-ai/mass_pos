@@ -105,7 +105,7 @@ public class SaleService {
     @Transactional
     public Edited replace(UUID invoiceId, EditRequest request) {
         Invoice original = invoices.findById(invoiceId)
-                .orElseThrow(() -> new EntityNotFoundException("No bill " + invoiceId));
+                .orElseThrow(() -> new EntityNotFoundException("That is not on this till any more. Refresh the screen and try again."));
         if (original.isCancelled()) {
             throw new IllegalArgumentException("Bill " + original.getInvoiceNumber() + " is cancelled, so it cannot"
                     + " be edited. Take a new bill instead.");
@@ -191,7 +191,7 @@ public class SaleService {
     @Transactional
     public InvoiceView cancel(UUID invoiceId, String reason) {
         Invoice invoice = invoices.findById(invoiceId)
-                .orElseThrow(() -> new EntityNotFoundException("No invoice " + invoiceId));
+                .orElseThrow(() -> new EntityNotFoundException("That is not on this till any more. Refresh the screen and try again."));
         requireNoReturns(invoice, "cancelled");
         invoice.cancel(currentUser(), reason, Instant.now());
         restock(invoice);
@@ -211,7 +211,7 @@ public class SaleService {
                 : text;
         return invoices.findByInvoiceNumber(full)
                 .map(InvoiceView::of)
-                .orElseThrow(() -> new EntityNotFoundException("No bill numbered " + full));
+                .orElseThrow(() -> new EntityNotFoundException("There is no bill numbered " + full + ". Check the number and try again."));
     }
 
     /**
@@ -261,7 +261,7 @@ public class SaleService {
     @Transactional(readOnly = true)
     public History history(UUID invoiceId) {
         Invoice opened = invoices.findById(invoiceId)
-                .orElseThrow(() -> new EntityNotFoundException("No bill " + invoiceId));
+                .orElseThrow(() -> new EntityNotFoundException("That is not on this till any more. Refresh the screen and try again."));
         java.util.LinkedList<Invoice> chain = new java.util.LinkedList<>(List.of(opened));
         // Each step is one edit; the cap only guards against a loop in hand-edited data.
         for (int step = 0; step < MAX_EDITS && chain.getFirst().getReplacesInvoiceNumber() != null; step++) {
@@ -296,7 +296,7 @@ public class SaleService {
     @Transactional(readOnly = true)
     public History historyOfReturn(UUID creditNoteId) {
         CreditNote note = creditNotes.findById(creditNoteId)
-                .orElseThrow(() -> new EntityNotFoundException("No return " + creditNoteId));
+                .orElseThrow(() -> new EntityNotFoundException("That is not on this till any more. Refresh the screen and try again."));
         Invoice against = note.getOriginalInvoice();
         return against == null
                 ? new History(List.of(), List.of(CreditNoteView.of(note)))

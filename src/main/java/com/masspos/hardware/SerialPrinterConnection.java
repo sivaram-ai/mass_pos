@@ -36,7 +36,7 @@ public class SerialPrinterConnection implements PrinterConnection {
             int n = serial.writeBytes(data, data.length - written, written);
             if (n <= 0) {
                 close();
-                throw new PrinterException("Printer on %s stopped accepting data after %d of %d bytes (unplugged, powered off or out of paper?)"
+                throw new PrinterException("The printer on %s stopped part way through the bill. Check it is switched on, has paper, and its cable is in. (%d of %d sent.)"
                         .formatted(describe(), written, data.length));
             }
             written += n;
@@ -79,22 +79,22 @@ public class SerialPrinterConnection implements PrinterConnection {
             return port;
         }
         if (settings.port() == null || settings.port().isBlank()) {
-            throw new PrinterException("No serial port configured: set pos.printer.serial.port"
-                    + " (GET /api/hardware/serial-ports lists the ports on this machine)");
+            throw new PrinterException("No COM port has been chosen for this printer yet."
+                    + " Choose one under Settings, Printer: the ports on this machine are listed there.");
         }
         SerialPort candidate;
         try {
             candidate = SerialPort.getCommPort(settings.port());
         } catch (SerialPortInvalidPortException e) {
-            throw new PrinterException("Serial port " + settings.port() + " does not exist", e);
+            throw new PrinterException("The printer is not on " + settings.port() + ". Check it is switched on and plugged in, or choose the right port under Settings, Printer.", e);
         }
         candidate.setComPortParameters(settings.baudRate(), 8, SerialPort.ONE_STOP_BIT, SerialPort.NO_PARITY);
         candidate.setFlowControl(flowControlMask(settings.flowControl()));
         candidate.setComPortTimeouts(SerialPort.TIMEOUT_WRITE_BLOCKING | SerialPort.TIMEOUT_READ_SEMI_BLOCKING,
                 DEFAULT_READ_TIMEOUT_MS, writeTimeoutMs);
         if (!candidate.openPort()) {
-            throw new PrinterException("Cannot open serial port " + settings.port()
-                    + ": in use by another program, unplugged, or no permission");
+            throw new PrinterException("The printer on " + settings.port() + " could not be opened."
+                    + " Check it is switched on, plugged in, and not in use by another program.");
         }
         log.info("Opened printer port {} at {} baud, flow control {}", settings.port(), settings.baudRate(),
                 settings.flowControl());

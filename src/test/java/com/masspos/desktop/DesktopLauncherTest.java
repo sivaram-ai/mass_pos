@@ -48,8 +48,12 @@ class DesktopLauncherTest {
     @Test
     void aLauncherPackagedAsTheServerSaysSoInsteadOfStartingAnotherOne() {
         assertThatThrownBy(() -> DesktopLauncher.refuseIfStartedAsTheServer("1"))
-                .isInstanceOf(IOException.class)
-                .hasMessageContaining("not installed properly");
+                .isInstanceOf(DesktopLauncher.Refusal.class)
+                .hasMessageContaining("not installed properly")
+                // What is wrong is a service question. The person holding the mouse is told the
+                // one thing they can do about it.
+                .hasMessageNotContaining(".exe")
+                .hasMessageNotContaining("launcher");
     }
 
     @Test

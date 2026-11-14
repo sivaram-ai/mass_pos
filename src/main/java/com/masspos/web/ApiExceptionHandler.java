@@ -47,29 +47,102 @@ public class ApiExceptionHandler {
     private static final String ASSERT_TRUE = "AssertTrue";
     private static final Pattern UNIQUE_COLUMN = Pattern.compile("UNIQUE constraint failed: \\w+\\.(\\w+)");
 
+    /**
+     * Wording that came from underneath the shop: package and class names, stack frames, database
+     * text, Windows paths, ids and property names. Every one of these has been on a screen at
+     * least once.
+     */
+    private static final Pattern INTERNAL = Pattern.compile(
+            "com\\.masspos"
+            + "|\\b(java|javax|jakarta)\\.[a-z]+\\."
+            + "|\\borg\\.(springframework|hibernate|sqlite|apache)"
+            + "|SQLITE|constraint failed|jdbc:"
+            + "|\\b[A-Za-z]:\\\\"
+            + "|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
+            + "|\\bpos\\.[a-z]+\\.[a-z]"
+            + "|\\.properties\\b"
+            + "|\\bat [a-z]+\\.[a-z]+\\.");
+
+    /**
+     * The last gate between the inside of the program and a screen at a counter.
+     *
+     * <p>Nearly every refusal this class turns into a {@code detail} is a sentence somebody wrote
+     * for a shop. But a refusal can also come from a layer nobody here worded - a library, a
+     * driver, an invariant only ever meant to fail in a test - and its message is then a class
+     * name, a file path, an id or a line of SQL. At a till that is worse than silence: the cashier
+     * cannot act on it, cannot repeat it down the phone, and has a customer waiting. The whole
+     * failure goes to the log, where whoever is called out will look; the screen gets a sentence.
+     *
+     * <p>Catching it here rather than at each throw site is deliberate. This is the one place every
+     * refusal passes through, so wording that slips in later is caught without anybody having to
+     * remember to look for it.
+     */
+    private static String forTheScreen(Throwable e, String instead) {
+        String said = e.getMessage();
+        if (said != null && !said.isBlank() && !INTERNAL.matcher(said).find()) {
+            return said;
+        }
+        log.error("Refused with nothing a shop could read, so it was not shown", e);
+        return instead;
+    }
+
     /** The sale itself is already committed; the UI offers a reprint. */
     @ExceptionHandler(PrinterException.class)
     public ProblemDetail printerUnavailable(PrinterException e) {
-        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, e.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, forTheScreen(e,
+                "The bill did not print. Check the printer, then print it again from the Bills screen."));
         problem.setTitle("Printer unavailable");
         return problem;
     }
 
     @ExceptionHandler(EntityNotFoundException.class)
     public ProblemDetail notFound(EntityNotFoundException e) {
-        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, forTheScreen(e,
+                "That is not on this till any more. Refresh the screen and try again."));
+        problem.setTitle("Not found");
+        return problem;
+    }
+
+    /**
+     * Anything nobody saw coming. The whole of it - type, message and stack - goes to the log for
+     * whoever comes to look; what reaches the till is one sentence saying what to do next.
+     *
+     * <p>Without this, an unexpected failure fell through to the framework's own error page, which
+     * answers a cashier with the word "Internal" and a number. Nothing a shop can act on, and the
+     * sort of thing that should never be the last word on a screen somebody is working at.
+     */
+    @ExceptionHandler(Exception.class)
+    public ProblemDetail somethingWentWrong(Exception e) {
+        // Framework refusals already know their own status - a page that is not there, a method
+        // that is not allowed - and turning those into "something went wrong" would be a lie as
+        // well as a 500. Their status is kept; only the wording is ours.
+        if (e instanceof org.springframework.web.ErrorResponse carried) {
+            org.springframework.http.HttpStatusCode status = carried.getStatusCode();
+            log.debug("Refused with {}", status, e);
+            return ProblemDetail.forStatusAndDetail(status, status.is4xxClientError()
+                    ? "That could not be done. Reload the screen and try again."
+                    : "Something went wrong on this till. Try again, and if it keeps happening"
+                            + " call service.");
+        }
+        log.error("Unhandled failure", e);
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR,
+                "Something went wrong on this till. Try again, and if it keeps happening call service.");
+        problem.setTitle("Something went wrong");
+        return problem;
     }
 
     @ExceptionHandler(AuthException.class)
     public ProblemDetail unauthenticated(AuthException e) {
-        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, e.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, forTheScreen(e,
+                "You have been signed out. Sign in again to carry on."));
         problem.setTitle("Sign in required");
         return problem;
     }
 
     @ExceptionHandler(AccessDeniedException.class)
     public ProblemDetail forbidden(AccessDeniedException e) {
-        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, e.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, forTheScreen(e,
+                "Your account is not allowed to do this. Ask a manager."));
         problem.setTitle("Not allowed for this role");
         return problem;
     }
@@ -77,7 +150,8 @@ public class ApiExceptionHandler {
     /** {@code license: true} tells the screens to refresh the licence banner. */
     @ExceptionHandler(LicenseLockedException.class)
     public ProblemDetail licenseLocked(LicenseLockedException e) {
-        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, e.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, forTheScreen(e,
+                "This till cannot bill at the moment. Open Menu, Licence to see why."));
         problem.setTitle("Billing is locked");
         problem.setProperty("license", true);
         return problem;
@@ -96,7 +170,8 @@ public class ApiExceptionHandler {
      */
     @ExceptionHandler(SessionConflictException.class)
     public ProblemDetail signedInElsewhere(SessionConflictException e) {
-        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, forTheScreen(e,
+                "This account is already signed in on another till."));
         problem.setTitle("This account is already in use");
         problem.setProperty("sessionConflict", true);
         java.util.Map<String, Object> where = new java.util.LinkedHashMap<>();
@@ -110,7 +185,8 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(ClientRefusedException.class)
     public ProblemDetail clientRefused(ClientRefusedException e) {
-        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, e.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, forTheScreen(e,
+                "This counter cannot bill against that server. Set this machine up again."));
         problem.setTitle("This counter cannot bill against that server");
         // Marked so the sign-in screen can tell this apart from a wrong PIN. Nothing is wrong with
         // the person standing there: it is the machine's own setup, or a shop with no place left,
@@ -121,13 +197,14 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ProblemDetail badRequest(IllegalArgumentException e) {
-        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.getMessage());
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, forTheScreen(e,
+                "That could not be done. Check what is on the screen and try again."));
     }
 
     /** A refused field that only a service can check, e.g. a barcode already on another item. */
     @ExceptionHandler(FieldRejectedException.class)
     public ProblemDetail fieldRejected(FieldRejectedException e) {
-        return invalid(Map.of(e.field(), e.getMessage()), Map.of());
+        return invalid(Map.of(e.field(), forTheScreen(e, "was not accepted")), Map.of());
     }
 
     /**
@@ -136,7 +213,8 @@ public class ApiExceptionHandler {
      */
     @ExceptionHandler(IllegalStateException.class)
     public ProblemDetail notReady(IllegalStateException e) {
-        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, forTheScreen(e,
+                "This till is not set up for that yet. Check Settings, then try again."));
         problem.setTitle("Not configured yet");
         return problem;
     }
@@ -192,9 +270,11 @@ public class ApiExceptionHandler {
         if (cause instanceof ConstraintViolationException violations) {
             return invalidEntity(violations);
         }
+        // The cause goes to the log, never to the screen: it is database text, and the person
+        // reading it is standing at a till with a customer waiting.
         log.error("Could not commit", e);
         return ProblemDetail.forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR,
-                "Could not save: " + cause.getMessage());
+                "That could not be saved. Try again, and if it keeps happening call service.");
     }
 
     /** Malformed JSON, or a value of the wrong type such as text in a number or an unknown unit. */
@@ -206,8 +286,9 @@ public class ApiExceptionHandler {
                     .collect(Collectors.joining())
                     .replaceFirst("^\\.", "");
             String message = mapping instanceof InvalidFormatException format && format.getTargetType().isEnum()
-                    ? "must be one of " + Arrays.toString(format.getTargetType().getEnumConstants())
-                    : "has a value of the wrong kind";
+                    ? "has to be one of: " + Arrays.stream(format.getTargetType().getEnumConstants())
+                            .map(String::valueOf).collect(Collectors.joining(", "))
+                    : "was not filled in the way this screen expects";
             return invalid(Map.of(field, message), Map.of());
         }
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST,
@@ -223,8 +304,8 @@ public class ApiExceptionHandler {
         String cause = String.valueOf(e.getMostSpecificCause().getMessage());
         Matcher unique = UNIQUE_COLUMN.matcher(cause);
         String detail = unique.find()
-                ? FieldLabels.of(toCamelCase(unique.group(1))) + " is already used by another record"
-                : "This change conflicts with data already saved";
+                ? FieldLabels.of(toCamelCase(unique.group(1))) + " is already in use. Choose another."
+                : "Somebody else changed this a moment ago. Refresh the screen and try again.";
         log.warn("Refused by the database: {}", cause);
         return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, detail);
     }

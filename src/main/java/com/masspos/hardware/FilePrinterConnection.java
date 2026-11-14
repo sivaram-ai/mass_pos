@@ -34,7 +34,7 @@ public class FilePrinterConnection implements PrinterConnection {
             Files.write(directory.resolve(name + ".bin"), document.toBytes());
             Files.writeString(directory.resolve(name + ".txt"), document.plainText());
         } catch (IOException e) {
-            throw new PrinterException("Cannot write print job to " + directory, e);
+            throw new PrinterException("The bill could not be saved to this till's printer folder. Check there is room on the disk.", e);
         }
     }
 

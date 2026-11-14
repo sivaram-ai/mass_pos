@@ -12,9 +12,13 @@ class SerialPrinterConnectionTest {
     void unconfiguredPortSaysWhatToSet() {
         SerialPrinterConnection connection = connection("");
 
+        // What a shop can act on, and nothing it cannot: the screen to open, not the property to
+        // edit or the endpoint that lists the ports.
         assertThatThrownBy(() -> connection.write(new EscPos(CodePage.PC437, 32)))
                 .isInstanceOf(PrinterException.class)
-                .hasMessageContaining("pos.printer.serial.port");
+                .hasMessageContaining("Choose one under Settings, Printer")
+                .hasMessageNotContaining("pos.printer")
+                .hasMessageNotContaining("/api/");
     }
 
     @Test

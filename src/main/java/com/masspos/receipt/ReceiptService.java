@@ -44,7 +44,7 @@ public class ReceiptService {
         EscPos receipt = readOnlyTx.execute(status -> {
             Invoice invoice = em.find(Invoice.class, invoiceId);
             if (invoice == null) {
-                throw new EntityNotFoundException("No invoice " + invoiceId);
+                throw new EntityNotFoundException("That is not on this till any more. Refresh the screen and try again.");
             }
             return formatter.format(invoice, settings.currentOrEmpty(), printer.settings(), copy,
                     openDrawer && copy == ReceiptCopy.ORIGINAL);
@@ -65,7 +65,7 @@ public class ReceiptService {
         EscPos receipt = readOnlyTx.execute(status -> {
             Invoice invoice = em.find(Invoice.class, invoiceId);
             if (invoice == null) {
-                throw new EntityNotFoundException("No invoice " + invoiceId);
+                throw new EntityNotFoundException("That is not on this till any more. Refresh the screen and try again.");
             }
             return formatter.format(invoice, settings.currentOrEmpty(), paper, copy,
                     openDrawer && copy == ReceiptCopy.ORIGINAL);
@@ -79,7 +79,7 @@ public class ReceiptService {
         EscPos receipt = readOnlyTx.execute(status -> {
             CreditNote note = em.find(CreditNote.class, creditNoteId);
             if (note == null) {
-                throw new EntityNotFoundException("No return " + creditNoteId);
+                throw new EntityNotFoundException("That is not on this till any more. Refresh the screen and try again.");
             }
             return formatter.format(note, settings.currentOrEmpty(), paper, copy,
                     openDrawer && copy == ReceiptCopy.ORIGINAL);
@@ -92,7 +92,7 @@ public class ReceiptService {
         EscPos receipt = readOnlyTx.execute(status -> {
             CreditNote note = em.find(CreditNote.class, creditNoteId);
             if (note == null) {
-                throw new EntityNotFoundException("No return " + creditNoteId);
+                throw new EntityNotFoundException("That is not on this till any more. Refresh the screen and try again.");
             }
             return formatter.format(note, settings.currentOrEmpty(), printer.settings(), copy,
                     openDrawer && copy == ReceiptCopy.ORIGINAL);

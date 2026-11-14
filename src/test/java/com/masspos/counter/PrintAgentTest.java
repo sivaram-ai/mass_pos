@@ -229,7 +229,11 @@ class PrintAgentTest {
         assertThat(send("PUT", "/settings", tcpForm(freePort())).statusCode()).isEqualTo(200);
         assertThat(send("POST", "/print", BILL).statusCode()).isEqualTo(202);
 
-        assertThat(failureWithin(Duration.ofSeconds(10))).contains("127.0.0.1");
+        // And it reads as a sentence. This is the one message on the printer settings screen, with
+        // no log behind it and nowhere else to look, so a class name here would be the whole answer.
+        assertThat(failureWithin(Duration.ofSeconds(10)))
+                .contains("127.0.0.1")
+                .doesNotContain("Exception", "java.", "com.masspos");
     }
 
     /** A printer that cannot answer a status query is not an error: it is a FILE or a dumb one. */

@@ -125,7 +125,7 @@ public class ProductController {
 
     @GetMapping("/{id}")
     public ProductView byId(@PathVariable UUID id) {
-        Product product = products.findById(id).orElseThrow(() -> new EntityNotFoundException("No such product"));
+        Product product = products.findById(id).orElseThrow(() -> new EntityNotFoundException("That item is not in the catalogue any more. Refresh the screen and try again."));
         return ProductView.of(product, inventory.onHand(id));
     }
 
@@ -217,7 +217,7 @@ public class ProductController {
     @RequiresRole({UserRole.MANAGER})
     @Transactional
     public ProductView update(@PathVariable UUID id, @Valid @RequestBody SaveProductRequest request) {
-        Product product = products.findById(id).orElseThrow(() -> new EntityNotFoundException("No such product"));
+        Product product = products.findById(id).orElseThrow(() -> new EntityNotFoundException("That item is not in the catalogue any more. Refresh the screen and try again."));
         checkCode(id, request);
         checkPriceAndBarcode(id, request);
         product.changeCode(request.sku().trim());
@@ -274,7 +274,7 @@ public class ProductController {
     @RequiresRole({UserRole.MANAGER})
     @Transactional
     public ProductView deactivate(@PathVariable UUID id) {
-        Product product = products.findById(id).orElseThrow(() -> new EntityNotFoundException("No such product"));
+        Product product = products.findById(id).orElseThrow(() -> new EntityNotFoundException("That item is not in the catalogue any more. Refresh the screen and try again."));
         product.deactivate();
         return ProductView.of(product, inventory.onHand(id));
     }
@@ -283,7 +283,7 @@ public class ProductController {
     @RequiresRole({UserRole.MANAGER})
     @Transactional
     public ProductView activate(@PathVariable UUID id) {
-        Product product = products.findById(id).orElseThrow(() -> new EntityNotFoundException("No such product"));
+        Product product = products.findById(id).orElseThrow(() -> new EntityNotFoundException("That item is not in the catalogue any more. Refresh the screen and try again."));
         product.activate();
         return ProductView.of(product, inventory.onHand(id));
     }
@@ -298,7 +298,7 @@ public class ProductController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @Transactional
     public void delete(@PathVariable UUID id) {
-        Product product = products.findById(id).orElseThrow(() -> new EntityNotFoundException("No such product"));
+        Product product = products.findById(id).orElseThrow(() -> new EntityNotFoundException("That item is not in the catalogue any more. Refresh the screen and try again."));
         product.delete();
     }
 }

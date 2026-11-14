@@ -95,7 +95,10 @@ public class InvoiceItem extends BaseEntity implements TaxLine {
             throw new IllegalArgumentException("Quantity must be positive; returns are credit notes");
         }
         if (product.getUnit().isWholeUnitsOnly() && quantityMilli % 1000 != 0) {
-            throw new IllegalArgumentException(product.getUnit() + " is sold in whole units only: " + quantityMilli);
+            // Milli-units are how a quantity is stored, never how it is read: 1500 means 1.5, and
+            // a cashier told "got 1500" would go looking for a quantity nobody typed.
+            throw new IllegalArgumentException(product.getName() + " is sold in whole "
+                    + product.getUnit() + " only, so its quantity cannot have a fraction.");
         }
         if (unitPricePaise < 0 || discountPaise < 0 || taxableValuePaise < 0
                 || cgstPaise < 0 || sgstPaise < 0 || igstPaise < 0 || cessPaise < 0) {

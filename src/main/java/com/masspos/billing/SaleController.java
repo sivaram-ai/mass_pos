@@ -129,7 +129,7 @@ public class SaleController {
     @Transactional(readOnly = true)
     public InvoiceView byId(@PathVariable UUID id) {
         return InvoiceView.of(invoices.findById(id)
-                .orElseThrow(() -> new EntityNotFoundException("No invoice " + id)));
+                .orElseThrow(() -> new EntityNotFoundException("That is not on this till any more. Refresh the screen and try again.")));
     }
 
     /**

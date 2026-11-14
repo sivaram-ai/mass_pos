@@ -470,8 +470,22 @@ public final class PrintAgent implements AutoCloseable {
     }
 
     private static byte[] error(RuntimeException refused) {
-        String said = refused.getMessage() == null ? refused.toString() : refused.getMessage();
-        return CounterPrinter.json(Map.of("error", said));
+        return CounterPrinter.json(Map.of("error", wordsFor(refused)));
+    }
+
+    /**
+     * What the screen is told. Every refusal out here is one this counter worded itself, so a
+     * message is shown as it is; an exception with none was not written for anybody, and its class
+     * name would be the only thing on a printer settings screen a manager is looking at.
+     */
+    private static String wordsFor(RuntimeException failed) {
+        String said = failed.getMessage();
+        if (said == null || said.isBlank()) {
+            CounterApp.note("The printer failed with nothing to say: " + failed);
+            return "The printer on this counter did not answer. Try again, and if it keeps"
+                    + " happening call service.";
+        }
+        return said;
     }
 
     /**
@@ -536,7 +550,7 @@ public final class PrintAgent implements AutoCloseable {
                     lastError = "";
                 }
             } catch (RuntimeException failed) {
-                lastError = failed.getMessage() == null ? failed.toString() : failed.getMessage();
+                lastError = wordsFor(failed);
                 closeOpen();
             }
         }

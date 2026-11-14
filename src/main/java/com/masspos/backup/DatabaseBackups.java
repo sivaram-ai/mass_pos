@@ -332,8 +332,10 @@ public class DatabaseBackups {
         }
         List<String> missing = EXPECTED_TABLES.stream().filter(table -> !tables.contains(table)).toList();
         if (!missing.isEmpty()) {
-            throw new IllegalArgumentException(file.getFileName() + " is a database, but not one of this till's:"
-                    + " it has no " + String.join(" or ", missing) + " table");
+            // Which tables are missing is a service question; the shop is told what the file is not.
+            log.warn("{} is a database, but has no {} table", file.getFileName(), String.join(" or ", missing));
+            throw new IllegalArgumentException(file.getFileName() + " is not a GO RockIt copy of this"
+                    + " till's data. Choose a file this till saved itself.");
         }
     }
 }

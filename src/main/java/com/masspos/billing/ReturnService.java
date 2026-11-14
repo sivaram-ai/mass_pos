@@ -166,13 +166,13 @@ public class ReturnService {
                 : text;
         return creditNotes.findByCreditNoteNumber(full)
                 .map(CreditNoteView::of)
-                .orElseThrow(() -> new EntityNotFoundException("No return numbered " + full));
+                .orElseThrow(() -> new EntityNotFoundException("There is no return numbered " + full + ". Check the number and try again."));
     }
 
     @Transactional(readOnly = true)
     public CreditNoteView byId(UUID id) {
         return CreditNoteView.of(creditNotes.findById(id)
-                .orElseThrow(() -> new EntityNotFoundException("No return " + id)));
+                .orElseThrow(() -> new EntityNotFoundException("That is not on this till any more. Refresh the screen and try again.")));
     }
 
     // ---- Pricing ------------------------------------------------------------------------------------
@@ -275,6 +275,6 @@ public class ReturnService {
     }
 
     private Invoice invoiceFor(UUID invoiceId) {
-        return invoices.findById(invoiceId).orElseThrow(() -> new EntityNotFoundException("No bill " + invoiceId));
+        return invoices.findById(invoiceId).orElseThrow(() -> new EntityNotFoundException("That is not on this till any more. Refresh the screen and try again."));
     }
 }

@@ -77,10 +77,10 @@ public class AuthService {
                               boolean takeOver) {
         User user = users.findByUsernameIgnoreCase(username == null ? "" : username.trim())
                 .filter(User::isActive)
-                .orElseThrow(() -> new AuthException("Wrong username or PIN"));
+                .orElseThrow(() -> new AuthException("We could not sign you in. Check the username and PIN, and try again."));
         if (!encoder.matches(pin == null ? "" : pin, user.getPinHash())) {
             log.warn("Failed sign-in for {} on counter {}", user.getUsername(), counterId);
-            throw new AuthException("Wrong username or PIN");
+            throw new AuthException("We could not sign you in. Check the username and PIN, and try again.");
         }
         String counter = clients.admit(counterId, overTheNetwork);
         if (overTheNetwork) {

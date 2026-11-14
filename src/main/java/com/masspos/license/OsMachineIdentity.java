@@ -1,5 +1,7 @@
 package com.masspos.license;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -32,6 +34,8 @@ import java.util.regex.Pattern;
 @Component
 public class OsMachineIdentity implements MachineIdentity {
 
+    private static final Logger log = LoggerFactory.getLogger(OsMachineIdentity.class);
+
     /** Readable over the phone: no I, L, O or U. */
     private static final String CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
     private static final String SALT = "masspos-machine-v1";
@@ -59,7 +63,7 @@ public class OsMachineIdentity implements MachineIdentity {
         if (os.startsWith("mac")) {
             String uuid = ioregPlatformUuid(run("ioreg", "-rd1", "-c", "IOPlatformExpertDevice"));
             if (uuid == null) {
-                throw new IllegalStateException("ioreg did not report an IOPlatformUUID");
+                throw new IllegalStateException("this computer did not report it");
             }
             return List.of(uuid);
         }
@@ -72,13 +76,15 @@ public class OsMachineIdentity implements MachineIdentity {
                 // Try the next place a machine ID is kept.
             }
         }
-        throw new IllegalStateException("no /etc/machine-id on this computer");
+        throw new IllegalStateException("this computer does not keep one");
     }
 
     private static String registry(String key, String name) {
         String value = registryValue(run("reg", "query", key, "/v", name), name);
         if (value == null) {
-            throw new IllegalStateException("Windows did not report %s\\%s".formatted(key, name));
+            // Which registry key is missing matters to whoever is called out, not to the shop.
+            log.warn("Windows did not report the value {} under {}", name, key);
+            throw new IllegalStateException("Windows did not report it");
         }
         return value;
     }
@@ -104,7 +110,7 @@ public class OsMachineIdentity implements MachineIdentity {
         for (String part : parts) {
             String value = part == null ? "" : part.strip().replace("{", "").replace("}", "").toUpperCase(Locale.ROOT);
             if (value.isEmpty()) {
-                throw new IllegalStateException("a hardware ID came back empty");
+                throw new IllegalStateException("it came back empty");
             }
             normalised.add(value);
         }
@@ -139,14 +145,17 @@ public class OsMachineIdentity implements MachineIdentity {
             // The answers are a few lines, well inside the pipe buffer, so waiting first cannot deadlock.
             if (!process.waitFor(10, TimeUnit.SECONDS)) {
                 process.destroyForcibly();
-                throw new IllegalStateException(command[0] + " did not answer");
+                throw new IllegalStateException("Windows would not answer");
             }
             return new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
         } catch (IOException e) {
-            throw new IllegalStateException("could not run " + command[0] + ": " + e.getMessage());
+            // The command and what it said go to the log. On screen this clause lands inside a
+            // sentence on the Licence screen, read by a shop owner who has no use for either.
+            log.warn("Could not run {} to read the hardware ID", command[0], e);
+            throw new IllegalStateException("Windows would not answer");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("interrupted while reading the hardware ID");
+            throw new IllegalStateException("reading it was interrupted");
         }
     }
 }

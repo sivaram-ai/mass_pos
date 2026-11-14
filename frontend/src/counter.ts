@@ -135,7 +135,7 @@ export async function agentRequest<T>(method: 'GET' | 'POST' | 'PUT', path: stri
     payload = null
   }
   if (!response.ok) {
-    throw new Error(payload?.error ?? `The printer on this counter did not answer (${response.status})`)
+    throw new Error(payload?.error ?? 'The printer on this counter did not answer. Try again, and if it keeps happening call service.')
   }
   return payload as T
 }
@@ -178,7 +178,7 @@ export async function printHere(job: PrintJob): Promise<void> {
   })
   if (!response.ok) {
     const said = await response.json().catch(() => null)
-    throw new Error(said?.error ?? `The printer on this counter did not take the bill (${response.status})`)
+    throw new Error(said?.error ?? 'The printer on this counter did not take the bill. Check the printer, then print it again from the Bills screen.')
   }
 }
 

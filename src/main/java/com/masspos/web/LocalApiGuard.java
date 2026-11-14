@@ -2,6 +2,8 @@ package com.masspos.web;
 
 import com.masspos.client.ClientProperties;
 import jakarta.servlet.FilterChain;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -40,6 +42,8 @@ public class LocalApiGuard extends OncePerRequestFilter {
     /** Which counter the machine making the request is. Absent from the server's own browser. */
     public static final String COUNTER_HEADER = "X-POS-Counter";
 
+    private static final Logger log = LoggerFactory.getLogger(LocalApiGuard.class);
+
     private static final Set<String> SAFE_METHODS = Set.of("GET", "HEAD", "OPTIONS");
 
     private final AllowedHosts hosts;
@@ -52,12 +56,19 @@ public class LocalApiGuard extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         if (!hosts.accepts(request.getServerName())) {
-            response.sendError(HttpServletResponse.SC_FORBIDDEN, "Host not allowed");
+            // Which address was asked for is the one thing not to repeat back: this check is
+            // what stops a page on another site reaching the till, and its answer is all the page
+            // on the other end gets to learn.
+            log.warn("Refused a request for host {}", request.getServerName());
+            Refusals.write(response, HttpServletResponse.SC_FORBIDDEN, "This address cannot be used",
+                    "Open the till from its own GO RockIt shortcut. This address cannot be used.");
             return;
         }
         if (request.getRequestURI().startsWith("/api/") && !SAFE_METHODS.contains(request.getMethod())
                 && request.getHeader(CLIENT_HEADER) == null) {
-            response.sendError(HttpServletResponse.SC_FORBIDDEN, "Missing " + CLIENT_HEADER + " header");
+            Refusals.write(response, HttpServletResponse.SC_FORBIDDEN, "Reload this screen",
+                    "Reload this screen and try again. If it keeps happening, open the till from its"
+                            + " own GO RockIt shortcut.");
             return;
         }
         chain.doFilter(request, response);

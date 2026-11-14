@@ -116,7 +116,7 @@ public class TerminalAdmin {
 
     private Terminal find(UUID id) {
         return terminals.findById(id)
-                .orElseThrow(() -> new EntityNotFoundException("No till " + id));
+                .orElseThrow(() -> new EntityNotFoundException("That till is not in this shop's list any more. Refresh the screen and try again."));
     }
 
     /**

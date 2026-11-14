@@ -80,7 +80,7 @@ public class HoldController {
     @DeleteMapping("/{id}")
     @Transactional
     public HoldView resume(@PathVariable UUID id) {
-        HeldBill held = holds.findById(id).orElseThrow(() -> new EntityNotFoundException("No held bill " + id));
+        HeldBill held = holds.findById(id).orElseThrow(() -> new EntityNotFoundException("That held bill is not there any more. Refresh the screen to see the ones that are."));
         HoldView view = viewOf(held);
         holds.delete(held);
         return view;

@@ -167,8 +167,9 @@ final class CounterSetup {
         try {
             config.save();
         } catch (IOException cannotWrite) {
-            answer.put("error", "This counter's settings could not be saved to "
-                    + CounterConfig.file() + ". Check the folder is not read-only, and try again.");
+            CounterApp.note("Could not save " + CounterConfig.file() + ": " + cannotWrite);
+            answer.put("error", "This counter's settings could not be saved. Check that this"
+                    + " machine's disk is not full or write-protected, and try again.");
             return Optional.empty();
         }
         return Optional.of(url);

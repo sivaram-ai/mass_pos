@@ -77,7 +77,7 @@ public class SupplierController {
     @RequiresRole({UserRole.ADMIN})
     @Transactional
     public SupplierView update(@PathVariable UUID id, @Valid @RequestBody SaveSupplierRequest request) {
-        Supplier supplier = suppliers.findById(id).orElseThrow(() -> new EntityNotFoundException("No such supplier"));
+        Supplier supplier = suppliers.findById(id).orElseThrow(() -> new EntityNotFoundException("That person is not on the list any more. Refresh the screen and try again."));
         checkCode(id, request.supplierId());
         supplier.rename(request.supplierId(), request.supplierName());
         return SupplierView.of(supplier);
@@ -88,7 +88,7 @@ public class SupplierController {
     @RequiresRole({UserRole.ADMIN})
     @Transactional
     public SupplierView deactivate(@PathVariable UUID id) {
-        Supplier supplier = suppliers.findById(id).orElseThrow(() -> new EntityNotFoundException("No such supplier"));
+        Supplier supplier = suppliers.findById(id).orElseThrow(() -> new EntityNotFoundException("That person is not on the list any more. Refresh the screen and try again."));
         supplier.deactivate();
         return SupplierView.of(supplier);
     }
@@ -97,7 +97,7 @@ public class SupplierController {
     @RequiresRole({UserRole.ADMIN})
     @Transactional
     public SupplierView activate(@PathVariable UUID id) {
-        Supplier supplier = suppliers.findById(id).orElseThrow(() -> new EntityNotFoundException("No such supplier"));
+        Supplier supplier = suppliers.findById(id).orElseThrow(() -> new EntityNotFoundException("That person is not on the list any more. Refresh the screen and try again."));
         supplier.activate();
         return SupplierView.of(supplier);
     }
