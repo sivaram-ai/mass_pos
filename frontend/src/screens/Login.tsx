@@ -55,6 +55,7 @@ export function Login({ onSignedIn }: { onSignedIn: (user: Principal) => void })
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [setup, setSetup] = useState<SetupView | null>(null)
+  const [conflict, setConflict] = useState<ActiveSession | null>(null)
   const [restoring, setRestoring] = useState(false)
 
   // A till being replaced has its shop on a pen drive, and that file holds the staff and their
@@ -64,8 +65,11 @@ export function Login({ onSignedIn }: { onSignedIn: (user: Principal) => void })
     api.get<SetupView>('/api/setup').then(setSetup).catch(() => setSetup(null))
   }, [])
 
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault()
+  /**
+   * @param takeOver set once the person has been told their account is in use on another till and
+   *                 has said to sign that one out and carry on here
+   */
+  const signIn = async (takeOver: boolean) => {
     setBusy(true)
     setError(null)
     try {
@@ -73,26 +77,37 @@ export function Login({ onSignedIn }: { onSignedIn: (user: Principal) => void })
       // means - the till's number, its name, whether it may bill at all - because the shop's
       // counters are the shop's to keep, not something a machine makes up about itself.
       const result = await api.post<{ token: string; user: Principal }>('/api/auth/login',
-        { username, pin, counterId: counterId() })
+        { username, pin, counterId: counterId(), takeOver })
       saveToken(result.token)
       onSignedIn(result.user)
     } catch (failure) {
       const said = failure instanceof Error ? failure.message : 'Could not sign in'
-      setPin('')
-      // Refused for what this machine is, not who is standing at it: no counter number, or a shop
-      // with every place taken - which is what the counter that loses the race for the last one is
-      // told. Nothing here can be put right on this screen, so the counter's own settings window
-      // comes back with the reason on it, and this screen says where to look.
-      if (failure instanceof ApiError && failure.counterSetup && goToCounterSetup(said)) {
-        // The browser is on its way to this machine's own setup page, which is where every one of
-        // these can actually be put right. Nothing more to show here.
-        setError(said)
-      } else {
-        setError(said)
+      // The account is in use on another till. Nothing is wrong and nobody is at fault - one
+      // person moving between two tills is ordinary - so it is put to them rather than refused.
+      // The PIN stays: taking over sends the same sign-in again, and asking for it twice to
+      // answer one question is the sort of thing that makes people stop reading the question.
+      if (failure instanceof ApiError && failure.activeSession) {
+        setConflict(failure.activeSession)
+        return
       }
+      setPin('')
+      setConflict(null)
+      // Refused for what this machine is, not who is standing at it: no counter chosen, a till
+      // that has been blocked, or one the shop's licence does not cover. None of that can be put
+      // right on a sign-in screen, so the browser goes to this machine's own setup page, which can.
+      if (failure instanceof ApiError && failure.counterSetup && goToCounterSetup(said)) {
+        setError(said)
+        return
+      }
+      setError(said)
     } finally {
       setBusy(false)
     }
+  }
+
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault()
+    void signIn(false)
   }
 
   return (
@@ -173,6 +188,146 @@ export function Login({ onSignedIn }: { onSignedIn: (user: Principal) => void })
           )}
         </div>
       )}
+
+      {conflict && (
+        <AlreadySignedIn
+          where={conflict}
+          busy={busy}
+          onGoBack={() => {
+            setConflict(null)
+            setError(null)
+            setPin('')
+          }}
+          onTakeOver={() => {
+            setConflict(null)
+            void signIn(true)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+/** Where an account is already signed in, as the server describes that till. */
+type ActiveSession = {
+  counterCode: string
+  counterName: string
+  /** The floor or area that till stands on, when the shop has said. */
+  where: string
+  /** When that sign-in happened, or null on a shop that has not kept it. */
+  since: string | null
+}
+
+/**
+ * The account is already in use on another till, so the person is told where and asked what to do.
+ *
+ * <p>Refusing outright would be wrong - one person moving between two tills is ordinary, and so is
+ * a cashier whose last machine was carried off without them signing out - and letting it through
+ * quietly would leave two tills taking bills under one name. Only the person standing there can
+ * tell those apart, so they are shown the till and given the two answers.
+ *
+ * <p>Both answers are safe to pick by mistake: going back changes nothing, and taking over signs
+ * out a session that person owns. So the harmless one is where the cursor starts, and the keys are
+ * the ones a cashier's hands already use - up and down to choose, Enter to do it.
+ */
+function AlreadySignedIn({ where, busy, onGoBack, onTakeOver }: {
+  where: ActiveSession
+  busy: boolean
+  onGoBack: () => void
+  onTakeOver: () => void
+}) {
+  const choices = [
+    { label: 'Go back', hint: 'Leave that sign-in alone and return to this screen.', run: onGoBack },
+    {
+      label: 'Sign out there and sign in here',
+      hint: `Ends the sign-in at ${where.counterName} and signs you in on this machine.`,
+      run: onTakeOver,
+    },
+  ]
+  const [at, setAt] = useState(0)
+  const list = useRef<HTMLDivElement>(null)
+
+  // Takes the focus off the PIN box behind, or the arrows would go on editing it.
+  useEffect(() => list.current?.focus(), [])
+
+  const onKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      setAt((now) => (now + (event.key === 'ArrowDown' ? 1 : choices.length - 1)) % choices.length)
+      return
+    }
+    // The in-app browser pane does not activate a focused button on Enter, and this list is a div
+    // in any case, so Enter is handled here rather than left to the browser.
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      choices[at].run()
+      return
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      onGoBack()
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-900/60 p-4">
+      <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+        <h2 className="text-lg font-semibold text-slate-900">This account is already in use</h2>
+        <p className="mt-1 text-sm text-slate-600">
+          Somebody is signed in as this user at another till. Two tills billing under one name is
+          usually a mistake, so nothing has been changed yet.
+        </p>
+
+        <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 rounded-lg bg-slate-50 px-4 py-3 text-sm">
+          <dt className="text-slate-500">Counter</dt>
+          <dd className="font-medium text-slate-900">{where.counterName}</dd>
+          <dt className="text-slate-500">Number</dt>
+          <dd className="num font-medium text-slate-900">{where.counterCode || '—'}</dd>
+          {where.where && (
+            <>
+              <dt className="text-slate-500">Where</dt>
+              <dd className="text-slate-700">{where.where}</dd>
+            </>
+          )}
+          <dt className="text-slate-500">Signed in</dt>
+          <dd className="text-slate-700">
+            {where.since ? new Date(where.since).toLocaleString() : 'Not known'}
+          </dd>
+        </dl>
+
+        <div
+          ref={list}
+          tabIndex={-1}
+          role="listbox"
+          aria-label="What would you like to do?"
+          onKeyDown={onKeyDown}
+          className="mt-4 space-y-2 outline-none"
+        >
+          {choices.map((choice, index) => (
+            <div
+              key={choice.label}
+              role="option"
+              aria-selected={index === at}
+              onMouseEnter={() => setAt(index)}
+              onClick={() => choice.run()}
+              className={`cursor-pointer rounded-lg border px-4 py-3 transition ${
+                index === at
+                  ? 'border-sky-500 bg-sky-50 ring-2 ring-sky-100'
+                  : 'border-slate-200 hover:bg-slate-50'}`}
+            >
+              <div className={`font-medium ${index === at ? 'text-sky-900' : 'text-slate-800'}`}>
+                {choice.label}
+              </div>
+              <div className="text-sm text-slate-500">{choice.hint}</div>
+            </div>
+          ))}
+        </div>
+
+        <p className="mt-3 text-center text-xs text-slate-400">
+          <kbd>↑</kbd> <kbd>↓</kbd> to choose, <kbd>Enter</kbd> to go ahead
+          {busy ? ' · signing in…' : ''}
+        </p>
+      </div>
     </div>
   )
 }

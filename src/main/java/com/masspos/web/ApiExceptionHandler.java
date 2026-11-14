@@ -13,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.MessageSourceResolvable;
 import org.springframework.dao.DataIntegrityViolationException;
+import com.masspos.auth.SessionConflictException;
 import com.masspos.client.ClientRefusedException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -88,6 +89,25 @@ public class ApiExceptionHandler {
      * rather than 400, because nothing about the request is malformed - the answer would be the
      * same however carefully it were retyped.
      */
+    /**
+     * The account is in use on another till. Not an error in the usual sense - nothing is wrong
+     * and nobody has done anything they should not - so it carries the till's details and leaves
+     * the choice to the person: go back, or take the sign-in over.
+     */
+    @ExceptionHandler(SessionConflictException.class)
+    public ProblemDetail signedInElsewhere(SessionConflictException e) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
+        problem.setTitle("This account is already in use");
+        problem.setProperty("sessionConflict", true);
+        java.util.Map<String, Object> where = new java.util.LinkedHashMap<>();
+        where.put("counterCode", e.getCounterCode());
+        where.put("counterName", e.getCounterName());
+        where.put("where", e.getWhere());
+        where.put("since", e.getSince() == null ? null : e.getSince().toString());
+        problem.setProperty("activeSession", where);
+        return problem;
+    }
+
     @ExceptionHandler(ClientRefusedException.class)
     public ProblemDetail clientRefused(ClientRefusedException e) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, e.getMessage());

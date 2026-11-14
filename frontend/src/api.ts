@@ -5,6 +5,14 @@ const TOKEN_KEY = 'masspos.token'
 /** Window event fired when the server refuses something because of the licence. */
 export const LICENSE_CHANGED = 'masspos:license'
 
+/** The till an account is already signed in on, as the server describes it. */
+export interface ActiveSessionDetails {
+  counterCode: string
+  counterName: string
+  where: string
+  since: string | null
+}
+
 /**
  * Thrown for any non-2xx reply; `message` is the server's own wording, fit to show on screen.
  * `fieldErrors` names each refused form field (`gstin`, `address[1]`) so a form can mark it.
@@ -14,13 +22,16 @@ export class ApiError extends Error {
   fieldErrors: Record<string, string>
   /** True when the server refused this machine rather than the person: see ApiExceptionHandler. */
   counterSetup: boolean
+  /** Where this account is already signed in, when that is what the refusal was about. */
+  activeSession: ActiveSessionDetails | null
 
   constructor(status: number, message: string, fieldErrors: Record<string, string> = {},
-              counterSetup = false) {
+              counterSetup = false, activeSession: ActiveSessionDetails | null = null) {
     super(message)
     this.status = status
     this.fieldErrors = fieldErrors
     this.counterSetup = counterSetup
+    this.activeSession = activeSession
   }
 }
 
@@ -89,9 +100,15 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       window.dispatchEvent(new Event(LICENSE_CHANGED))
     }
     const errors = (payload as { errors?: Record<string, string> } | null)?.errors
+    const said = payload as {
+      counterSetup?: boolean
+      sessionConflict?: boolean
+      activeSession?: ActiveSessionDetails
+    } | null
     throw new ApiError(response.status, messageOf(payload, response.status),
       errors && typeof errors === 'object' ? errors : {},
-      Boolean((payload as { counterSetup?: boolean } | null)?.counterSetup))
+      Boolean(said?.counterSetup),
+      said?.sessionConflict && said.activeSession ? said.activeSession : null)
   }
   return payload as T
 }
@@ -182,9 +199,15 @@ export async function uploadCsv<T>(path: string, csv: string): Promise<T> {
   const payload = text ? safeParse(text) : null
   if (!response.ok) {
     const errors = (payload as { errors?: Record<string, string> } | null)?.errors
+    const said = payload as {
+      counterSetup?: boolean
+      sessionConflict?: boolean
+      activeSession?: ActiveSessionDetails
+    } | null
     throw new ApiError(response.status, messageOf(payload, response.status),
       errors && typeof errors === 'object' ? errors : {},
-      Boolean((payload as { counterSetup?: boolean } | null)?.counterSetup))
+      Boolean(said?.counterSetup),
+      said?.sessionConflict && said.activeSession ? said.activeSession : null)
   }
   return payload as T
 }

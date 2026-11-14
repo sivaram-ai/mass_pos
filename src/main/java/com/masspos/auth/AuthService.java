@@ -18,6 +18,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.List;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.Optional;
@@ -54,7 +55,7 @@ public class AuthService {
     /** Signing in on this machine itself, which is what a shop with one till always does. */
     @Transactional
     public LoginResult signIn(String username, String pin) {
-        return signIn(username, pin, null, false);
+        return signIn(username, pin, null, false, false);
     }
 
     /**
@@ -68,9 +69,12 @@ public class AuthService {
      * @param counterId       which of the shop's counters this machine was told it is; blank from
      *                        the browser on the server
      * @param overTheNetwork  false when the request came in over loopback, i.e. the server's own till
+     * @param takeOver        sign this account out of wherever else it is in use and carry on here,
+     *                        which is what somebody answers once they have been told where that is
      */
     @Transactional
-    public LoginResult signIn(String username, String pin, String counterId, boolean overTheNetwork) {
+    public LoginResult signIn(String username, String pin, String counterId, boolean overTheNetwork,
+                              boolean takeOver) {
         User user = users.findByUsernameIgnoreCase(username == null ? "" : username.trim())
                 .filter(User::isActive)
                 .orElseThrow(() -> new AuthException("Wrong username or PIN"));
@@ -82,10 +86,42 @@ public class AuthService {
         if (overTheNetwork) {
             endEarlierSessionsOn(counter);
         }
+        settleSessionsElsewhere(user, counter, takeOver);
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes());
         AuthToken saved = tokens.save(new AuthToken(user, hash(token), counter));
         log.info("{} signed in on {}", user.getUsername(), counter);
         return new LoginResult(token, principal(user, saved.getId(), counter));
+    }
+
+    /**
+     * One person, one till at a time.
+     *
+     * <p>An account signed in on two tills at once is either a mistake or a cashier whose last
+     * machine was carried off without them signing out, and both end the same way: two tills
+     * taking bills under one name, and nobody the wiser until the day's takings are read. So the
+     * sign-in stops and says where the account is already in use, and the person decides - which
+     * is the only way to tell those two apart from here.
+     *
+     * <p>Sessions on the till being signed in to are not in question: that is this machine, and
+     * {@link #endEarlierSessionsOn} has already dealt with them.
+     */
+    private void settleSessionsElsewhere(User user, String counter, boolean takeOver) {
+        List<AuthToken> elsewhere = tokens.findByUserIdAndRevokedAtIsNull(user.getId()).stream()
+                .filter(open -> !open.getTerminalCode().equals(counter))
+                .toList();
+        if (elsewhere.isEmpty()) {
+            return;
+        }
+        if (!takeOver) {
+            AuthToken open = elsewhere.get(0);
+            ClientRegistry.Till till = clients.describe(open.getTerminalCode());
+            throw new SessionConflictException(till.code(), till.name(), till.where(),
+                    open.getCreatedAt());
+        }
+        Instant now = Instant.now();
+        elsewhere.forEach(open -> open.revoke("TAKEN_OVER", now));
+        log.info("{} took their sign-in over from {}", user.getUsername(),
+                elsewhere.stream().map(AuthToken::getTerminalCode).distinct().toList());
     }
 
     /**

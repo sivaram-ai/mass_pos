@@ -26,6 +26,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3N | The shop owns its counters: an admin adds them on the server (number fixed at creation, name editable, block/unblock), and a counter machine chooses which of them it is from the list the server offers. A machine signs in with that till's id, never a number it typed. The counter settings window asks two questions and no longer sets a printer; a new counter saves its bills to a file on its own machine until somebody picks a printer in the app | Done: 368 tests green, driven over the LAN; the Swing window is covered by tests, not driven on screen |
 | 3O | `pos.clients.max` caps how many counters a shop may have, not only how many may bill at once: creating one past the limit is refused with the licence message, Add a counter goes grey, and a counter beyond the limit (a licence cut below the counters a shop already has) is red and marked "Licence limit exceeded", as blocked ones now are | Done: 368 tests green, driven over the LAN and in the browser |
 | 3P | A counter shows no desktop windows at all: the Swing settings dialog is gone and setting a counter up is a page the counter serves itself from its print agent, found before any shop server has been, with every refusal shown in full on it | Done: 365 tests green, driven end to end in the browser |
+| 3Q | Signing in where that account is already open on another till stops and says where - counter, number, floor and when - and offers Go back or sign that one out and carry on here, chosen with the arrow keys and Enter | Done: 368 tests green, driven in the browser |
 | L1 | Offline subscription licence per till: Ed25519-signed key bound to a hardware machine ID, warn/grace days, billing lock, Licence screen + banner, vendor `tools/license/LicenseTool.java` | Done: 172 tests green, real key verified on this PC |
 | 5A | Windows installer: jpackage + WiX 3.14, trimmed JDK 21 runtime, one file, `tools/build-installer.ps1` | Done: installed and run from the exe on this PC |
 | 5B | One folder per till, `%LOCALAPPDATA%\GoRockitPOS`, data in `data\`, with an automatic move from the old `MassPOS` folder | Done: 235 tests green, this PC's own till migrated |
@@ -518,6 +519,20 @@ folder and everything under it, so that is the only copy that survives one.
     refreshes `lastSeenAt`). Deliberately *not* the three-minute presence window: a counter asleep
     or off the Wi-Fi for five minutes would otherwise lose its place to another machine and come
     back still signed in, billing without one.
+  - **One account, one till at a time** (`AuthService.settleSessionsElsewhere`). Signing in where
+    that account is already open somewhere else stops with a 409 carrying `sessionConflict` and
+    the till's details, and the person chooses: go back, or `takeOver: true`, which signs the other
+    one out. Not refused outright and not allowed quietly - one person moving between two tills is
+    ordinary, and so is a cashier whose last machine was carried off without them signing out, and
+    only the person standing there can tell those apart. Sessions on the till being signed in to
+    are not in question; `endEarlierSessionsOn` has already dealt with those.
+    - **It is thrown after the writes `admit` and `endEarlierSessionsOn` have made**, which is safe
+      because `signIn` is `@Transactional` and this is a `RuntimeException`: asking the question
+      changes nothing.
+    - **Tests that need two counters billing at once need two cashiers.** `ClientsApiIntegrationTest
+      .cashierAt` makes one per counter, and signs it out afterwards - creating an account signs it
+      in on the server's own till to get through the forced PIN change, and that open session is
+      itself "signed in somewhere else".
   - **One counter, one session** (`AuthService.endEarlierSessionsOn`, counters only). The counter
     app opens exactly one window, so a counter signing in again means the window before it has
     gone. Those abandoned sign-ins used to stay open for ever, and each went on holding the place

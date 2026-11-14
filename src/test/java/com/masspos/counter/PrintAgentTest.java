@@ -286,6 +286,11 @@ class PrintAgentTest {
      * The agent answers as soon as it has taken the job, not when the paper is out - the same
      * bargain the server's printer makes - so the preview is waited for rather than expected.
      */
+    /**
+     * Waits for a printed page to be <em>finished</em>, not merely started. The agent answers as
+     * soon as it has taken the job and the printer thread writes it afterwards, so a file that
+     * exists may still be empty for a moment - which read a blank page about one run in twenty.
+     */
     private Path printedWithin(Duration limit) throws Exception {
         Instant giveUp = Instant.now().plus(limit);
         while (Instant.now().isBefore(giveUp)) {
@@ -293,6 +298,7 @@ class PrintAgentTest {
                 try (Stream<Path> files = Files.list(spool)) {
                     Optional<Path> preview = files
                             .filter(file -> file.getFileName().toString().endsWith(".txt"))
+                            .filter(file -> sizeOf(file) > 0)
                             .findFirst();
                     if (preview.isPresent()) {
                         return preview.get();
@@ -302,6 +308,14 @@ class PrintAgentTest {
             Thread.sleep(50);
         }
         throw new AssertionError("Nothing was printed on this counter within " + limit);
+    }
+
+    private static long sizeOf(Path file) {
+        try {
+            return Files.size(file);
+        } catch (java.io.IOException beingWritten) {
+            return 0;
+        }
     }
 
     private static String header(HttpResponse<String> response, String name) {

@@ -39,8 +39,12 @@ public class AuthController {
      *                  to set and to correct, and a machine that had kept a copy of it would go on
      *                  claiming to be a counter that no longer exists.
      */
+    /**
+     * @param takeOver true once somebody has been told their account is in use on another till and
+     *                 has said to sign that one out and carry on here
+     */
     public record LoginRequest(@NotBlank String username, @NotBlank String pin,
-                               @Size(max = 36) String counterId) {
+                               @Size(max = 36) String counterId, boolean takeOver) {
     }
 
     public record LoginResponse(String token, Principal user) {
@@ -59,7 +63,7 @@ public class AuthController {
     @PostMapping("/login")
     public LoginResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest http) {
         AuthService.LoginResult result = auth.signIn(request.username(), request.pin(),
-                request.counterId(), overTheNetwork(http));
+                request.counterId(), overTheNetwork(http), request.takeOver());
         return new LoginResponse(result.token(), result.principal());
     }
 

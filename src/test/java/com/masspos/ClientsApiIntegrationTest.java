@@ -66,6 +66,8 @@ class ClientsApiIntegrationTest {
 
     private final ObjectMapper json = new ObjectMapper();
     private static boolean staffReady;
+    /** Which counters already have a cashier of their own, across this class's tests. */
+    private static final java.util.Set<String> staff = java.util.concurrent.ConcurrentHashMap.newKeySet();
     /** Only an admin may sign another till out, so the shop has one. */
     private static String adminToken;
 
@@ -130,6 +132,76 @@ class ClientsApiIntegrationTest {
         signIn("192.168.1.71", "T1")
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.detail").value(containsString("is the server itself")));
+    }
+
+    /**
+     * One account, one till at a time. Two tills billing under one name is either a mistake or a
+     * cashier whose last machine was carried off without them signing out, and only the person
+     * standing there can tell those apart - so the sign-in stops and says where the account is
+     * already in use, with enough for somebody to walk over and look.
+     */
+    @Test
+    void saysWhereAnAccountIsAlreadySignedInRatherThanQuietlyAllowingTwo() throws Exception {
+        String counter = counterId("UA", "Front counter");
+        mvc.perform(asAdmin(put("/api/terminals/" + counter))
+                        .content("{\"name\":\"Front counter\",\"section\":\"Ground floor\"}"))
+                .andExpect(status().isNoContent());
+        String cashier = cashierAt("UA");
+        mvc.perform(login(counter, cashier).with(from("192.168.1.171"))).andExpect(status().isOk());
+
+        // The same person, now at another till.
+        String elsewhere = counterId("UB", "Back counter");
+        mvc.perform(login(elsewhere, cashier).with(from("192.168.1.172")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.sessionConflict").value(true))
+                .andExpect(jsonPath("$.detail").value(containsString("already signed in at Front counter")))
+                .andExpect(jsonPath("$.activeSession.counterCode").value("UA"))
+                .andExpect(jsonPath("$.activeSession.counterName").value("Front counter"))
+                .andExpect(jsonPath("$.activeSession.where").value("Ground floor"))
+                .andExpect(jsonPath("$.activeSession.since").isNotEmpty());
+
+        // Nothing was changed by asking: the first till is still signed in and still holds a place.
+        assertThat(tillSeenBy(adminToken, null, "UA").get("signedIn").asBoolean()).isTrue();
+    }
+
+    /** Having been told, the person says to take it over - and the other till is signed out. */
+    @Test
+    void takesTheSignInOverWhenThePersonSaysSo() throws Exception {
+        String first = counterId("UC", "Counter C");
+        String cashier = cashierAt("UC");
+        String there = tokenOf(mvc.perform(login(first, cashier).with(from("192.168.1.173")))
+                .andExpect(status().isOk()));
+
+        String second = counterId("UD", "Counter D");
+        mvc.perform(login(second, cashier).with(from("192.168.1.174")))
+                .andExpect(status().isConflict());
+
+        mvc.perform(post("/api/auth/login")
+                        .header(LocalApiGuard.CLIENT_HEADER, "test")
+                        .header(HttpHeaders.HOST, "localhost")
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"username\":\"%s\",\"pin\":\"%s\",\"counterId\":\"%s\",\"takeOver\":true}"
+                                .formatted(cashier, TestAccounts.CHOSEN_PIN, second))
+                        .with(from("192.168.1.174")))
+                .andExpect(status().isOk());
+
+        // The till they came from is signed out, and the token they had there no longer works.
+        assertThat(tillSeenBy(adminToken, null, "UC").get("signedIn").asBoolean()).isFalse();
+        mvc.perform(get("/api/auth/me")
+                        .header(LocalApiGuard.CLIENT_HEADER, "test")
+                        .header(HttpHeaders.HOST, "localhost")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + there))
+                .andExpect(status().isUnauthorized());
+    }
+
+    /** Signing in again on the till you are already on is not somebody else: no question asked. */
+    @Test
+    void asksNothingWhenTheSameTillSignsTheSamePersonInAgain() throws Exception {
+        String counter = counterId("UE", "Counter E");
+        String cashier = cashierAt("UE");
+
+        mvc.perform(login(counter, cashier).with(from("192.168.1.175"))).andExpect(status().isOk());
+        mvc.perform(login(counter, cashier).with(from("192.168.1.175"))).andExpect(status().isOk());
     }
 
     /** A machine nobody has set up yet is told what to go and do. */
@@ -564,7 +636,7 @@ class ClientsApiIntegrationTest {
      */
     private ResultActions signIn(String fromAddress, String code, String name) throws Exception {
         String id = code == null ? "" : counterId(code, name == null ? "Counter " + code : name);
-        return mvc.perform(login(id).with(from(fromAddress)));
+        return mvc.perform(login(id, code == null ? "asha" : cashierAt(code)).with(from(fromAddress)));
     }
 
     /** That counter's id, created through the admin's own endpoint if the shop has not got it. */
@@ -585,14 +657,38 @@ class ClientsApiIntegrationTest {
     }
 
     private MockHttpServletRequestBuilder login(String counterId) {
+        return login(counterId, "asha");
+    }
+
+    private MockHttpServletRequestBuilder login(String counterId, String username) {
         return post("/api/auth/login")
                 .header(LocalApiGuard.CLIENT_HEADER, "test")
                 .header(HttpHeaders.HOST, "localhost")
                 .contentType(APPLICATION_JSON)
                 .content(counterId == null || counterId.isEmpty()
-                        ? "{\"username\":\"asha\",\"pin\":\"%s\"}".formatted(TestAccounts.CHOSEN_PIN)
-                        : "{\"username\":\"asha\",\"pin\":\"%s\",\"counterId\":\"%s\"}"
-                                .formatted(TestAccounts.CHOSEN_PIN, counterId));
+                        ? "{\"username\":\"%s\",\"pin\":\"%s\"}"
+                                .formatted(username, TestAccounts.CHOSEN_PIN)
+                        : "{\"username\":\"%s\",\"pin\":\"%s\",\"counterId\":\"%s\"}"
+                                .formatted(username, TestAccounts.CHOSEN_PIN, counterId));
+    }
+
+    /**
+     * A cashier of that counter's own, created once and reused.
+     *
+     * <p>These tests have several counters billing at the same time, and a shop that does that has
+     * a person at each: one account signed in on two tills at once is the thing the sign-in now
+     * stops and asks about. Giving each counter its own cashier keeps every test about what it is
+     * actually about, rather than quietly answering that question in a helper.
+     */
+    private String cashierAt(String code) throws Exception {
+        String username = "till" + code.toLowerCase(java.util.Locale.ROOT);
+        if (staff.add(username)) {
+            // Creating an account signs it in, on this server's own till, to get through the
+            // forced first PIN change. Left open, that session is this person signed in somewhere
+            // else - which is exactly what the sign-in now stops to ask about.
+            logOut(TestAccounts.tokenFor(auth, username, UserRole.CASHIER));
+        }
+        return username;
     }
 
     private static String newCounter(String code, String name) {

@@ -147,6 +147,22 @@ public class ClientRegistry {
         return null;
     }
 
+    /** A till in the words the shop uses for it, for telling somebody where to go and look. */
+    public record Till(String code, String name, String where) {
+    }
+
+    /**
+     * How to describe one till to a person. A till the shop has no row for is described by its own
+     * number, which is still something to go on and better than a blank.
+     */
+    @Transactional(readOnly = true)
+    public Till describe(String code) {
+        return terminals.findByCode(code == null ? "" : code)
+                .map(till -> new Till(till.getCode(), till.getName(),
+                        till.getSection() == null ? "" : till.getSection()))
+                .orElseGet(() -> new Till(code == null ? "" : code, code == null ? "" : code, ""));
+    }
+
     /** Places not taken by another counter, for the counter settings window and the tills list. */
     @Transactional(readOnly = true)
     public int free() {
