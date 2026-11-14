@@ -85,13 +85,28 @@ public final class CounterApp {
         if (running.isEmpty()) {
             return false;
         }
-        String server = running.get().isBlank() ? config.lastServer() : running.get();
-        // Running but with no server yet means it is still being set up, so send this click to the
-        // page where that is happening rather than opening a window on nothing.
-        Browser.openApp(server.isBlank()
-                ? "http://127.0.0.1:" + config.agentPort() + "/setup"
-                : billingScreen(config, server));
+        Browser.openApp(windowFor(config,
+                running.get().isBlank() ? config.lastServer() : running.get()));
         return true;
+    }
+
+    /**
+     * Where a click on the shortcut lands when a counter is already running on this machine.
+     *
+     * <p>The shop is asked first. One that answered this morning may not answer now - a cable out
+     * of its socket is the usual reason - and a browser sent to a shop that cannot answer shows
+     * its own error page: a cloud, a Refresh button, and no way at all back to this counter's
+     * settings, which is the one screen that could put it right. A counter that is up but still
+     * being set up has no server to open a window on either, and lands in the same place.
+     *
+     * <p>The setup page is served by the print agent on this machine, so it answers whatever the
+     * network is doing. It is the only address here that cannot fail.
+     */
+    static String windowFor(CounterConfig config, String server) {
+        if (server.isBlank() || ServerFinder.reachable(server).isEmpty()) {
+            return "http://127.0.0.1:" + config.agentPort() + "/setup";
+        }
+        return billingScreen(config, server);
     }
 
     /**

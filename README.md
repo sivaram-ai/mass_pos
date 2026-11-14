@@ -243,6 +243,14 @@ shops' data, is in [docs/multi-terminal-and-rbac.md](docs/multi-terminal-and-rba
 The UI port stays on loopback even on the master, so nobody on the network can drive a till's
 screen or open its cash drawer.
 
+**When the network drops**, nothing on the screen is lost. A red bar says the shop cannot be
+reached and billing carries on where it left off the moment it answers — the till keeps asking, so
+nobody has to press anything after pushing the cable back in. The bill being rung up stays on the
+grid, and survives a refresh or a restart of the browser window as well. While the shop is out,
+Refresh asks it again rather than reloading, because reloading then lands on the browser's own
+error page. The bar carries a **Counter settings** button, so a counter can be moved from the cable
+to Wi-Fi, or pointed at a new address, without closing the program.
+
 **A counter's own settings** — how it finds the shop's server, that server's address, and which of
 the shop's counters this machine is — are on a page the counter serves itself, so it opens whether
 or not the shop's server can be reached. Open it from **Counter settings**, in the top-left corner

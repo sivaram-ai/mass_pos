@@ -16,7 +16,7 @@
     <!-- The till's version: shown at the top of the Settings screen, and what
          tools/build-installer.ps1 gives jpackage as the installer's app version. Bump it for every
          shipped build, as Windows refuses to install the same app version over itself (error 1638). -->
-    <version>0.4.22</version>
+    <version>0.4.23</version>
     <name>Mass POS</name>
     <description>Offline-first GST billing and inventory POS (single desktop executable)</description>
 

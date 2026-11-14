@@ -19,6 +19,7 @@ import {
 } from '../shortcuts'
 import type { ShortcutAction } from '../shortcuts'
 import type { Toast } from '../App'
+import { forgetBillDraft, saveBillDraft, savedBillDraft } from '../billDraft'
 
 const ONE_UNIT = 1000
 const NO_CUSTOMER: Customer = { name: '', gstin: '', placeOfSupply: '' }
@@ -175,7 +176,8 @@ const lastBillOf = (invoice: Invoice): LastBill => ({
  * @param headerSlot where the bill type, customer and last bill are shown, in the app header
  * @param request    a bill another screen wants edited or returned here
  */
-export default function Billing({ settings, onToast, active, blocked, headerSlot, role, request }: {
+export default function Billing({ settings, onToast, active, blocked, headerSlot, role, request,
+                                  onCartChanged, holdRequest, onHeldForSignOut }: {
   settings: SettingsView | null
   onToast: Toast
   active: boolean
@@ -183,9 +185,24 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
   headerSlot: HTMLElement | null
   role: Role
   request: BillingRequest | null
+  /** Tells the shell how many items are on the bill, so Log out can ask about them first. */
+  onCartChanged?: (items: number) => void
+  /** Bumped by the shell when somebody is logging out and the bill on screen must not be lost. */
+  holdRequest?: number
+  onHeldForSignOut?: (outcome: { held: boolean; says: string }) => void
 }) {
-  const [lines, setLines] = useState<Row[]>([])
-  const [customer, setCustomer] = useState<Customer>(NO_CUSTOMER)
+  /**
+   * The bill this machine had on screen when it was last open. A refresh, or the browser's own
+   * error page after the network dropped, is a reload, and a reload used to empty the grid - with
+   * no way back, because nothing on it had been sent anywhere yet. Re-keyed on the way in so the
+   * row keys stay this run's own.
+   */
+  const [resumed] = useState(() => {
+    const draft = savedBillDraft<Row>(localToday())
+    return draft ? { ...draft, lines: draft.lines.map((line, at) => ({ ...line, key: at + 1 })) } : null
+  })
+  const [lines, setLines] = useState<Row[]>(() => resumed?.lines ?? [])
+  const [customer, setCustomer] = useState<Customer>(() => resumed?.customer ?? NO_CUSTOMER)
   const [quote, setQuote] = useState<QuotedCart | null>(null)
   const [edit, setEdit] = useState<Edit>({ row: 0, col: 'code', text: '', dirty: false })
   const [found, setFound] = useState<Found | null>(null)
@@ -209,9 +226,11 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
   const [shortcuts, setShortcuts] = useState(loadShortcuts)
   const [showShortcuts, setShowShortcuts] = useState(loadShowShortcuts)
   const [askCashReceived, setAskCashReceived] = useState(loadAskCashReceived)
-  const [billInfo, setBillInfo] = useState<BillInfo>(NO_BILL_INFO)
+  const [billInfo, setBillInfo] = useState<BillInfo>(() => resumed
+    ? { tableNo: resumed.tableNo, supplierId: resumed.supplierId }
+    : NO_BILL_INFO)
   /** What is typed in the supplier box, which is not the committed supplier until it resolves. */
-  const [supplierText, setSupplierText] = useState('')
+  const [supplierText, setSupplierText] = useState(() => resumed?.supplierText ?? '')
   const [supplierOpen, setSupplierOpen] = useState(false)
   const [supplierHighlight, setSupplierHighlight] = useState(0)
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
@@ -220,7 +239,9 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
 
   const cells = useRef(new Map<string, HTMLInputElement>())
   const listItems = useRef(new Map<number, HTMLTableRowElement>())
-  const nextKey = useRef(1)
+  const nextKey = useRef((resumed?.lines.length ?? 0) + 1)
+  /** The hold-before-signing-out this screen has already answered; see the effect that uses it. */
+  const handledHold = useRef(holdRequest ?? 0)
   // Handlers read these rather than render-time state: a key press can change the bill and move on
   // before React has rendered the change.
   const linesRef = useRef(lines)
@@ -1176,6 +1197,65 @@ export default function Billing({ settings, onToast, active, blocked, headerSlot
     setHolds(null)
     requestFocus(linesRef.current.length, 'code')
   }
+
+  /**
+   * The bill on screen is written to this machine whenever it changes, so a reload opens on it
+   * again. Only a sale: an edit or a return is a document the server already has open, and half of
+   * one brought back out of storage - against a bill that may since have been returned against -
+   * is worse than none. An empty grid forgets the note, which is what makes taking, holding or
+   * clearing a bill the end of it.
+   */
+  useEffect(() => {
+    if (mode.kind !== 'sale' || lines.length === 0) {
+      forgetBillDraft()
+      return
+    }
+    saveBillDraft<Row>(localToday(), {
+      lines,
+      customer,
+      tableNo: billInfo.tableNo,
+      supplierId: billInfo.supplierId,
+      supplierText,
+    })
+  }, [lines, customer, billInfo, supplierText, mode])
+
+  /** The shell asks before it signs anybody out, so it has to know whether there is a bill. */
+  useEffect(() => {
+    onCartChanged?.(lines.length)
+  }, [lines.length, onCartChanged])
+
+  /**
+   * Logging out with a bill on screen holds it instead of losing it. The shell asks here and waits
+   * for the answer before it signs out, so a hold the server refused - no network, most likely -
+   * leaves the cashier on their bill with the reason, rather than signed out without it.
+   */
+  useEffect(() => {
+    // The number this screen opened on has already been dealt with, by the screen before it: the
+    // grid is unmounted and built again at every sign-out, and a request left over from the last
+    // person would otherwise hold nothing and sign the next one straight back out.
+    if (!holdRequest || holdRequest === handledHold.current) {
+      return
+    }
+    handledHold.current = holdRequest
+    void (async () => {
+      try {
+        const applied = commitEdit()
+        if (applied) {
+          foldNewest(applied)
+        }
+        const held = linesRef.current.length > 0 ? await holdCurrent('') : null
+        clearBill()
+        onHeldForSignOut?.({ held: true, says: held ? `Bill held as ${held.label}` : '' })
+      } catch (failure) {
+        onHeldForSignOut?.({
+          held: false,
+          says: messageOfFailure(failure, 'This bill could not be held, so you are still signed in'),
+        })
+      }
+    })()
+    // Deliberately only the request: it carries this render's own commitEdit and holdCurrent.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [holdRequest])
 
   const runAsk = async (value: string) => {
     const pending = ask

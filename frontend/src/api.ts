@@ -5,6 +5,42 @@ const TOKEN_KEY = 'masspos.token'
 /** Window event fired when the server refuses something because of the licence. */
 export const LICENSE_CHANGED = 'masspos:license'
 
+/**
+ * Window events for the one failure a counter cannot read its way out of: the shop stopped
+ * answering. A pulled Ethernet cable, a switch off at the wall, the server restarting.
+ *
+ * <p>They are events rather than a return value because the whole screen has to know, not the one
+ * call that happened to be in flight. A cashier halfway through a bill should be told the shop has
+ * gone - once, plainly, without the bill moving - and told again when it comes back, and neither
+ * of those belongs to whichever request found out.
+ *
+ * <p>Only a request that never reached the server counts. A refusal is not this: a 401, a 409, a
+ * 500 all mean the shop answered, and the screen that asked has a sentence of its own to show.
+ */
+export const SHOP_UNREACHABLE = 'masspos:unreachable'
+export const SHOP_ANSWERED = 'masspos:answered'
+
+let answering = true
+
+/** True until a request fails to reach the shop at all, and again as soon as one gets through. */
+export function shopIsAnswering(): boolean {
+  return answering
+}
+
+function reached() {
+  if (!answering) {
+    answering = true
+    window.dispatchEvent(new Event(SHOP_ANSWERED))
+  }
+}
+
+function couldNotReach() {
+  if (answering) {
+    answering = false
+    window.dispatchEvent(new Event(SHOP_UNREACHABLE))
+  }
+}
+
 /** The till an account is already signed in on, as the server describes it. */
 export interface ActiveSessionDetails {
   counterCode: string
@@ -93,9 +129,12 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   } catch {
     // The browser's own wording here is "Failed to fetch" or "NetworkError when attempting to
     // fetch resource": true, and no use to anybody at a counter. Status 0 is never a reply.
+    couldNotReach()
     throw new ApiError(0, 'The till could not be reached. Check that it is switched on and on this'
       + ' network, then try again.')
   }
+  // Answered, whatever it said: a refusal still proves the shop is there and the cable is in.
+  reached()
 
   if (response.status === 204) {
     return undefined as T

@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, billDate, clockTime, LICENSE_CHANGED, saveToken, savedToken } from './api'
+import {
+  api, ApiError, billDate, clockTime, LICENSE_CHANGED, saveToken, savedToken,
+  SHOP_ANSWERED, SHOP_UNREACHABLE, shopIsAnswering,
+} from './api'
+import { forgetBillDraft } from './billDraft'
+import { hasPrintAgent, openCounterSetup } from './counter'
 import type { LicenseStatus, Principal, Role, SettingsView } from './types'
 import { Login, ChangePin } from './screens/Login'
 import Billing from './screens/Billing'
@@ -45,6 +50,13 @@ const LICENSE_REFRESH_MS = 10 * 60 * 1000
  */
 const STILL_HERE_MS = 60 * 1000
 
+/**
+ * How often a till that has lost the shop asks whether it is back. Often enough that somebody who
+ * has just pushed the cable in sees the screen clear itself while they are still standing there,
+ * and cheap enough to leave running all evening.
+ */
+const ASK_AGAIN_MS = 3000
+
 /** ADMIN reaches everything; the rest see only what their job needs. */
 const SCREENS: { id: Screen; label: string; roles: Role[] }[] = [
   { id: 'billing', label: 'Billing', roles: ['CASHIER', 'MANAGER'] },
@@ -79,12 +91,22 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [billingRequest, setBillingRequest] = useState<BillingRequest | null>(null)
   const [toast, setToast] = useState<{ tone: 'good' | 'bad' | 'warn'; text: string } | null>(null)
+  /** How many items the billing screen has on the bill, which is what Log out asks about. */
+  const [billItems, setBillItems] = useState(0)
+  const [leaving, setLeaving] = useState(false)
+  const [holdRequest, setHoldRequest] = useState(0)
+  const [holding, setHolding] = useState(false)
+  const [holdFailed, setHoldFailed] = useState<string | null>(null)
+  const onCartChanged = useCallback((items: number) => setBillItems(items), [])
   const lastEscape = useRef(0)
   // The billing screen puts its bill details into the header through this slot.
   const [headerSlot, setHeaderSlot] = useState<HTMLDivElement | null>(null)
 
   const refreshSettings = useCallback(() => {
-    api.get<SettingsView>('/api/settings').then(setSettings).catch(() => setSettings(null))
+    api.get<SettingsView>('/api/settings').then(setSettings).catch(() => {
+      // Keep what is on screen. A till that cannot be reached has not renamed the shop, and
+      // blanking the header on a dropped cable only makes a bad minute look worse.
+    })
   }, [])
 
   useEffect(() => {
@@ -94,7 +116,14 @@ export default function App() {
     }
     api.get<Principal>('/api/auth/me')
       .then(setUser)
-      .catch(() => saveToken(null))
+      .catch((failure) => {
+        // A till that could not be reached has not signed anybody out. Throwing the token away
+        // here is how a pulled cable turned into "sign in again" - with the shop unreachable, so
+        // nobody could. The token is kept and tried again when the shop answers.
+        if (!(failure instanceof ApiError) || failure.status !== 0) {
+          saveToken(null)
+        }
+      })
       .finally(() => setBooting(false))
   }, [])
 
@@ -103,6 +132,52 @@ export default function App() {
       refreshSettings()
     }
   }, [user, refreshSettings])
+
+  // Whether the shop is answering at all. Every request says so, so the whole screen knows rather
+  // than only the call that happened to find out.
+  const [reachable, setReachable] = useState(shopIsAnswering)
+  useEffect(() => {
+    const lost = () => setReachable(false)
+    const back = () => setReachable(true)
+    window.addEventListener(SHOP_UNREACHABLE, lost)
+    window.addEventListener(SHOP_ANSWERED, back)
+    return () => {
+      window.removeEventListener(SHOP_UNREACHABLE, lost)
+      window.removeEventListener(SHOP_ANSWERED, back)
+    }
+  }, [])
+
+  /** Asks the shop something cheap that needs no sign-in, which is also how the bar goes away. */
+  const askTheShop = useCallback(() => {
+    api.get('/api/clients/places').catch(() => {
+      // Still out. The bar is already saying so and the next ask is three seconds away.
+    })
+  }, [])
+
+  // While the shop is out, keep asking. Nothing on screen moves and nothing is cleared: the first
+  // request that gets through puts the bar away by itself, mid-bill, with the bill still there.
+  useEffect(() => {
+    if (reachable) {
+      return
+    }
+    const timer = setInterval(askTheShop, ASK_AGAIN_MS)
+    window.addEventListener('focus', askTheShop)
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('focus', askTheShop)
+    }
+  }, [reachable, askTheShop])
+
+  // Back again. The sign-in this browser still holds a token for is picked up without anybody
+  // typing a PIN: being unable to reach the shop for a minute is not a reason to sign out.
+  useEffect(() => {
+    if (!reachable || booting || user || !savedToken()) {
+      return
+    }
+    api.get<Principal>('/api/auth/me').then(setUser).catch(() => {
+      // A token the shop no longer knows: the sign-in screen is already up, which is the answer.
+    })
+  }, [reachable, booting, user])
 
   const signedIn = Boolean(user && !user.mustChangePin)
   const theme = useThemeSync(signedIn)
@@ -144,6 +219,20 @@ export default function App() {
     }
   }, [signedIn])
 
+  /**
+   * Reloading while the shop is unreachable is how somebody ends up on the browser's own error
+   * page, with the screen they were on gone and no way back to this counter's settings. So while
+   * the shop is out, refreshing asks it instead of reloading: the screen stays, and it comes back
+   * on its own the moment the shop answers.
+   */
+  const refresh = useCallback(() => {
+    if (shopIsAnswering()) {
+      window.location.reload()
+    } else {
+      askTheShop()
+    }
+  }, [askTheShop])
+
   // F5 is the key everyone reaches for to refresh, so it reloads - except on the billing grid,
   // where it has long been "remove this line" and the cart is live anyway.
   useEffect(() => {
@@ -153,12 +242,12 @@ export default function App() {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'F5' && !event.repeat) {
         event.preventDefault()
-        window.location.reload()
+        refresh()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [screen, user])
+  }, [screen, user, refresh])
 
   // Esc twice in quick succession on any other screen goes back to billing. A single Esc keeps
   // its usual job, and an Esc a dialog or the menu used to close itself never counts.
@@ -190,7 +279,7 @@ export default function App() {
         setMenuOpen((wasOpen) => !wasOpen)
       }
     },
-  }, Boolean(user) && !user?.mustChangePin)
+  }, Boolean(user) && !user?.mustChangePin && !leaving)
 
   useEffect(() => {
     if (!toast) {
@@ -202,25 +291,74 @@ export default function App() {
 
   const signOut = async () => {
     setMenuOpen(false)
+    setLeaving(false)
     try {
       await api.post('/api/auth/logout')
+    } catch {
+      // Signing out locally matters more than telling the server: a till nobody can reach is
+      // exactly where somebody needs to get off this account and on with their evening. The
+      // session is settled at the server's end by the next sign-in on this counter.
     } finally {
+      forgetBillDraft()
       saveToken(null)
       setUser(null)
       setSettings(null)
       setLicense(null)
+      setBillItems(0)
+      setHoldRequest(0)
       goTo('billing')
     }
   }
+
+  /**
+   * Log out is never one click. It sits under Menu, a keystroke away from the screens beside it,
+   * and the bill on screen has been typed by hand and sent nowhere - so it is asked about first,
+   * and a bill that is part way through is held rather than lost.
+   */
+  const askToSignOut = () => {
+    setHoldFailed(null)
+    setLeaving(true)
+  }
+
+  const holdThenSignOut = () => {
+    setHoldFailed(null)
+    setHolding(true)
+    setHoldRequest((asked) => asked + 1)
+  }
+
+  const heldForSignOut = (outcome: { held: boolean; says: string }) => {
+    setHolding(false)
+    if (!outcome.held) {
+      // The bill is still on screen and still theirs. Said inside this dialog, where the person
+      // who pressed the button is looking - a toast would render behind it.
+      setHoldFailed(outcome.says)
+      return
+    }
+    void signOut()
+  }
+
+  // At the foot of a signed-out screen: the sign-in screen's own Counter settings button is in
+  // the top-left corner, and the one screen that can put this right must not be covered by the
+  // message telling somebody to go to it.
+  const troubleAtTheFoot = !reachable && (
+    <div className="fixed inset-x-0 bottom-0 z-40">
+      <ShopUnreachable onTryAgain={askTheShop} />
+    </div>
+  )
 
   if (booting) {
     return <div className="grid h-screen place-items-center text-slate-400">Starting GO…</div>
   }
   if (!user) {
-    return <Login onSignedIn={setUser} />
+    return <><Login onSignedIn={setUser} />{troubleAtTheFoot}</>
   }
   if (user.mustChangePin) {
-    return <ChangePin user={user} onDone={setUser} onCancel={signOut} />
+    return (
+      <>
+        <ChangePin user={user} onDone={setUser} onCancel={() => void signOut()} />
+        {troubleAtTheFoot}
+      </>
+    )
   }
 
   const allowed = SCREENS.filter((item) => user.role === 'ADMIN' || item.roles.includes(user.role))
@@ -244,10 +382,12 @@ export default function App() {
         </button>
         <button
           type="button"
-          onClick={() => window.location.reload()}
-          title={current === 'billing'
-            ? 'Reload the till'
-            : 'Reload this screen, and come back to it'}
+          onClick={refresh}
+          title={!reachable
+            ? 'Ask the shop again. Reloading now would lose this screen.'
+            : current === 'billing'
+              ? 'Reload the till'
+              : 'Reload this screen, and come back to it'}
           className="flex shrink-0 items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-slate-800"
         >
           <RefreshIcon />
@@ -282,6 +422,8 @@ export default function App() {
         )}
       </header>
 
+      {!reachable && <ShopUnreachable onTryAgain={askTheShop} />}
+
       {license && (license.state !== 'ACTIVE' || license.clockBehind) && (
         <LicenseBanner
           status={license}
@@ -302,8 +444,24 @@ export default function App() {
           setMenuOpen(false)
         }}
         onClose={() => setMenuOpen(false)}
-        onSignOut={signOut}
+        onSignOut={askToSignOut}
       />
+
+      {leaving && (
+        <ConfirmSignOut
+          items={billItems}
+          busy={holding}
+          failed={holdFailed}
+          onHold={holdThenSignOut}
+          onSignOut={() => void signOut()}
+          onBack={() => {
+            setLeaving(false)
+            if (billItems > 0 && canBill) {
+              goTo('billing')
+            }
+          }}
+        />
+      )}
 
       {toast && (
         <div className="fixed right-4 top-14 z-40 w-[28rem] max-w-[calc(100vw-2rem)] shadow-lg">
@@ -324,6 +482,9 @@ export default function App() {
               headerSlot={headerSlot}
               role={user.role}
               request={billingRequest}
+              onCartChanged={onCartChanged}
+              holdRequest={holdRequest}
+              onHeldForSignOut={heldForSignOut}
             />
           </div>
         )}
@@ -357,6 +518,169 @@ export default function App() {
           />
         )}
       </main>
+    </div>
+  )
+}
+
+const TROUBLE_BUTTON = 'rounded-md border border-[#be123c] bg-white px-3 py-1.5 text-sm '
+  + 'font-medium text-[#9f1239] transition hover:bg-[#ffe4e6]'
+
+/**
+ * The shop has stopped answering: a cable out of its socket, a switch off at the wall, the server
+ * being restarted in the back office.
+ *
+ * <p>It is a bar and not a dialog on purpose. Nothing is taken off the screen, the cursor stays
+ * in the bill, and the twenty items already rung up out of a trolley that is now packed are still
+ * there to carry on with. The till keeps asking in the background, so the bar goes away by itself
+ * the moment somebody pushes the cable back in - nobody has to find a button to get going again.
+ *
+ * <p>The way out is on it. A counter's own settings - how it finds the shop, over a cable or over
+ * Wi-Fi, and at what address - are served by the print agent on this very machine, which is still
+ * running and still answering whatever the network is doing. So the one screen that can put this
+ * right is a button away rather than something a shop has to close the program to reach.
+ *
+ * <p>Fixed colours: the status scales flip on a dark theme, and a warning that turns into pale
+ * text on a pale bar is not a warning.
+ */
+function ShopUnreachable({ onTryAgain }: { onTryAgain: () => void }) {
+  return (
+    <div className="shrink-0 border-y-2 border-[#be123c] bg-[#fff1f2] px-4 py-3 text-[#881337] shadow-lg">
+      <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold">This till cannot reach the shop at the moment.</p>
+          <p className="text-sm">
+            Nothing on this screen has been lost. Check the network cable, or the Wi-Fi, and
+            billing carries on the moment the shop answers — this machine keeps asking.
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button type="button" onClick={onTryAgain} className={TROUBLE_BUTTON}>Try now</button>
+          {hasPrintAgent() && (
+            <button
+              type="button"
+              onClick={() => { openCounterSetup() }}
+              title="Change how this counter finds the shop, or the address it looks for"
+              className={TROUBLE_BUTTON}
+            >
+              Counter settings
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Log out, asked rather than done.
+ *
+ * <p>It sits at the foot of the menu, one keystroke from the screens above it, and the bill on
+ * screen has been typed in by hand and sent nowhere - so a slip costs a trolley-load of items
+ * that no server has and no undo can reach. With a bill in progress there is deliberately no
+ * "log out anyway": the bill is held first, which puts it on Held bills for whoever comes back to
+ * this till, and that is a better answer than either losing it or refusing to let somebody leave.
+ *
+ * <p>Both answers are safe to pick by mistake, and the harmless one is where the cursor starts.
+ * The keys are the ones a cashier's hands already use: up and down to choose, Enter to do it.
+ */
+function ConfirmSignOut({ items, busy, failed, onHold, onSignOut, onBack }: {
+  items: number
+  busy: boolean
+  failed: string | null
+  onHold: () => void
+  onSignOut: () => void
+  onBack: () => void
+}) {
+  const hasBill = items > 0
+  const choices = hasBill
+    ? [
+      { label: 'Back to the bill', hint: 'Leave it on screen and carry on with it.', run: onBack },
+      {
+        label: 'Hold the bill, then log out',
+        hint: 'Keeps it on Held bills, for whoever comes back to this till.',
+        run: onHold,
+      },
+    ]
+    : [
+      { label: 'Stay signed in', hint: 'Nothing changes.', run: onBack },
+      { label: 'Log out', hint: "Ends this sign-in and frees this counter's place.", run: onSignOut },
+    ]
+  const [at, setAt] = useState(0)
+  const list = useRef<HTMLDivElement>(null)
+
+  // Takes the focus off the bill behind, or the arrows would go on editing it.
+  useEffect(() => list.current?.focus(), [])
+
+  const onKeyDown = (event: React.KeyboardEvent) => {
+    if (busy) {
+      return
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      setAt((now) => (now + (event.key === 'ArrowDown' ? 1 : choices.length - 1)) % choices.length)
+      return
+    }
+    // The in-app browser pane does not activate a focused button on Enter, and this list is a div
+    // in any case, so Enter is handled here rather than left to the browser.
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      choices[at].run()
+      return
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      onBack()
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-900/60 p-4">
+      <div className="w-full max-w-lg rounded-2xl bg-surface p-6 shadow-2xl">
+        <h2 className="text-lg font-semibold text-slate-900">
+          {hasBill ? 'There is a bill on this screen' : 'Log out?'}
+        </h2>
+        <p className="mt-1 text-sm text-slate-600">
+          {hasBill
+            ? `${items} ${items === 1 ? 'item has' : 'items have'} been rung up and the bill has not`
+              + ' been taken. Logging out now would lose it, so it is held first.'
+            : 'You will be signed out of this till. Anybody can sign in again on it.'}
+        </p>
+
+        {failed && <div className="mt-4"><Banner tone="bad">{failed}</Banner></div>}
+
+        <div
+          ref={list}
+          tabIndex={-1}
+          role="listbox"
+          aria-label="What would you like to do?"
+          onKeyDown={onKeyDown}
+          className="mt-4 space-y-2 outline-none"
+        >
+          {choices.map((choice, index) => (
+            <div
+              key={choice.label}
+              role="option"
+              aria-selected={index === at}
+              onMouseEnter={() => setAt(index)}
+              onClick={() => !busy && choice.run()}
+              className={`rounded-lg border px-4 py-3 transition ${busy ? 'opacity-60' : 'cursor-pointer'} ${
+                index === at
+                  ? 'border-sky-500 bg-sky-50 ring-2 ring-sky-100'
+                  : 'border-slate-200 hover:bg-slate-50'}`}
+            >
+              <div className={`font-medium ${index === at ? 'text-sky-900' : 'text-slate-800'}`}>
+                {choice.label}
+              </div>
+              <div className="text-sm text-slate-500">{choice.hint}</div>
+            </div>
+          ))}
+        </div>
+
+        <p className="mt-3 text-center text-xs text-slate-400">
+          {busy ? 'Holding the bill…' : <><kbd>↑</kbd> <kbd>↓</kbd> to choose, <kbd>Enter</kbd> to go ahead</>}
+        </p>
+      </div>
     </div>
   )
 }

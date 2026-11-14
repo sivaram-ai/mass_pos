@@ -29,6 +29,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3Q | Signing in where that account is already open on another till stops and says where - counter, number, floor and when - and offers Go back or sign that one out and carry on here, chosen with the arrow keys and Enter | Done: 368 tests green, driven in the browser |
 | 3R | Nothing from inside the program reaches a counter's screen: every refusal is a sentence written for a shop, and the exception, its stack, the SQL, the paths and the ids go to the log. `ApiExceptionHandler.forTheScreen` is the gate; `api.ts` guards the browser end | Done: 377 tests green, refusals driven against a running till |
 | 3S | A counter's settings are reachable while nobody is signed in: the sign-in screen opens, from its corner, the very page the counter serves itself at first start, so the connection mode, the server's address and which of the shop's counters this machine is can all be changed without closing the program. A counter that is already billing is given a way back that changes nothing | Done: 385 tests green, driven in the browser |
+| 3T | A till that cannot reach its shop keeps its screen: a bar says so, the bill stays where it is, Refresh asks instead of reloading, and Counter settings is on the bar - and it clears itself when the cable goes back in. The bill on screen survives a reload, and Log out asks first, holding a bill in progress rather than losing it | Done: 387 tests green, driven in the browser |
 | L1 | Offline subscription licence per till: Ed25519-signed key bound to a hardware machine ID, warn/grace days, billing lock, Licence screen + banner, vendor `tools/license/LicenseTool.java` | Done: 172 tests green, real key verified on this PC |
 | 5A | Windows installer: jpackage + WiX 3.14, trimmed JDK 21 runtime, one file, `tools/build-installer.ps1` | Done: installed and run from the exe on this PC |
 | 5B | One folder per till, `%LOCALAPPDATA%\GoRockitPOS`, data in `data\`, with an automatic move from the old `MassPOS` folder | Done: 235 tests green, this PC's own till migrated |
@@ -97,6 +98,43 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 - **Screen keys**: `useScreenKeys` (shortcuts.ts) binds a screen's own F-keys while it is open —
   F2 its search box, F3/F4 what it does next (Bills: day, new return; Products: add). `KeyBox`
   (ui.tsx) draws the key inside the box. Pass `!dialogOpen` so they do nothing behind a dialog.
+- **The shop going quiet is a bar, never a screen** (`api.ts` `SHOP_UNREACHABLE` / `SHOP_ANSWERED`,
+  `ShopUnreachable` in `App.tsx`). A request that never reached the server - a pulled Ethernet
+  cable, a switch off at the wall - fires a window event, and the shell draws a red bar under the
+  header. Nothing navigates, nothing is cleared, the cursor stays in the bill: a cashier twenty
+  items into a trolley that is already packed has nowhere to get those items back from. A refusal
+  is **not** this: a 401, a 409, a 500 all mean the shop answered, and the screen that asked has a
+  sentence of its own. The events fire on the *change* only, so a till that is out does not shout
+  once a request.
+  - **It clears itself.** While out, `App` asks `/api/clients/places` (public, no token) every 3 s
+    and on window focus; the first request that gets through dispatches `SHOP_ANSWERED` and the bar
+    goes. Nobody has to find a button after pushing the cable back in.
+  - **A network failure must never sign anybody out.** `/api/auth/me` failing with status 0 used to
+    clear the token, so a dropped cable became "sign in again" - with the shop unreachable, so
+    nobody could. The token is kept for status 0 and tried again when the shop answers; the same
+    goes for `/api/settings`, which keeps the last shop name rather than blanking the header.
+  - **Refresh does not reload while the shop is out.** Reloading then lands on the browser's own
+    error page, where the screen is gone and nothing of this program is left to go back to. The
+    header's Refresh button and F5 ask the shop instead (`refresh()` in `App.tsx`).
+  - **The way out is on the bar**: Counter settings, on a counter, which is served by the print
+    agent on that machine and so answers whatever the network is doing. See the counter notes.
+- **The bill on screen survives a reload** (`billDraft.ts`). It is written to `localStorage` on
+  every change and read back when the grid mounts. Not a held bill - that one is the shop's, named
+  and on the server - but this machine's note of its own screen, dropped as soon as the bill is
+  taken, held, cleared or signed out from. Stamped with the till's day and this counter's code,
+  and ignored after 12 hours, so yesterday's abandoned screen is never billed to this morning's
+  customer. Sale mode only: half an edit or a return brought back out of storage, against a bill
+  that may since have been returned against, is worse than none.
+- **Log out is asked, never done on one click** (`ConfirmSignOut` in `App.tsx`). It sits at the
+  foot of the menu one keystroke from the screens above it. With a bill on screen the only two
+  answers are "Back to the bill" and "Hold the bill, then log out" - deliberately no "log out
+  anyway", because the bill is better on Held bills than gone. Billing reports its line count
+  through `onCartChanged` and holds on a bumped `holdRequest`, answering `onHeldForSignOut`; a
+  hold the server refused leaves the person on their bill with the reason **in the dialog**.
+  - **A bumped request is dealt with once** (`handledHold`). The grid unmounts and is built again
+    at every sign-out, so a request left over from the last person re-ran on mount, held nothing,
+    and signed the next person straight back out - 200 on login, 204 on logout, in the same second.
+    Any new request-counter prop to a screen that remounts needs the same guard.
 - **Refreshing is a page reload, and the screen survives it.** `App` keeps the current screen in
   `localStorage` (`masspos.screen`) and comes back to it, instead of dropping a manager reading a
   report back onto the billing grid. The header has a Refresh button on every screen; **F5 reloads
@@ -678,6 +716,11 @@ folder and everything under it, so that is the only copy that survives one.
     `hasPrintAgent()` is true: the server's own browser has no agent to ask and no counter settings
     to show. Signing out is exactly when somebody changes one of these things, and the sign-in
     screen is what they are looking at while they do.
+  - **A click on the shortcut asks the shop before opening a window on it** (`CounterApp
+    .windowFor`). A counter already running here used to be sent straight to its last server. One
+    that answered this morning may not answer now, and a browser sent to a shop that cannot answer
+    shows its own error page - a cloud, a Refresh button, and no way at all back to this counter's
+    settings. It goes to the setup page instead, which is served from this machine and cannot fail.
   - **It is the same page, deliberately - not a counter settings screen in the React app.** A
     second screen asking the same two questions is a second set of words to keep in step, and the
     one inside the app would be the one that cannot be reached when the shop's server is down,

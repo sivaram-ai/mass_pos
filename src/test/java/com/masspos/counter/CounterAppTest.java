@@ -89,6 +89,44 @@ class CounterAppTest {
         }
     }
 
+    /**
+     * A shop that is not answering is not somewhere to send a browser. It shows the browser's own
+     * error page - a cloud, a Refresh button, and nothing of this program at all - and from there
+     * a counter pointed at an address that has stopped working cannot be put right without closing
+     * the program. The click goes to this machine's own setup page instead, which is served from
+     * here and answers whatever the network is doing.
+     */
+    @Test
+    void sendsAClickToTheSetupPageRatherThanToAShopThatIsNotAnswering() throws Exception {
+        CounterConfig config = new CounterConfig();
+        config.counter("01a1cb62-d9d7-75cd-be17-fa6db596caa3", "T2", "Counter 2");
+        config.agentPort(freePort());
+
+        // A port on this machine that nothing is listening on: refused at once, and it cannot be
+        // answered by whatever happens to be on the network the build is running on.
+        assertThat(CounterApp.windowFor(config, "http://127.0.0.1:" + freePort()))
+                .isEqualTo("http://127.0.0.1:" + config.agentPort() + "/setup");
+        assertThat(CounterApp.windowFor(config, ""))
+                .as("still being set up, so there is no shop to open a window on")
+                .isEqualTo("http://127.0.0.1:" + config.agentPort() + "/setup");
+    }
+
+    /** And when it is answering, straight to billing, which is the whole point of the shortcut. */
+    @Test
+    void sendsAClickToBillingWhenTheShopIsThere() throws Exception {
+        CounterConfig config = new CounterConfig();
+        config.counter("01a1cb62-d9d7-75cd-be17-fa6db596caa3", "T2", "Counter 2");
+        config.agentPort(freePort());
+
+        try (java.net.ServerSocket shop = new java.net.ServerSocket(0)) {
+            String url = "http://127.0.0.1:" + shop.getLocalPort();
+
+            assertThat(CounterApp.windowFor(config, url))
+                    .isEqualTo(url + "/?counter=01a1cb62-d9d7-75cd-be17-fa6db596caa3"
+                            + "&counterCode=T2&agent=" + config.agentPort());
+        }
+    }
+
     private static int freePort() throws Exception {
         try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
             return socket.getLocalPort();
