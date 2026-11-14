@@ -103,18 +103,23 @@ counters a shop already has - is shown in red as **Licence limit exceeded**. Its
 nothing can bill on it until the limit is raised.
 
 1. Install `GoRockitPOS-Counter-<version>.exe`. No licence, no database, nothing to back up.
-2. Start **GO RockIt Counter**. It asks two things:
+2. Start **GO RockIt Counter**. A setup page opens in a browser window - there is no separate
+   settings program. It asks two things:
    - **Where the server is** - leave it on *Find the server on this network* and press **Look for
      the server**. If nothing answers (some networks do not pass the broadcast), type the server's
-     address instead.
+     address instead. When nothing answers, the page says what to go and check on the server.
    - **Which counter is this machine** - a list of the counters added on the server. Pick the one
-     this machine is standing at. Counters somebody else is already on, and any that are blocked,
-     are marked. Nothing is typed, so no machine can invent a counter or claim another's number.
+     this machine is standing at. Counters somebody else is already on, blocked ones, and any
+     beyond what the licence covers are all marked, and picking one says why it cannot be used.
+     Nothing is typed, so no machine can invent a counter or claim another number.
 
    **Save and start billing stays grey until all of that is right** and the shop has a place for
    this counter, so a counter can never reach a sign-in screen that would turn it away. The line
-   above the buttons says what is still missing. If the shop is full, leave the window open: it
-   keeps looking, and lights up by itself when a place comes free.
+   above the buttons says what is still missing.
+
+   The same page comes back by itself if the shop's server ever turns this machine away - blocked,
+   or beyond the licence - with the reason on it, so nobody is left on a sign-in screen that will
+   not let them in.
 3. Press **Save and start billing**. Staff sign in with the same username and PIN they use
    anywhere in the shop.
 4. **Set the printer** on the counter's own screen, under Settings > Printer. Until somebody does,

@@ -5,7 +5,9 @@ import com.masspos.desktop.Browser;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.Optional;
 
 /**
@@ -16,66 +18,54 @@ import java.util.Optional;
  * state is one properties file. What it does have is the two things a browser window cannot do by
  * itself - find the shop's server, and drive the printer and cash drawer standing on this counter.
  *
- * <p>In order: read the settings, ask for them if they are not there or the server cannot be
- * found, start the print agent, and open the billing screen pointed at the server with this
- * counter's number on the address. The server reads that number once, at sign-in, and every bill
- * taken here is numbered as this counter from then on.
+ * <p>It shows no windows of its own. Setting a counter up used to mean a desktop dialog, for one
+ * reason: everything it decides has to be settled <em>before</em> there is a shop server to serve
+ * a page. The print agent is a web server on this machine that starts before anything has been
+ * found, so the setup page comes from there instead and the whole product is one kind of thing -
+ * a browser window - whether or not the shop can be reached.
+ *
+ * <p>In order: read the settings, start the agent, and open either the billing screen or, when
+ * this machine has not been set up or its server cannot be found, the agent's own setup page.
  */
 public final class CounterApp {
 
-    /** Where FILE-type jobs land, for a counter set up before its printer has arrived. */
+    /** Where FILE-type jobs land, which is what a counter prints to until a printer is chosen. */
     private static final String SPOOL = "printer-out";
-
-    /**
-     * Naming the three things that are ever actually wrong, in the order worth checking.
-     *
-     * <p>"Nothing answered" was true and useless: a counter cannot tell a server that is switched
-     * off from one that is running but keeping to itself, or from a network that will not carry
-     * the question. Two of the three are on the <em>server's</em> machine, which is the part
-     * nobody guesses, so the message says so rather than sending somebody to look at the cable.
-     */
-    private static final String CANNOT_REACH = """
-            This counter could not find the shop's server.
-
-            On the server's computer, in order:
-
-            1. Is GO RockIt running, and set to serve counters? Open its data folder, open
-               pos.properties, and check pos.clients.max is the number of counters the shop
-               has. 0 means the server keeps to itself. Restart it after changing this.
-
-            2. Did Windows Firewall ask about GO RockIt, and was it allowed? Refused once,
-               Windows remembers, and no counter will ever reach it.
-
-            3. Is the network set to Private in Windows rather than Public? Windows stops
-               machines reaching each other on a Public network whatever the firewall says.
-               Both computers need this.
-
-            If all three are right, type the server's address here instead of looking for it:
-            some networks do not pass the question on.""";
+    /** If the agent's own port is taken, the few after it, before giving up on printing. */
+    private static final int PORTS_TO_TRY = 10;
 
     private CounterApp() {
     }
 
     public static void main(String[] args) {
+        CounterConfig config = CounterConfig.load();
         try {
-            CounterConfig config = CounterConfig.load();
             if (openOnTheCounterAlreadyRunning(config)) {
                 return;
             }
-            if (!config.readyToConnect() && settingsCancelled(config)) {
+            PrintAgent agent = listening(config);
+            if (agent == null) {
+                // No port to serve the setup page from, so there is nothing to show and nowhere to
+                // show it. The log is the only honest place left.
+                note(config, "Could not start this counter's print service on port "
+                        + config.agentPort() + " or the " + PORTS_TO_TRY + " after it."
+                        + " Close whatever is using those ports and start GO RockIt Counter again.");
                 return;
             }
-            Optional<String> server = connect(config);
-            while (server.isEmpty()) {
-                if (settingsCancelled(config)) {
-                    return;
-                }
-                server = connect(config);
+            Optional<String> server = config.readyToConnect() ? connect(config) : Optional.empty();
+            if (server.isPresent()) {
+                remember(config, server.get());
+                agent.serving(server.get());
+                Browser.openApp(billingScreen(config, server.get()));
+            } else {
+                // Not set up, or set up and the shop cannot be found. Both are the same screen.
+                Browser.openApp(agent.setupUrl());
             }
-            start(config, server.get());
+            // The agent is the reason this process stays alive: the browser window is the shop's,
+            // but the printer belongs to this program, and closing it would take the printer away.
+            keepRunning();
         } catch (Exception unexpected) {
-            // Nobody is watching a console on a counter, so anything that escapes gets a window.
-            CounterSettings.say("GO RockIt counter", "This counter could not start: " + unexpected);
+            note(config, "This counter could not start: " + unexpected);
         }
     }
 
@@ -83,28 +73,24 @@ public final class CounterApp {
      * One counter process per machine.
      *
      * <p>Clicking the shortcut again used to start a whole second copy of this program. Only one
-     * of them could hold the printer - the loser said so in a window and then carried on running
-     * anyway - so a shop that opens the till two or three times a day finished the week with a row
-     * of them in Task Manager, each with its own JVM. Now the new process asks the one already
-     * running where it is billing, opens a window there, and stops.
+     * of them could hold the printer - the loser said so and then carried on running anyway - so a
+     * shop that opens the till two or three times a day finished the week with a row of them in
+     * Task Manager, each with its own JVM. Now the new process asks the one already running where
+     * it is billing, opens a window there, and stops.
      *
-     * @return true when a counter was already running and the billing screen has been opened on it
+     * @return true when a counter was already running and a window has been opened on it
      */
     private static boolean openOnTheCounterAlreadyRunning(CounterConfig config) throws IOException {
-        Optional<String> window = windowOfRunningCounter(config);
-        if (window.isEmpty()) {
+        Optional<String> running = PrintAgent.runningOn(config.agentPort());
+        if (running.isEmpty()) {
             return false;
         }
-        if (window.get().isEmpty()) {
-            // It is ours and it is up, but it has not reached a server yet - the settings window
-            // on the first copy is probably still open. Opening a second window on nothing would
-            // help nobody, so say where to look.
-            CounterSettings.say("GO RockIt counter",
-                    "This counter is already running and is still being set up.\n\n"
-                            + "Finish in the settings window that is already open.");
-            return true;
-        }
-        Browser.openApp(window.get());
+        String server = running.get().isBlank() ? config.lastServer() : running.get();
+        // Running but with no server yet means it is still being set up, so send this click to the
+        // page where that is happening rather than opening a window on nothing.
+        Browser.openApp(server.isBlank()
+                ? "http://127.0.0.1:" + config.agentPort() + "/setup"
+                : billingScreen(config, server));
         return true;
     }
 
@@ -121,12 +107,23 @@ public final class CounterApp {
     }
 
     /**
-     * Opens the settings window, re-asking after a failed connection with the reason on screen.
-     *
-     * @return true when the person closed it without saving, which means they want to stop
+     * Starts the agent, moving up a port or two if this machine has something on the one it wants.
+     * A counter with no agent has no printer and no setup page, so it is worth a few tries.
      */
-    private static boolean settingsCancelled(CounterConfig config) {
-        return CounterSettings.edit(config).isEmpty();
+    private static PrintAgent listening(CounterConfig config) {
+        int wanted = config.agentPort();
+        for (int port = wanted; port < wanted + PORTS_TO_TRY; port++) {
+            config.agentPort(port);
+            PrintAgent agent = new PrintAgent(config, Path.of(CounterConfig.folder().toString(), SPOOL));
+            try {
+                agent.start();
+                return agent;
+            } catch (IOException portTaken) {
+                agent.close();
+            }
+        }
+        config.agentPort(wanted);
+        return null;
     }
 
     /**
@@ -139,52 +136,7 @@ public final class CounterApp {
         if (found.isEmpty() && !config.lastServer().isBlank()) {
             found = ServerFinder.reachable(config.lastServer());
         }
-        if (found.isEmpty()) {
-            CounterSettings.say("GO RockIt counter", CANNOT_REACH);
-        }
         return found;
-    }
-
-    private static void start(CounterConfig config, String server) throws IOException {
-        remember(config, server);
-        PrintAgent agent = new PrintAgent(config, Path.of(CounterConfig.folder().toString(), SPOOL));
-        agent.serving(server);
-        try {
-            agent.start();
-        } catch (IOException portTaken) {
-            CounterSettings.say("GO RockIt counter",
-                    "Bills will not print on this counter: port " + agent.port() + " is already in use.\n\n"
-                            + "Another program on this machine is using it. Change the print agent port in"
-                            + " counter.properties, or close whatever has taken it, and start again.");
-        }
-        Browser.openApp(billingScreen(config, server));
-        // The agent is the reason this process stays alive: the browser window is the shop's, but
-        // the printer belongs to this program, and closing it would take the printer with it.
-        //
-        // It is also how the sign-in screen gets this window back. A counter the server turns away
-        // - no place left in the shop, a number that is already the server's - has nothing useful
-        // to do on a sign-in screen, and the page cannot open a window of this program's by itself.
-        serveUntilClosed(config, agent);
-    }
-
-    /**
-     * Waits for work, which on a counter means one of two things: nothing at all, which is the
-     * normal day, or the page asking for the settings window back after the server refused this
-     * machine. Settings saved, it looks for the server again and opens billing on it.
-     */
-    private static void serveUntilClosed(CounterConfig config, PrintAgent agent) {
-        Optional<String> asked = agent.awaitSettingsRequest();
-        while (asked.isPresent()) {
-            if (CounterSettings.edit(config, asked.get().trim()).isPresent()) {
-                Optional<String> server = connect(config);
-                if (server.isPresent()) {
-                    remember(config, server.get());
-                    agent.serving(server.get());
-                    openQuietly(config, server.get());
-                }
-            }
-            asked = agent.awaitSettingsRequest();
-        }
     }
 
     private static void remember(CounterConfig config, String server) {
@@ -196,23 +148,32 @@ public final class CounterApp {
             config.save();
         } catch (IOException cannotRemember) {
             // Not worth stopping for: the counter works, it just re-discovers next time.
-            CounterSettings.say("GO RockIt counter",
-                    "Could not remember where the server is: " + cannotRemember.getMessage());
-        }
-    }
-
-    private static void openQuietly(CounterConfig config, String server) {
-        try {
-            Browser.openApp(billingScreen(config, server));
-        } catch (IOException noBrowser) {
-            CounterSettings.say("GO RockIt counter",
-                    "Could not open the billing screen: " + noBrowser.getMessage());
+            note(config, "Could not remember where the server is: " + cannotRemember.getMessage());
         }
     }
 
     /**
-     * The billing screen, told which counter is looking at it. The screen keeps the number and
-     * sends it with everything it asks the server, which is how a bill gets this counter's series.
+     * The last place left to say something, for the few failures that leave no screen to say it
+     * on. Everything a person is meant to read is on the setup page; this is for the engineer who
+     * comes afterwards.
+     */
+    private static void note(CounterConfig config, String what) {
+        try {
+            Path log = CounterConfig.folder().resolve("counter.log");
+            Files.createDirectories(log.getParent());
+            Files.writeString(log, Instant.now() + "  " + what + System.lineSeparator(),
+                    StandardCharsets.UTF_8, java.nio.file.StandardOpenOption.CREATE,
+                    java.nio.file.StandardOpenOption.APPEND);
+        } catch (IOException | RuntimeException nowhereToWrite) {
+            // Then there is genuinely nowhere left. Not worth a second failure on the way out.
+        }
+    }
+
+    /**
+     * The billing screen, told which of the shop's counters is looking at it. The screen keeps
+     * that till's id and sends it once, at sign-in, which is how a bill gets this counter's
+     * series. The number comes too, but only to be shown: what this machine is called is the
+     * shop's to say.
      */
     static String billingScreen(CounterConfig config, String server) {
         return server + "/?counter=" + URLEncoder.encode(config.counterId(), StandardCharsets.UTF_8)
@@ -220,4 +181,11 @@ public final class CounterApp {
                 + "&agent=" + config.agentPort();
     }
 
+    private static void keepRunning() {
+        try {
+            Thread.currentThread().join();
+        } catch (InterruptedException stopping) {
+            Thread.currentThread().interrupt();
+        }
+    }
 }

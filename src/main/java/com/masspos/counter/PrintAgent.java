@@ -81,11 +81,6 @@ public final class PrintAgent implements AutoCloseable {
     private final CounterConfig config;
     private final Path spoolFolder;
     private final BlockingQueue<Task> queue = new ArrayBlockingQueue<>(32);
-    /**
-     * One pending "open the settings window", never a queue of them: a page that asks twice while
-     * somebody is already looking at the window should not open a second one behind it.
-     */
-    private final BlockingQueue<String> settingsRequests = new ArrayBlockingQueue<>(1);
     /** Held by anything that reads or writes {@link #config}; the printer thread never takes it. */
     private final Object settings = new Object();
     private volatile String allowedOrigin = "";
@@ -134,7 +129,7 @@ public final class PrintAgent implements AutoCloseable {
         http.createContext("/print", this::onPrint);
         http.createContext("/hello", this::onHello);
         http.createContext("/settings", this::onSettings);
-        http.createContext("/settings-window", this::onSettingsWindow);
+        http.createContext("/setup", this::onSetup);
         http.createContext("/status", this::onStatus);
         http.createContext("/test-page", this::onTestPage);
         // A handful of threads, not the listener's own: asking the printer how it is waits for the
@@ -155,23 +150,6 @@ public final class PrintAgent implements AutoCloseable {
     /** The one page allowed to send this counter a bill: the shop server it is connected to. */
     public void serving(String serverUrl) {
         this.allowedOrigin = ServerFinder.normalise(serverUrl);
-    }
-
-    /**
-     * Blocks until the counter's own page asks for the settings window back, which it does when
-     * the server turns this machine away - no counter number, no place left in the shop. The
-     * reason comes with it, so the window can open saying what happened rather than blank.
-     *
-     * @return the reason to show, or empty when the agent is shutting down and the counter should stop
-     */
-    public Optional<String> awaitSettingsRequest() {
-        try {
-            String asked = settingsRequests.take();
-            return CLOSING.equals(asked) ? Optional.empty() : Optional.of(asked);
-        } catch (InterruptedException stopping) {
-            Thread.currentThread().interrupt();
-            return Optional.empty();
-        }
     }
 
     /**
@@ -218,7 +196,6 @@ public final class PrintAgent implements AutoCloseable {
     @Override
     public void close() {
         running = false;
-        settingsRequests.offer(CLOSING);
         if (http != null) {
             http.stop(0);
         }
@@ -332,18 +309,97 @@ public final class PrintAgent implements AutoCloseable {
      * piece of the counter that both ends can reach, so the request comes through here and the
      * counter's own settings window opens with the server's sentence on it.
      */
-    private void onSettingsWindow(HttpExchange exchange) throws IOException {
-        if (cors(exchange)) {
+    private void onSetup(HttpExchange exchange) throws IOException {
+        if (notThisMachine(exchange)) {
             return;
         }
-        if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
-            respond(exchange, 405, "{\"error\":\"ask for the settings window with POST\"}");
-            return;
+        String path = exchange.getRequestURI().getPath();
+        try {
+            if (path.equals("/setup") || path.equals("/setup/")) {
+                page(exchange);
+                return;
+            }
+            if (path.equals("/setup/state")) {
+                synchronized (settings) {
+                    respond(exchange, 200, CounterSetup.state(config));
+                }
+                return;
+            }
+            if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+                respond(exchange, 405, "{\"error\":\"ask with POST\"}");
+                return;
+            }
+            byte[] body = exchange.getRequestBody().readNBytes(MAX_SETTINGS_BYTES);
+            if (path.equals("/setup/look")) {
+                // On a scratch copy: nothing the page is still deciding touches the settings this
+                // counter is running on until Save.
+                CounterConfig asking = new CounterConfig();
+                com.fasterxml.jackson.databind.JsonNode said = CounterSetup.read(body);
+                asking.find(CounterSetup.find(said.path("find").asText("")));
+                asking.address(said.path("address").asText(""));
+                asking.url(said.path("url").asText(""));
+                synchronized (settings) {
+                    asking.counter(config.counterId(), config.code(), config.name());
+                }
+                respond(exchange, 200, CounterSetup.look(asking));
+                return;
+            }
+            if (path.equals("/setup/save")) {
+                com.fasterxml.jackson.databind.node.ObjectNode answer = CounterSetup.object();
+                Optional<String> server;
+                synchronized (settings) {
+                    server = CounterSetup.save(config, CounterSetup.read(body), answer);
+                }
+                if (server.isPresent()) {
+                    serving(server.get());
+                    synchronized (settings) {
+                        answer.put("billing", CounterApp.billingScreen(config, server.get()));
+                    }
+                }
+                respond(exchange, 200, CounterSetup.bytes(answer));
+                return;
+            }
+            respond(exchange, 404, "{\"error\":\"no such setup page\"}");
+        } catch (RuntimeException unexpected) {
+            // Nothing here may take the agent down: this is the one screen a counter that cannot
+            // reach its shop still has.
+            respond(exchange, 500, "{\"error\":\"This counter's setup service hit a problem."
+                    + " Close this window and start GO RockIt Counter again.\"}");
         }
-        String reason = PrintJobs.reason(exchange.getRequestBody().readNBytes(MAX_SETTINGS_BYTES));
-        // offer, not put: a window is already open or on its way, and one is all anybody wants.
-        settingsRequests.offer(reason.isBlank() ? " " : reason);
-        respond(exchange, 202, "{\"opening\":true}");
+    }
+
+    private void page(HttpExchange exchange) throws IOException {
+        byte[] html = CounterSetup.page();
+        exchange.getResponseHeaders().add("Content-Type", "text/html; charset=utf-8");
+        exchange.getResponseHeaders().add("Cache-Control", "no-store");
+        exchange.sendResponseHeaders(200, html.length);
+        try (OutputStream out = exchange.getResponseBody()) {
+            out.write(html);
+        }
+    }
+
+    /**
+     * Setting this counter up is for the person at this machine, not for a page from anywhere
+     * else: these are the only requests that change which shop the counter bills against. A
+     * browser sends its own origin on a cross-site POST, so anything but this agent's own page is
+     * refused. The port is loopback already, so nothing on the network reaches here at all.
+     */
+    private boolean notThisMachine(HttpExchange exchange) throws IOException {
+        String origin = exchange.getRequestHeaders().getFirst("Origin");
+        if (origin == null || origin.isBlank() || origin.equals(ownOrigin())) {
+            return false;
+        }
+        respond(exchange, 403, "{\"error\":\"this page can only be opened on the counter itself\"}");
+        return true;
+    }
+
+    private String ownOrigin() {
+        return "http://127.0.0.1:" + config.agentPort();
+    }
+
+    /** Where to send somebody to set this counter up, or to put right what the shop refused. */
+    public String setupUrl() {
+        return ownOrigin() + "/setup";
     }
 
     /** Paper and cover on this counter's printer, for the lines under the settings page. */

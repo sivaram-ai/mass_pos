@@ -80,31 +80,21 @@ export function agentUrl(): string {
 }
 
 /**
- * Hands this machine back to its own settings window, with the server's reason to show on it.
+ * Sends this machine to its own setup page, with the server's reason to show on it.
  *
- * <p>Used when the server refuses the machine rather than the person - this counter has no number,
- * or the shop has no place left for it, which is what the counter that loses a race for the last
- * place is told. Nothing can be done about any of that on a sign-in screen, and a web page cannot
- * open a window belonging to the counter program, so the request goes through the print agent,
- * which is the one piece of the counter both ends can reach.
+ * <p>Used when the server refuses the machine rather than the person - this counter has not been
+ * told which till it is, the till it claims has been blocked, or the shop's licence does not cover
+ * it. None of that can be put right on a sign-in screen, and the page that can is served by the
+ * print agent on this very machine, so it is reachable whether or not the shop's server is.
  *
- * @return true when the counter took the request, i.e. its settings window is opening
+ * @return true when this machine has a setup page to go to, i.e. it is a counter
  */
-export async function askForCounterSettings(reason: string): Promise<boolean> {
+export function goToCounterSetup(reason: string): boolean {
   if (!hasPrintAgent()) {
     return false
   }
-  try {
-    const response = await fetch(`${agentUrl()}/settings-window`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason }),
-    })
-    return response.ok
-  } catch {
-    // An older counter build, or one whose agent has gone. The message on screen still stands.
-    return false
-  }
+  window.location.href = `${agentUrl()}/setup?reason=${encodeURIComponent(reason)}`
+  return true
 }
 
 /** A bill the server laid out, in the two shapes a printer might want it. */

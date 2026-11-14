@@ -25,6 +25,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3M | A counter's place is held by a live sign-in, not by having once said hello: the cap is checked at every sign-in, logging out frees a place at once, the settings window will not let anybody press "Save and start billing" until the shop has a place for this counter, the counter that loses the race for the last one is handed back to its own settings window, and clicking the shortcut twice no longer leaves two counter processes running. Logging out frees the place there and then: a counter signing in ends whatever session was open on it, an admin can sign a till out from the tills panel, and a counter turned away watches for a place to come free | Done: 365 tests green, server side driven over the LAN; the Swing settings window itself is covered by tests, not driven on screen |
 | 3N | The shop owns its counters: an admin adds them on the server (number fixed at creation, name editable, block/unblock), and a counter machine chooses which of them it is from the list the server offers. A machine signs in with that till's id, never a number it typed. The counter settings window asks two questions and no longer sets a printer; a new counter saves its bills to a file on its own machine until somebody picks a printer in the app | Done: 368 tests green, driven over the LAN; the Swing window is covered by tests, not driven on screen |
 | 3O | `pos.clients.max` caps how many counters a shop may have, not only how many may bill at once: creating one past the limit is refused with the licence message, Add a counter goes grey, and a counter beyond the limit (a licence cut below the counters a shop already has) is red and marked "Licence limit exceeded", as blocked ones now are | Done: 368 tests green, driven over the LAN and in the browser |
+| 3P | A counter shows no desktop windows at all: the Swing settings dialog is gone and setting a counter up is a page the counter serves itself from its print agent, found before any shop server has been, with every refusal shown in full on it | Done: 365 tests green, driven end to end in the browser |
 | L1 | Offline subscription licence per till: Ed25519-signed key bound to a hardware machine ID, warn/grace days, billing lock, Licence screen + banner, vendor `tools/license/LicenseTool.java` | Done: 172 tests green, real key verified on this PC |
 | 5A | Windows installer: jpackage + WiX 3.14, trimmed JDK 21 runtime, one file, `tools/build-installer.ps1` | Done: installed and run from the exe on this PC |
 | 5B | One folder per till, `%LOCALAPPDATA%\GoRockitPOS`, data in `data\`, with an automatic move from the old `MassPOS` folder | Done: 235 tests green, this PC's own till migrated |
@@ -547,6 +548,23 @@ folder and everything under it, so that is the only copy that survives one.
   anyway, and a shop that opens the till a few times a day finished the week with a row of them in
   Task Manager. The second process now opens a window on the server the first is already using and
   exits.
+- **A counter shows no windows of its own** (`CounterSetup`, `setup.html`, served by `PrintAgent`
+  at `http://127.0.0.1:<agent port>/setup`). Setting a counter up was a Swing dialog for one
+  reason: everything it decides has to be settled *before* there is a shop server to serve a page.
+  The print agent is a web server on that machine which starts before anything has been found and
+  whether or not the shop is reachable, so the page comes from there and the whole product is one
+  kind of thing. Consequences:
+  - **The agent must start even with nothing configured.** It is the only screen a counter that
+    cannot reach its shop has. `CounterApp.listening` tries the agent port and the ten after it,
+    because a counter with no agent has no printer *and* no way to be set up.
+  - **Setup requests are same-origin only** (`notThisMachine`): they are the only ones that change
+    which shop a counter bills against, and a browser sends its own origin on a cross-site POST.
+    The rest of the agent still answers the shop server's page, through `cors`.
+  - **A refused counter is sent there by the browser**, not by the program: `goToCounterSetup` in
+    `counter.ts` navigates to the page with the reason on the query string. Nothing has to signal
+    across processes any more, so the agent's settings-request queue is gone.
+  - **The one thing with no screen left** is an agent that cannot bind any port at all. That goes
+    to `counter.log` in the counter's folder, because there is genuinely nowhere else.
 - **A counter turned away watches for a place** (`CounterSettings`, a 4 s Swing `Timer`). Somebody
   logging out across the room frees a place at once, and the only thing between this machine and
   billing is asking again - so it asks itself, quietly (the last answer stays on screen rather than

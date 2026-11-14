@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GO RockIt counter setup</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 20px; background: #f1f5f9; color: #0f172a;
+    font: 16px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+  main { max-width: 680px; margin: 0 auto; background: #fff; border-radius: 14px;
+         box-shadow: 0 10px 30px rgb(15 23 42 / 8%); padding: 28px 30px 24px; }
+  h1 { margin: 0 0 4px; font-size: 24px; }
+  .lede { margin: 0 0 24px; color: #64748b; font-size: 15px; }
+  h2 { margin: 26px 0 10px; font-size: 15px; text-transform: uppercase;
+       letter-spacing: .04em; color: #475569; }
+  label.choice { display: flex; align-items: center; gap: 10px; padding: 7px 0; cursor: pointer; }
+  input[type=text] {
+    flex: 1; min-width: 0; padding: 9px 11px; font: inherit; border: 1px solid #cbd5e1;
+    border-radius: 8px; background: #fff;
+  }
+  input[type=text]:focus, select:focus { outline: 2px solid #0284c7; outline-offset: 1px; border-color: #0284c7; }
+  input[disabled], select[disabled] { background: #f1f5f9; color: #94a3b8; }
+  select { width: 100%; padding: 10px 11px; font: inherit; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; }
+  .hint { color: #94a3b8; font-size: 14px; }
+  /* The message is the whole of what this page has to say when something is wrong, so it is
+     given room to say it: never one truncated line in a corner. */
+  #said { margin: 22px 0 0; padding: 14px 16px; border-radius: 10px; font-size: 15px;
+          white-space: pre-wrap; border: 1px solid transparent; }
+  #said.info { background: #f8fafc; border-color: #e2e8f0; color: #475569; }
+  #said.good { background: #ecfdf5; border-color: #a7f3d0; color: #065f46; }
+  #said.bad  { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+  #said h3 { margin: 0 0 6px; font-size: 15px; }
+  #said ol { margin: 8px 0 0; padding-left: 20px; }
+  #said li { margin: 4px 0; }
+  .buttons { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
+  button {
+    font: inherit; padding: 10px 18px; border-radius: 8px; border: 1px solid #cbd5e1;
+    background: #fff; cursor: pointer;
+  }
+  button:hover:not([disabled]) { background: #f8fafc; }
+  button.primary { background: #0284c7; border-color: #0284c7; color: #fff; font-weight: 600; }
+  button.primary:hover:not([disabled]) { background: #0369a1; }
+  button[disabled] { opacity: .5; cursor: not-allowed; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Set this counter up</h1>
+  <p class="lede">Two things: where the shop's server is, and which of its counters this machine is.</p>
+
+  <h2>The shop's server</h2>
+  <label class="choice">
+    <input type="radio" name="find" value="AUTOMATIC" checked>
+    <span>Find the server on this network <span class="hint">&nbsp;a cable or Wi-Fi, either works</span></span>
+  </label>
+  <label class="choice">
+    <input type="radio" name="find" value="ADDRESS">
+    <span style="white-space: nowrap">The server's name or IP address</span>
+    <input type="text" id="address" placeholder="192.168.1.10" disabled>
+  </label>
+  <label class="choice">
+    <input type="radio" name="find" value="URL">
+    <span style="white-space: nowrap">A full address</span>
+    <input type="text" id="url" placeholder="http://192.168.1.10:8765" disabled>
+  </label>
+
+  <h2>Which counter is this machine?</h2>
+  <select id="counters" disabled>
+    <option>Look for the server first</option>
+  </select>
+  <p class="hint" style="margin: 8px 0 0">
+    Counters are added on the server, under Settings, Tills in this shop.
+  </p>
+
+  <div id="said" class="info">Press “Look for the server” to see this shop's counters.</div>
+
+  <div class="buttons">
+    <button id="look" type="button">Look for the server</button>
+    <button id="save" type="button" class="primary" disabled>Save and start billing</button>
+  </div>
+</main>
+
+<script>
+(function () {
+  'use strict';
+  var said = document.getElementById('said');
+  var counters = document.getElementById('counters');
+  var address = document.getElementById('address');
+  var url = document.getElementById('url');
+  var look = document.getElementById('look');
+  var save = document.getElementById('save');
+  var found = null;      // what the last look turned up, or null
+  var looking = false;
+
+  function find() {
+    return document.querySelector('input[name=find]:checked').value;
+  }
+
+  function say(tone, text, steps) {
+    said.className = tone;
+    said.textContent = '';
+    var head = document.createElement('h3');
+    head.textContent = text;
+    said.appendChild(head);
+    if (steps && steps.length) {
+      var list = document.createElement('ol');
+      steps.forEach(function (step) {
+        var item = document.createElement('li');
+        item.textContent = step;
+        list.appendChild(item);
+      });
+      said.appendChild(list);
+    }
+  }
+
+  function chosen() {
+    if (!found || !found.counters.length) { return null; }
+    return found.counters[counters.selectedIndex] || null;
+  }
+
+  function refresh() {
+    address.disabled = find() !== 'ADDRESS';
+    url.disabled = find() !== 'URL';
+    look.disabled = looking;
+    look.textContent = looking ? 'Looking…' : 'Look for the server';
+    var pick = chosen();
+    counters.disabled = !found || !found.counters.length;
+    save.disabled = !pick || !pick.canUse;
+    if (looking) { say('info', 'Looking for the shop’s server…'); return; }
+    if (!found) { return; }
+    if (!found.counters.length) {
+      say('bad', 'This shop has no counters set up yet.',
+        ['On the server, open Settings, then "Tills in this shop".',
+         'Press "Add a counter" and give this machine a number and a name.',
+         'Come back here and press "Look for the server" again.']);
+      return;
+    }
+    if (!pick) { say('info', 'Choose which of the shop’s counters this machine is.'); return; }
+    if (!pick.canUse) { say('bad', pick.why); return; }
+    say('good', 'Ready: this machine will bill as ' + pick.code + ' ' + pick.name
+      + ' at ' + (found.shop || 'the shop’s server') + '.');
+  }
+
+  function ask(path, body) {
+    return fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function (answer) {
+      return answer.json().catch(function () { return {}; });
+    });
+  }
+
+  function doLook() {
+    if (looking) { return; }
+    looking = true;
+    found = null;
+    refresh();
+    ask('/setup/look', { find: find(), address: address.value, url: url.value })
+      .then(function (answer) {
+        looking = false;
+        if (!answer.found) {
+          found = null;
+          say('bad', answer.trouble || 'The shop’s server did not answer.', answer.steps);
+          refresh();
+          return;
+        }
+        found = answer;
+        counters.innerHTML = '';
+        answer.counters.forEach(function (counter) {
+          var option = document.createElement('option');
+          option.textContent = counter.label;
+          counters.appendChild(option);
+        });
+        var keep = answer.counters.findIndex(function (c) { return c.id === answer.counterId; });
+        var free = answer.counters.findIndex(function (c) { return c.canUse; });
+        counters.selectedIndex = keep >= 0 ? keep : (free >= 0 ? free : 0);
+        refresh();
+      })
+      .catch(function () {
+        looking = false;
+        say('bad', 'This counter could not ask its own setup service. Close this window and start'
+          + ' GO RockIt Counter again.');
+        refresh();
+      });
+  }
+
+  function doSave() {
+    var pick = chosen();
+    if (!pick) { return; }
+    save.disabled = true;
+    ask('/setup/save', {
+      find: find(), address: address.value, url: url.value, counterId: pick.id
+    }).then(function (answer) {
+      if (answer.billing) {
+        say('good', 'Saved. Opening the billing screen…');
+        window.location = answer.billing;
+        return;
+      }
+      say('bad', answer.error || 'This counter could not be saved.');
+      refresh();
+    }).catch(function () {
+      say('bad', 'This counter could not be saved. Check that GO RockIt Counter is still running.');
+      refresh();
+    });
+  }
+
+  [].forEach.call(document.querySelectorAll('input[name=find]'), function (radio) {
+    radio.addEventListener('change', function () { found = null; refresh(); });
+  });
+  [address, url].forEach(function (box) {
+    box.addEventListener('input', function () { found = null; refresh(); });
+    box.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') { doLook(); }
+    });
+  });
+  counters.addEventListener('change', refresh);
+  look.addEventListener('click', doLook);
+  save.addEventListener('click', doSave);
+
+  // What this machine already had, and why it is here if the server turned it away.
+  var why = new URLSearchParams(window.location.search).get('reason');
+  fetch('/setup/state').then(function (answer) { return answer.json(); }).then(function (state) {
+    document.querySelector('input[name=find][value=' + state.find + ']').checked = true;
+    address.value = state.address || '';
+    url.value = state.url || '';
+    refresh();
+    if (why) { say('bad', why); }
+    // A counter that was set up before only has to be told whether its server is still there.
+    if (state.find !== 'AUTOMATIC' || state.counterId) { doLook(); }
+  }).catch(refresh);
+}());
+</script>
+</body>
+</html>

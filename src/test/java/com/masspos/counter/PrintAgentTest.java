@@ -98,26 +98,64 @@ class PrintAgentTest {
     }
 
     /**
-     * The sign-in screen asking for this counter's own settings window back, which is what happens
-     * when the shop has no place left for it. The counter program is waiting on exactly this, with
-     * the server's reason to put on the window.
+     * Setting a counter up is a page this machine serves itself. It has to be here before the
+     * shop's server has been found - that is the whole reason it is here rather than on the
+     * server - so it is served whether or not this counter has ever reached one.
      */
     @Test
-    void handsTheCounterBackToItsSettingsWindowWhenTheShopWillNotHaveIt() throws Exception {
-        HttpResponse<String> asked = send("POST", "/settings-window",
-                "{\"reason\":\"This shop is set up for 2 counters and they are in use (T2, T3).\"}");
+    void servesTheSetupPageWithoutAShopServerAnywhere() throws Exception {
+        HttpResponse<String> page = get("/setup");
 
-        assertThat(asked.statusCode()).isEqualTo(202);
-        assertThat(agent.awaitSettingsRequest())
-                .contains("This shop is set up for 2 counters and they are in use (T2, T3).");
+        assertThat(page.statusCode()).isEqualTo(200);
+        assertThat(header(page, "Content-Type")).contains("text/html");
+        assertThat(page.body()).contains("Set this counter up", "Which counter is this machine?");
     }
 
-    /** Closing stops the counter waiting for somebody to finish with a window that will not come. */
+    /** The page opens on the settings this machine already has, rather than empty. */
     @Test
-    void stopsWaitingForTheSettingsWindowWhenTheCounterShutsDown() {
-        agent.close();
+    void tellsTheSetupPageWhatThisCounterAlreadyIs() throws Exception {
+        JsonNode state = json.readTree(get("/setup/state").body());
 
-        assertThat(agent.awaitSettingsRequest()).isEmpty();
+        assertThat(state.get("find").asText()).isEqualTo("AUTOMATIC");
+        assertThat(state.get("counterCode").asText()).isEqualTo("T2");
+    }
+
+    /** No shop server out there: the page is told so, and what to go and check. */
+    @Test
+    void saysWhatToCheckWhenNoShopServerAnswers() throws Exception {
+        HttpResponse<String> looked = send("POST", "/setup/look",
+                "{\"find\":\"ADDRESS\",\"address\":\"127.0.0.1:1\"}");
+
+        JsonNode answer = json.readTree(looked.body());
+        assertThat(answer.get("found").asBoolean()).isFalse();
+        assertThat(answer.get("trouble").asText()).contains("Nothing answered at that address");
+        assertThat(answer.get("steps")).isNotEmpty();
+    }
+
+    /** And saving is refused, in words, rather than writing settings that cannot work. */
+    @Test
+    void refusesToSaveACounterItCannotReach() throws Exception {
+        HttpResponse<String> saved = send("POST", "/setup/save",
+                "{\"find\":\"ADDRESS\",\"address\":\"127.0.0.1:1\",\"counterId\":\"01a1-not-real\"}");
+
+        JsonNode answer = json.readTree(saved.body());
+        assertThat(answer.has("billing")).isFalse();
+        assertThat(answer.get("error").asText()).contains("stopped answering");
+    }
+
+    /**
+     * These are the only requests that change which shop a counter bills against, so they are for
+     * the person at this machine alone. A browser sends its own origin on a cross-site POST.
+     */
+    @Test
+    void refusesSetupFromAnyPageButItsOwn() throws Exception {
+        HttpResponse<String> elsewhere = http.send(HttpRequest.newBuilder(URI.create(base + "/setup/save"))
+                .header("Origin", "http://evil.example")
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("{}"))
+                .build(), HttpResponse.BodyHandlers.ofString());
+
+        assertThat(elsewhere.statusCode()).isEqualTo(403);
     }
 
     /**

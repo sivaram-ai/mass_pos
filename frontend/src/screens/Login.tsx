@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, ApiError, messageOfFailure, postBinary, saveToken } from '../api'
-import { askForCounterSettings, counterId } from '../counter'
+import { counterId, goToCounterSetup } from '../counter'
 import type { BackupCandidate, Principal, SetupView } from '../types'
 import { Banner, Button, Field, inputClass } from '../components/ui'
 
@@ -83,9 +83,10 @@ export function Login({ onSignedIn }: { onSignedIn: (user: Principal) => void })
       // with every place taken - which is what the counter that loses the race for the last one is
       // told. Nothing here can be put right on this screen, so the counter's own settings window
       // comes back with the reason on it, and this screen says where to look.
-      if (failure instanceof ApiError && failure.counterSetup && await askForCounterSettings(said)) {
-        setError(`${said} This counter's settings window has opened: put it right there, then save`
-          + ' to start billing again.')
+      if (failure instanceof ApiError && failure.counterSetup && goToCounterSetup(said)) {
+        // The browser is on its way to this machine's own setup page, which is where every one of
+        // these can actually be put right. Nothing more to show here.
+        setError(said)
       } else {
         setError(said)
       }
