@@ -76,16 +76,64 @@ class StockGuardApiIntegrationTest {
         assertThat(stockOf(productId)).isZero();
     }
 
+    /**
+     * The sale goes through - that is what the exemption is for - and the count stops at empty.
+     *
+     * <p>It used to go below zero, on the reasoning that the goods had left the shop so the ledger
+     * should say so. In a kitchen it compounds instead: one restaurant's screen read -357 of a
+     * biriyani it cooks to order, which tells nobody anything and makes every figure beside it
+     * worth ignoring. A count below zero is not a fact about a shop.
+     */
     @Test
-    void anItemBilledWithoutStockSellsAnyway() throws Exception {
+    void anItemBilledWithoutStockSellsAnywayAndTheCountStopsAtEmpty() throws Exception {
         String productId = newProduct("GUARD-2", "Chicken rice", true);
         assertThat(productOf(productId).get("billWithoutStock").asBoolean()).isTrue();
 
         sell(productId, status().isCreated());
+        sell(productId, status().isCreated());
 
-        // The sale is still recorded as a stock movement; the count simply goes below zero.
-        assertThat(stockOf(productId)).isEqualTo(-2_000);
+        assertThat(stockOf(productId)).isZero();
     }
+
+    /**
+     * Part of a sale can come off a shelf that runs out halfway through it. What came off is three
+     * of the five sold, and the bill still says five: the bill is the record of what was sold, and
+     * this is the record of what the shelf had.
+     */
+    @Test
+    void takesOffWhatTheShelfHasAndNoMore() throws Exception {
+        String productId = newProduct("GUARD-4", "Idli", true);
+        receive(productId, 3_000);
+
+        JsonNode sale = sell(productId, 5_000, status().isCreated());
+
+        assertThat(stockOf(productId)).isZero();
+        assertThat(sale.at("/invoice/lines/0/quantityMilli").asLong())
+                .as("the customer was billed for all five").isEqualTo(5_000);
+    }
+
+    /**
+     * Cancelling puts back what the bill took off, not what it sold. Reversing the quantity on the
+     * bill would leave two on a shelf that was empty when it was billed from.
+     */
+    @Test
+    void cancellingPutsBackOnlyWhatTheBillTookOff() throws Exception {
+        String productId = newProduct("GUARD-5", "Vada", true);
+        receive(productId, 3_000);
+        String invoiceId = sell(productId, 5_000, status().isCreated()).get("invoice").get("id").asText();
+
+        call(post("/api/invoices/" + invoiceId + "/cancel"), managerToken,
+                "{\"reason\":\"Customer changed their mind\"}", status().isOk());
+
+        assertThat(stockOf(productId)).isEqualTo(3_000);
+    }
+
+    private void receive(String productId, long quantityMilli) throws Exception {
+        call(post("/api/stock/receipts"), managerToken, """
+                {"productId":"%s","quantityMilli":%d,"note":"Opening"}"""
+                .formatted(productId, quantityMilli), status().isCreated());
+    }
+
 
     @Test
     void theExemptionIsTurnedOnAndOffWhenTheItemIsEdited() throws Exception {
@@ -113,10 +161,16 @@ class StockGuardApiIntegrationTest {
     }
 
     private JsonNode sell(String productId, ResultMatcher expected) throws Exception {
+        return sell(productId, 2_000, expected);
+    }
+
+    /** Everything here is priced at 10000 paise the unit, so the cash due is the quantity x 10. */
+    private JsonNode sell(String productId, long quantityMilli, ResultMatcher expected) throws Exception {
+        long due = quantityMilli * 10;
         return call(post("/api/sales"), cashierToken, """
-                {"lines":[{"productId":"%s","quantityMilli":2000,"discountPaise":0}],
-                 "payments":[{"mode":"CASH","amountPaise":20000,"tenderedPaise":20000}],"print":false}
-                """.formatted(productId), expected);
+                {"lines":[{"productId":"%s","quantityMilli":%d,"discountPaise":0}],
+                 "payments":[{"mode":"CASH","amountPaise":%d,"tenderedPaise":%d}],"print":false}
+                """.formatted(productId, quantityMilli, due, due), expected);
     }
 
     private JsonNode productOf(String productId) throws Exception {

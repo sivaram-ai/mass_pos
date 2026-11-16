@@ -31,6 +31,19 @@ public interface InventoryLedgerRepository extends JpaRepository<InventoryLedger
             """)
     List<Object[]> onHandForAll();
 
+    /**
+     * What one document actually moved, per product. Not the same as what it sold: a bill for ten
+     * of something the shelf had three of takes three off, because the count never goes below
+     * empty. Cancelling that bill has to put back the three, not the ten.
+     */
+    @Query("""
+            select e.product.id, coalesce(sum(e.quantityDeltaMilli), 0)
+            from InventoryLedgerEvent e
+            where e.referenceId = :referenceId and e.type = :type
+            group by e.product.id
+            """)
+    List<Object[]> movedBy(@Param("referenceId") UUID referenceId, @Param("type") LedgerEventType type);
+
     List<InventoryLedgerEvent> findByProductIdOrderByOccurredAtDesc(UUID productId);
 
     List<InventoryLedgerEvent> findByOccurredAtBetweenOrderByOccurredAtDesc(Instant from, Instant to);

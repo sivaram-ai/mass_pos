@@ -151,8 +151,12 @@ to one item, so a code another item already uses is refused and names that item.
 **Bill without stock** sells the item whatever the stock count says, for cooked food, loose produce,
 services and anything else whose stock is never counted. It only matters when *Refuse to sell items
 the stock says you do not have* is ticked in Settings: items with this box ticked are the exception
-to that rule, and the list shows them as "not counted". The sale is still recorded as a stock
-movement, so the count simply goes below zero.
+to that rule, and the list shows them as "not counted".
+
+**The stock count never goes below zero.** A sale takes off what the shelf has and no more, so an
+item that has run out stays at 0 however many of it you sell. The bill is unaffected — it carries
+the full quantity, and so do the takings, the GST and the customer's copy. Cancelling a bill puts
+back exactly what it took off the shelf, not what it sold.
 
 ### Changing a bill after it was taken
 

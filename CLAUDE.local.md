@@ -29,6 +29,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3Q | Signing in where that account is already open on another till stops and says where - counter, number, floor and when - and offers Go back or sign that one out and carry on here, chosen with the arrow keys and Enter | Done: 368 tests green, driven in the browser |
 | 3R | Nothing from inside the program reaches a counter's screen: every refusal is a sentence written for a shop, and the exception, its stack, the SQL, the paths and the ids go to the log. `ApiExceptionHandler.forTheScreen` is the gate; `api.ts` guards the browser end | Done: 377 tests green, refusals driven against a running till |
 | 3S | A counter's settings are reachable while nobody is signed in: the sign-in screen opens, from its corner, the very page the counter serves itself at first start, so the connection mode, the server's address and which of the shop's counters this machine is can all be changed without closing the program. A counter that is already billing is given a way back that changes nothing | Done: 385 tests green, driven in the browser |
+| 3V | The stock count stops at empty: a sale takes off what the shelf has and no more, the bill still carries the full quantity, and cancelling puts back what was taken off rather than what was sold | Done: 391 tests green |
 | 3U | One bill per counter, not one per address: the bill on screen is kept by the print agent on that machine, so moving a counter from the cable to Wi-Fi comes back to the same bill instead of to a separate one the browser kept against each address | Done: 389 tests green, driven across two addresses in the browser |
 | 3T | A till that cannot reach its shop keeps its screen: a bar says so, the bill stays where it is, Refresh asks instead of reloading, and Counter settings is on the bar - and it clears itself when the cable goes back in. The bill on screen survives a reload, and Log out asks first, holding a bill in progress rather than losing it | Done: 387 tests green, driven in the browser |
 | L1 | Offline subscription licence per till: Ed25519-signed key bound to a hardware machine ID, warn/grace days, billing lock, Licence screen + banner, vendor `tools/license/LicenseTool.java` | Done: 172 tests green, real key verified on this PC |
@@ -512,8 +513,27 @@ folder and everything under it, so that is the only copy that survives one.
   than by method name. A stopped item (`active = false`) is a different thing: it stays on Products and
   Stock, marked, and only leaves billing.
 - **`Product.billWithoutStock`** exempts one item from the shop-wide `blockNegativeStock` rule
-  (`SaleService` checks both). The sale still records its SALE ledger event, so the count goes
-  negative: the exemption is about refusing the sale, never about skipping the movement.
+  (`SaleService` checks both). The exemption is about refusing the sale, never about skipping the
+  movement.
+- **The count stops at empty, always** (`InventoryService.sell`). A sale takes off what the shelf
+  has and no more, whatever it bills for; a sale from an empty shelf writes no ledger event at all,
+  because `LedgerEventType.checkDelta` refuses a zero one and it would say nothing anyway.
+  - **A count below zero is not a fact about a shop.** It used to go negative on the reasoning that
+    the goods had left, so the ledger should say so. In a kitchen it compounds: a restaurant's
+    screen read **-357** of a biriyani it cooks to order, -37 of another and -25 of a third, which
+    tells nobody anything and makes every figure beside it worth ignoring (2026-11-16).
+  - **The bill is untouched, and the bill is the record of what was sold**: the money, the tax and
+    the customer's copy all carry the full quantity. The ledger is the record of what the *shelf*
+    had. So nothing is lost - the invoice line against the ledger event gives what went out over
+    and above the count, for any report that wants it.
+  - **Cancelling puts back what the bill took off, not what it sold** (`InventoryService.putBack`
+    over `InventoryLedgerRepository.movedBy`). Reversing the quantities on the bill would conjure
+    stock onto a shelf that was empty when it was billed from: five sold off a shelf of three put
+    five back and left two from nowhere. Per product, not per line, or the same item on two lines
+    of one bill comes back twice.
+  - **A return is not a cancellation and is deliberately left alone.** Goods coming back are
+    physically in somebody's hand, so SALE_RETURN adds them whether or not the sale ever took them
+    off - the shop really does have them now.
 - **The item code (`sku`) is editable** (`Product.changeCode`, checked for clashes by
   `ProductController.checkCode`, which excludes the item being saved). Invoice and credit note lines
   copy the code at issue, so an old bill keeps the code it was sold under.

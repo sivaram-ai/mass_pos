@@ -74,6 +74,52 @@ public class InventoryService {
         return record(productId, LedgerEventType.DAMAGE, -Math.abs(quantityMilli), null, note);
     }
 
+    /**
+     * Takes a sale off the shelf, and never past empty.
+     *
+     * <p>A count below zero is not a fact about a shop. It is what you get by subtracting from
+     * something that had already run out, and it compounds: one restaurant's screen read -357 of a
+     * biriyani it cooks to order, which tells nobody anything and makes every number beside it
+     * worth ignoring. The shelf stops at empty, and the sale goes through - that is what billing
+     * without stock means.
+     *
+     * <p>The bill is untouched by this, and the bill is the record of what was sold: the money, the
+     * tax and the customer's copy all carry the full quantity. This is the record of what the shelf
+     * had, which is a different question. The two can be compared - the invoice line against the
+     * ledger - so what went out over and above the count is still there to be found.
+     *
+     * @return what was actually taken off, which is less than asked for when the shelf runs out
+     */
+    @Transactional
+    public long sell(UUID productId, long quantityMilli, UUID invoiceId) {
+        long onShelf = Math.max(0, onHand(productId));
+        long take = Math.min(onShelf, quantityMilli);
+        if (take <= 0) {
+            // Nothing to take off. A zero event is refused, and would say nothing anyway.
+            return 0;
+        }
+        record(productId, LedgerEventType.SALE, -take, invoiceId,
+                take < quantityMilli ? "The shelf ran out, so only part of this sale came off the count" : null);
+        return take;
+    }
+
+    /**
+     * Puts back exactly what a document took off the shelf, which is what a cancelled bill means:
+     * nothing physically moved, so the count goes back to where it was. Reversing the quantities on
+     * the bill instead would conjure stock out of a shelf that was empty when it was sold from.
+     *
+     * <p>Per product rather than per line: the same item on two lines of one bill is one count.
+     */
+    @Transactional
+    public void putBack(UUID invoiceId, String note) {
+        for (Map.Entry<UUID, Long> tookOff : toMap(ledger.movedBy(invoiceId, LedgerEventType.SALE)).entrySet()) {
+            long back = -tookOff.getValue();
+            if (back > 0) {
+                record(tookOff.getKey(), LedgerEventType.SALE_CANCELLED, back, invoiceId, note);
+            }
+        }
+    }
+
     /** Used by the sale and cancellation paths, which pass the invoice as the source document. */
     @Transactional
     public InventoryLedgerEvent record(UUID productId, LedgerEventType type, long deltaMilli, UUID referenceId,

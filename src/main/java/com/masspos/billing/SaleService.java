@@ -350,8 +350,9 @@ public class SaleService {
     private InvoiceView issue(Invoice invoice) {
         invoices.save(invoice);
         for (InvoiceItem item : invoice.getItems()) {
-            inventory.record(item.getProduct().getId(), LedgerEventType.SALE, -item.getQuantityMilli(),
-                    invoice.getId(), null);
+            // Takes off what the shelf has and no more: the count stops at empty, while the bill
+            // carries the full quantity, because that is what was sold and paid for.
+            inventory.sell(item.getProduct().getId(), item.getQuantityMilli(), invoice.getId());
         }
         return InvoiceView.of(invoice);
     }
@@ -371,12 +372,13 @@ public class SaleService {
         }
     }
 
-    /** Puts back the stock of a bill just cancelled, with compensating ledger events. */
+    /**
+     * Puts back the stock of a bill just cancelled, with compensating ledger events - exactly what
+     * that bill took off, which is not always what it sold. A bill for ten of something the shelf
+     * had three of took three off; putting ten back would leave seven on a shelf that was empty.
+     */
     private void restock(Invoice invoice) {
-        for (InvoiceItem item : invoice.getItems()) {
-            inventory.record(item.getProduct().getId(), LedgerEventType.SALE_CANCELLED, item.getQuantityMilli(),
-                    invoice.getId(), "Invoice " + invoice.getInvoiceNumber() + " cancelled");
-        }
+        inventory.putBack(invoice.getId(), "Invoice " + invoice.getInvoiceNumber() + " cancelled");
     }
 
     private static String reasonFor(String given, String replacementNumber) {
