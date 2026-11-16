@@ -352,7 +352,8 @@ public class SaleService {
         for (InvoiceItem item : invoice.getItems()) {
             // Takes off what the shelf has and no more: the count stops at empty, while the bill
             // carries the full quantity, because that is what was sold and paid for.
-            inventory.sell(item.getProduct().getId(), item.getQuantityMilli(), invoice.getId());
+            inventory.sell(item.getProduct().getId(), item.getQuantityMilli(), invoice.getId(),
+                    invoice.getInvoiceNumber());
         }
         return InvoiceView.of(invoice);
     }

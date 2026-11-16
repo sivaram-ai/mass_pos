@@ -153,6 +153,14 @@ services and anything else whose stock is never counted. It only matters when *R
 the stock says you do not have* is ticked in Settings: items with this box ticked are the exception
 to that rule, and the list shows them as "not counted".
 
+**History (F6)** answers "why does it say four when there are six on the shelf". On Products or
+Stock, press **F6** on the item you are on: every movement ever recorded against it, newest first —
+what came in, what sold and on which bill, what came back, the damage, and the corrections somebody
+made by hand — each with the count after it, the till, the person and the time. ← → pick a kind, F2
+searches, F4 changes the order, and **F3** swaps between this item and the whole shop's last 30
+days. Nothing here can be edited: a correction is made on the Stock screen and appears here as its
+own line with the reason typed against it.
+
 **The stock count never goes below zero.** A sale takes off what the shelf has and no more, so an
 item that has run out stays at 0 however many of it you sell. The bill is unaffected — it carries
 the full quantity, and so do the takings, the GST and the customer's copy. Cancelling a bill puts

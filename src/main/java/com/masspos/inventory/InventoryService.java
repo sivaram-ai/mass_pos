@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -54,6 +55,35 @@ public class InventoryService {
         return toMap(ledger.onHandForAll());
     }
 
+    /**
+     * Everything that has ever moved one item, newest first, each row carrying what the shelf held
+     * once it had been applied.
+     *
+     * <p>The running count is walked backwards from today's: the newest movement left the shelf at
+     * the count it is on now, and each older one left it at the count after it less that movement.
+     * It is only honest over a whole history, which is why this takes no date window - the screen
+     * filters and searches within what comes back.
+     */
+    @Transactional(readOnly = true)
+    public List<StockMovementView> historyOf(UUID productId) {
+        List<InventoryLedgerEvent> events = ledger.findByProductIdOrderByOccurredAtDesc(productId);
+        long running = events.stream().mapToLong(InventoryLedgerEvent::getQuantityDeltaMilli).sum();
+        List<StockMovementView> history = new ArrayList<>(events.size());
+        for (InventoryLedgerEvent event : events) {
+            history.add(StockMovementView.of(event, running));
+            running -= event.getQuantityDeltaMilli();
+        }
+        return history;
+    }
+
+    /** Every item's movements over a window, for somebody asking what the shop has been doing. */
+    @Transactional(readOnly = true)
+    public List<StockMovementView> historySince(Instant from) {
+        return ledger.findByOccurredAtBetweenOrderByOccurredAtDesc(from, Instant.now()).stream()
+                .map(event -> StockMovementView.of(event, null))
+                .toList();
+    }
+
     /** Goods arriving from a supplier. */
     @Transactional
     public InventoryLedgerEvent receive(UUID productId, long quantityMilli, String note) {
@@ -91,15 +121,19 @@ public class InventoryService {
      * @return what was actually taken off, which is less than asked for when the shelf runs out
      */
     @Transactional
-    public long sell(UUID productId, long quantityMilli, UUID invoiceId) {
+    public long sell(UUID productId, long quantityMilli, UUID invoiceId, String invoiceNumber) {
         long onShelf = Math.max(0, onHand(productId));
         long take = Math.min(onShelf, quantityMilli);
         if (take <= 0) {
             // Nothing to take off. A zero event is refused, and would say nothing anyway.
             return 0;
         }
+        // The bill is named on the movement, the way a return and a cancellation already name
+        // theirs. It is what the history screen answers "where did five of these go" with, and it
+        // costs one string here instead of the inventory package reading the billing package back.
+        String note = "Bill " + invoiceNumber;
         record(productId, LedgerEventType.SALE, -take, invoiceId,
-                take < quantityMilli ? "The shelf ran out, so only part of this sale came off the count" : null);
+                take < quantityMilli ? note + " - the shelf ran out, so only part of it came off the count" : note);
         return take;
     }
 

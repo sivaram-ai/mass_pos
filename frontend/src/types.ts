@@ -78,6 +78,28 @@ export interface Product {
   stockMilli: number
 }
 
+/** Every kind of movement the ledger records. The screen's own words for them are in StockHistory. */
+export type StockMovementType =
+  | 'OPENING_STOCK' | 'PURCHASE_RECEIPT' | 'PURCHASE_RETURN' | 'SALE' | 'SALE_RETURN'
+  | 'SALE_CANCELLED' | 'DAMAGE' | 'TRANSFER_IN' | 'TRANSFER_OUT' | 'ADJUSTMENT'
+
+/** One movement in an item's history. */
+export interface StockMovement {
+  id: string
+  occurredAt: string
+  type: StockMovementType
+  quantityDeltaMilli: number
+  /** What the shelf held once this was applied, or null over a window across every item. */
+  balanceAfterMilli: number | null
+  productId: string
+  sku: string
+  name: string
+  unit: Unit
+  counterCode: string
+  by: string
+  note: string
+}
+
 export interface StockRow {
   productId: string
   sku: string

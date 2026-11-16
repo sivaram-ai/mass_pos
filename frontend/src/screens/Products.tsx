@@ -10,6 +10,7 @@ import {
 } from '../components/ui'
 import { useScreenKeys } from '../shortcuts'
 import { SortMenu } from '../components/SortMenu'
+import { StockHistory } from '../components/StockHistory'
 import { loadSort, PRODUCT_SORT_KEY, saveSort, SORT_LABELS, sorted } from '../sorting'
 import type { Sort } from '../sorting'
 import type { Toast } from '../App'
@@ -20,6 +21,7 @@ const GST_SLABS = [0, 500, 1200, 1800, 2800]
 const SEARCH_KEY = 'F2'
 const ADD_KEY = 'F3'
 const SORT_KEY = 'F4'
+const HISTORY_KEY = 'F6'
 
 type Action = 'edit' | 'status' | 'delete'
 
@@ -98,7 +100,8 @@ export default function Products({ onToast }: { onToast: Toast }) {
   const list = useRef<HTMLDivElement>(null)
   const searchBox = useRef<HTMLInputElement>(null)
   const rows = useRef(new Map<string, HTMLTableRowElement>())
-  const dialogOpen = editing !== null || confirming !== null
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const dialogOpen = editing !== null || confirming !== null || historyOpen
 
   const load = useCallback(() => {
     api.get<Product[]>('/api/products?all=true')
@@ -183,6 +186,7 @@ export default function Products({ onToast }: { onToast: Toast }) {
     },
     [ADD_KEY]: () => openEditor(null, EMPTY),
     [SORT_KEY]: () => setSortOpen(true),
+    [HISTORY_KEY]: () => setHistoryOpen(true),
   }, !dialogOpen && !sortOpen)
 
   const save = async (id: string | null, draft: Draft) => {
@@ -326,6 +330,11 @@ export default function Products({ onToast }: { onToast: Toast }) {
               />
             )}
           </div>
+          <Button className="whitespace-nowrap px-2 py-1" hint={HISTORY_KEY}
+                  onClick={() => setHistoryOpen(true)}
+                  title="Where this item's count came from: everything that has moved it">
+            History
+          </Button>
           <KeyBox hint={SEARCH_KEY}>
             <input
               ref={searchBox}
@@ -376,7 +385,7 @@ export default function Products({ onToast }: { onToast: Toast }) {
         <span><kbd>↑</kbd> <kbd>↓</kbd> choose an item</span>
         <span><kbd>←</kbd> <kbd>→</kbd> Edit, Stop or Delete</span>
         <span><kbd>Enter</kbd> do it</span>
-        <span><kbd>{SEARCH_KEY}</kbd> search · <kbd>{SORT_KEY}</kbd> sort · <kbd>{ADD_KEY}</kbd> add, then <kbd>Enter</kbd> or <kbd>Esc</kbd> back to the list</span>
+        <span><kbd>{SEARCH_KEY}</kbd> search · <kbd>{SORT_KEY}</kbd> sort · <kbd>{HISTORY_KEY}</kbd> history · <kbd>{ADD_KEY}</kbd> add, then <kbd>Enter</kbd> or <kbd>Esc</kbd> back to the list</span>
         <span><kbd>F9</kbd> menu · <kbd>Esc</kbd> <kbd>Esc</kbd> billing</span>
       </p>
 
@@ -533,6 +542,16 @@ export default function Products({ onToast }: { onToast: Toast }) {
           </table>
         )}
       </div>
+
+      {historyOpen && (
+        <StockHistory
+          of={current ? { productId: current.id, sku: current.sku, name: current.name } : null}
+          onClose={() => {
+            setHistoryOpen(false)
+            requestAnimationFrame(() => list.current?.focus())
+          }}
+        />
+      )}
 
       {editing && (
         <ProductDialog

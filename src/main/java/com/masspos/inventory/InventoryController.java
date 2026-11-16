@@ -14,9 +14,12 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -52,6 +55,7 @@ public class InventoryController {
     public record AdjustmentRequest(@NotNull UUID productId, long deltaMilli, @Size(max = 200) String note) {
     }
 
+
     /**
      * Stock on hand for every product the shop still has, valued at the current selling price.
      * Stopped items are in the list: the goods are on the shelf whether or not they are being sold,
@@ -66,6 +70,28 @@ public class InventoryController {
                 .map(product -> StockRow.of(product, onHand.getOrDefault(product.getId(), 0L)))
                 .sorted(Comparator.comparing(StockRow::sku))
                 .toList();
+    }
+
+    /**
+     * Where an item's count came from: every movement ever recorded against it, newest first, each
+     * with what the shelf held once it had been applied.
+     *
+     * <p>A count on its own is a number somebody has to take on trust. This is the answer to "it
+     * says four and there are six" - the goods that came in, the bills that took them out, the
+     * damage, and the corrections somebody made by hand, each with the till, the person and the
+     * time. Nothing here is computed: it is the ledger, which is what the count is summed from.
+     *
+     * @param productId one item's whole history, with a running count; or every item's movements
+     *                  over the last {@code days} when it is left out
+     */
+    @GetMapping("/history")
+    @RequiresRole({UserRole.MANAGER, UserRole.AUDITOR})
+    public List<StockMovementView> history(@RequestParam(required = false) UUID productId,
+                                           @RequestParam(defaultValue = "30") int days) {
+        if (productId != null) {
+            return inventory.historyOf(productId);
+        }
+        return inventory.historySince(Instant.now().minus(Duration.ofDays(Math.max(1, Math.min(days, 370)))));
     }
 
     @PostMapping("/receipts")

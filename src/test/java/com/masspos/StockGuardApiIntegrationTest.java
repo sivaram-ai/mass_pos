@@ -128,6 +128,49 @@ class StockGuardApiIntegrationTest {
         assertThat(stockOf(productId)).isEqualTo(3_000);
     }
 
+    /**
+     * Where a count came from. A number on its own has to be taken on trust; this is what somebody
+     * holding six of something the screen calls four actually opens.
+     */
+    @Test
+    void tellsTheWholeStoryOfOneItemsCount() throws Exception {
+        String productId = newProduct("GUARD-6", "Dosa", true);
+        receive(productId, 3_000);
+        sell(productId, 5_000, status().isCreated());
+
+        JsonNode history = call(get("/api/stock/history?productId=" + productId), managerToken, null, status().isOk());
+
+        assertThat(history).hasSize(2);
+        JsonNode sold = history.get(0);
+        assertThat(sold.get("type").asText()).as("newest first").isEqualTo("SALE");
+        assertThat(sold.get("quantityDeltaMilli").asLong()).as("only what the shelf had").isEqualTo(-3_000);
+        assertThat(sold.get("balanceAfterMilli").asLong()).isZero();
+        assertThat(sold.get("note").asText()).as("which bill took them").startsWith("Bill ");
+        assertThat(sold.get("by").asText()).isNotEmpty();
+
+        JsonNode received = history.get(1);
+        assertThat(received.get("type").asText()).isEqualTo("PURCHASE_RECEIPT");
+        assertThat(received.get("quantityDeltaMilli").asLong()).isEqualTo(3_000);
+        assertThat(received.get("balanceAfterMilli").asLong())
+                .as("what the shelf held after the goods came in").isEqualTo(3_000);
+        assertThat(received.get("name").asText()).isEqualTo("Dosa");
+    }
+
+    /** Over a window across every item there is no honest running count, so none is offered. */
+    @Test
+    void leavesTheRunningCountOutOfAWindowThatStartsInTheMiddle() throws Exception {
+        String productId = newProduct("GUARD-7", "Pongal", true);
+        receive(productId, 1_000);
+
+        JsonNode history = call(get("/api/stock/history?days=7"), managerToken, null, status().isOk());
+
+        assertThat(history.isArray()).isTrue();
+        assertThat(history).isNotEmpty();
+        for (JsonNode row : history) {
+            assertThat(row.get("balanceAfterMilli").isNull()).isTrue();
+        }
+    }
+
     private void receive(String productId, long quantityMilli) throws Exception {
         call(post("/api/stock/receipts"), managerToken, """
                 {"productId":"%s","quantityMilli":%d,"note":"Opening"}"""

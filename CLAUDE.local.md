@@ -29,6 +29,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3Q | Signing in where that account is already open on another till stops and says where - counter, number, floor and when - and offers Go back or sign that one out and carry on here, chosen with the arrow keys and Enter | Done: 368 tests green, driven in the browser |
 | 3R | Nothing from inside the program reaches a counter's screen: every refusal is a sentence written for a shop, and the exception, its stack, the SQL, the paths and the ids go to the log. `ApiExceptionHandler.forTheScreen` is the gate; `api.ts` guards the browser end | Done: 377 tests green, refusals driven against a running till |
 | 3S | A counter's settings are reachable while nobody is signed in: the sign-in screen opens, from its corner, the very page the counter serves itself at first start, so the connection mode, the server's address and which of the shop's counters this machine is can all be changed without closing the program. A counter that is already billing is given a way back that changes nothing | Done: 385 tests green, driven in the browser |
+| 3W | Where a count came from: F6 on Products and Stock opens every movement ever recorded against the item - what came in, what sold, what came back, corrections and losses - each with the count after it, the till, the person and the time, searchable and orderable, or across the whole shop for the last 30 days | Done: 393 tests green, driven in the browser |
 | 3V | The stock count stops at empty: a sale takes off what the shelf has and no more, the bill still carries the full quantity, and cancelling puts back what was taken off rather than what was sold | Done: 391 tests green |
 | 3U | One bill per counter, not one per address: the bill on screen is kept by the print agent on that machine, so moving a counter from the cable to Wi-Fi comes back to the same bill instead of to a separate one the browser kept against each address | Done: 389 tests green, driven across two addresses in the browser |
 | 3T | A till that cannot reach its shop keeps its screen: a bar says so, the bill stays where it is, Refresh asks instead of reloading, and Counter settings is on the bar - and it clears itself when the cable goes back in. The bill on screen survives a reload, and Log out asks first, holding a bill in progress rather than losing it | Done: 387 tests green, driven in the browser |
@@ -190,6 +191,31 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
   only because `useShortcuts` is passed `inFront && !modalOpen` - keep that guard.
 - **F9 opens the menu everywhere** (`MENU_KEY`, handled in `App`), so it is deliberately absent from
   `ASSIGNABLE_KEYS`; `isModalOpen()` (a counter kept by `Modal`) stops it opening behind a dialog.
+- **Where a count came from is a screen** (`components/StockHistory.tsx`, `GET /api/stock/history`).
+  A count on its own has to be taken on trust, and the first thing anybody does when the screen
+  says four and the shelf holds six is ask why. **F6** on both Products and Stock opens the item
+  the cursor is on: every movement ever recorded against it, newest first, each with what the shelf
+  held once it had been applied, and with the till, the person and the time.
+  - **The running count is only offered where it is honest.** `InventoryService.historyOf` walks it
+    backwards from today's count, which works over a whole history and not over a window that
+    starts in the middle - so the shop-wide view (**F3**, last 30 days) sends `balanceAfterMilli`
+    null and the column reads "—" rather than a number somebody might believe.
+  - **The ledger's names are not the shop's.** `WHAT` in the component turns `ADJUSTMENT` into
+    "Correction" and `SALE` into "Sold"; `KINDS` gathers the ten ledger types into the five things
+    people actually ask for - what came in, what sold, what came back, corrections, losses.
+  - **A sale names its bill in the movement's note**, the way a return and a cancellation already
+    did (`InventoryService.sell`). That is how the screen answers "where did five of these go"
+    without the inventory package reading the billing package back, which would be a cycle for one
+    string. Movements recorded before this build have no bill on them.
+  - **Read-only, deliberately.** The ledger is append-only, which is what makes the count worth
+    anything; a correction is made on the Stock screen and turns up here as its own line with
+    whatever reason was typed against it.
+  - **A dialog focuses itself at once *and* again through a frame** (`useLayoutEffect` +
+    `requestAnimationFrame`). At once, because F6 then F2 is one movement of a hand and a frame is
+    long enough for both keys to arrive - the second would land on the screen behind. Again through
+    a frame, because the screen underneath hands focus back to its own list when a dialog closes
+    and does that through a frame, so Esc then F6 would otherwise leave the cursor behind. **Both
+    were real, and both were found by driving it.**
 - **Sorting is one module for both lists** (`sorting.ts`: the six fields, the comparator, and the
   per-machine `masspos.productSort` / `masspos.stockSort`), with `SortMenu` as a popover that *takes
   focus* - a grid cell that kept focus behind it would still receive the arrows. F4 opens it on both

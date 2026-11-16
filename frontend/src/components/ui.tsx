@@ -116,10 +116,12 @@ export function Modal({ title, children, onClose, wide, size }: {
   children: ReactNode
   onClose: () => void
   wide?: boolean
-  /** Overrides `wide`: md (default), xl for a two-column dialog, 3xl for a table. */
-  size?: 'md' | 'xl' | '3xl'
+  /** Overrides `wide`: md (default), xl for a two-column dialog, 3xl for a table, 5xl for a long one. */
+  size?: 'md' | 'xl' | '3xl' | '5xl'
 }) {
-  const width = { md: 'max-w-md', xl: 'max-w-xl', '3xl': 'max-w-3xl' }[size ?? (wide ? '3xl' : 'md')]
+  const width = {
+    md: 'max-w-md', xl: 'max-w-xl', '3xl': 'max-w-3xl', '5xl': 'max-w-5xl',
+  }[size ?? (wide ? '3xl' : 'md')]
 
   useEffect(() => {
     openModals += 1

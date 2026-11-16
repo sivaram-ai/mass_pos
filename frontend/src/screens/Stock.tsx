@@ -7,12 +7,14 @@ import {
 } from '../components/ui'
 import { useScreenKeys } from '../shortcuts'
 import { SortMenu } from '../components/SortMenu'
+import { StockHistory } from '../components/StockHistory'
 import { loadSort, saveSort, SORT_LABELS, sorted, STOCK_SORT_KEY } from '../sorting'
 import type { Sort } from '../sorting'
 import type { Toast } from '../App'
 
 const SEARCH_KEY = 'F2'
 const SORT_KEY = 'F4'
+const HISTORY_KEY = 'F6'
 
 type Action = 'receipts' | 'adjustments' | 'damages'
 
@@ -44,6 +46,7 @@ export default function Stock({ onToast }: { onToast: Toast }) {
   const [action, setAction] = useState<Action>('receipts')
   const [listFocused, setListFocused] = useState(false)
   const [movement, setMovement] = useState<Movement | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const list = useRef<HTMLDivElement>(null)
   const searchBox = useRef<HTMLInputElement>(null)
   const lines = useRef(new Map<string, HTMLTableRowElement>())
@@ -83,7 +86,8 @@ export default function Stock({ onToast }: { onToast: Toast }) {
       searchBox.current?.select()
     },
     [SORT_KEY]: () => setSortOpen(true),
-  }, movement === null && !sortOpen)
+    [HISTORY_KEY]: () => setHistoryOpen(true),
+  }, movement === null && !sortOpen && !historyOpen)
 
   const choose = (index: number) => {
     setSelected(index)
@@ -106,7 +110,7 @@ export default function Stock({ onToast }: { onToast: Toast }) {
   }
 
   const onListKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (movement || sortOpen || !current) {
+    if (movement || sortOpen || historyOpen || !current) {
       return
     }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -166,6 +170,11 @@ export default function Stock({ onToast }: { onToast: Toast }) {
               />
             )}
           </div>
+          <Button className="whitespace-nowrap px-2 py-1" hint={HISTORY_KEY}
+                  onClick={() => setHistoryOpen(true)}
+                  title="Where this count came from: everything that has moved this item">
+            History
+          </Button>
           <KeyBox hint={SEARCH_KEY}>
             <input
               ref={searchBox}
@@ -187,7 +196,7 @@ export default function Stock({ onToast }: { onToast: Toast }) {
         <span><kbd>↑</kbd> <kbd>↓</kbd> choose an item</span>
         <span><kbd>←</kbd> <kbd>→</kbd> Received, Correct or Damage</span>
         <span><kbd>Enter</kbd> do it</span>
-        <span><kbd>{SEARCH_KEY}</kbd> search · <kbd>{SORT_KEY}</kbd> sort</span>
+        <span><kbd>{SEARCH_KEY}</kbd> search · <kbd>{SORT_KEY}</kbd> sort · <kbd>{HISTORY_KEY}</kbd> history</span>
         <span><kbd>F9</kbd> menu · <kbd>Esc</kbd> <kbd>Esc</kbd> billing</span>
       </p>
 
@@ -310,6 +319,16 @@ export default function Stock({ onToast }: { onToast: Toast }) {
           </table>
         )}
       </div>
+
+      {historyOpen && (
+        <StockHistory
+          of={current ? { productId: current.productId, sku: current.sku, name: current.name } : null}
+          onClose={() => {
+            setHistoryOpen(false)
+            requestAnimationFrame(() => list.current?.focus())
+          }}
+        />
+      )}
 
       {movement && (
         <MovementDialog
