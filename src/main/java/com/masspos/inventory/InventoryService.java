@@ -84,10 +84,26 @@ public class InventoryService {
                 .toList();
     }
 
-    /** Goods arriving from a supplier. */
+    /**
+     * Goods arriving from a vendor, with what they cost and who they came from.
+     *
+     * <p>Both are kept on the movement rather than on the item: an item has one price now, a shop
+     * has a different delivery every week, and "what did we pay for these" is a question about the
+     * delivery. They are optional - a shop that does not track its buying prices leaves the price
+     * at zero and the vendor empty, and nothing asks again.
+     */
     @Transactional
-    public InventoryLedgerEvent receive(UUID productId, long quantityMilli, String note) {
-        return record(productId, LedgerEventType.PURCHASE_RECEIPT, quantityMilli, null, note);
+    public InventoryLedgerEvent receive(UUID productId, long quantityMilli, String note,
+                                        long buyingPricePaise, String vendorName) {
+        Product product = productOrRefuse(productId);
+        return ledger.save(new InventoryLedgerEvent(product, LedgerEventType.PURCHASE_RECEIPT, quantityMilli, null,
+                counter.code(), Instant.now(), currentUser(), note, buyingPricePaise, vendorName));
+    }
+
+    /** Every vendor this shop has already received goods from, for the box to suggest from. */
+    @Transactional(readOnly = true)
+    public List<String> vendorsSoFar() {
+        return ledger.vendorsSoFar();
     }
 
     /**
@@ -158,10 +174,14 @@ public class InventoryService {
     @Transactional
     public InventoryLedgerEvent record(UUID productId, LedgerEventType type, long deltaMilli, UUID referenceId,
                                        String note) {
-        Product product = products.findById(productId)
-                .orElseThrow(() -> new IllegalArgumentException("No such product: " + productId));
-        return ledger.save(new InventoryLedgerEvent(product, type, deltaMilli, referenceId, counter.code(),
-                Instant.now(), currentUser(), note));
+        return ledger.save(new InventoryLedgerEvent(productOrRefuse(productId), type, deltaMilli, referenceId,
+                counter.code(), Instant.now(), currentUser(), note));
+    }
+
+    private Product productOrRefuse(UUID productId) {
+        return products.findById(productId)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "That item is not on this till any more. Refresh the screen and try again."));
     }
 
     private User currentUser() {

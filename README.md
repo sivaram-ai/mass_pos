@@ -153,6 +153,12 @@ services and anything else whose stock is never counted. It only matters when *R
 the stock says you do not have* is ticked in Settings: items with this box ticked are the exception
 to that rule, and the list shows them as "not counted".
 
+**Goods received** asks two more things, both optional: the **buying price** — what one unit cost
+you, with the total shown back as you type it — and the **vendor** it came from, which is suggested
+from whoever you have taken deliveries from before. Both are kept against that delivery for good,
+so what you paid in March is still answerable in December whatever the item is priced at now, and
+both show up in the history. Leave them empty and you are never asked again.
+
 **History (F6)** answers "why does it say four when there are six on the shelf". On Products or
 Stock, press **F6** on the item you are on: every movement ever recorded against it, newest first —
 what came in, what sold and on which bill, what came back, the damage, and the corrections somebody

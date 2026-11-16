@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { api, fieldErrorsOf, messageOfFailure, milliFromUnits, quantity, rupees } from '../api'
+import { api, fieldErrorsOf, messageOfFailure, milliFromUnits, paiseFromRupees, quantity, rupees } from '../api'
 import type { StockRow } from '../types'
 import {
   Banner, Button, Empty, errorFor, Field, inputClass, KeyBox, Modal, Panel, smallInputClass,
@@ -362,7 +362,24 @@ function MovementDialog({ movement, onClose, onDone, onToast }: {
 }) {
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
+  const [price, setPrice] = useState('')
+  const [vendor, setVendor] = useState('')
+  const [vendorsSoFar, setVendorsSoFar] = useState<string[]>([])
   const [errors, setErrors] = useState<{ message: string; fields: Record<string, string> } | null>(null)
+  const arriving = movement.kind === 'receipts'
+  // Shown back as a total while it is typed, because that is the figure on the delivery note and
+  // the one worth checking: a price per unit entered as the whole lorry is a quiet, expensive slip.
+  const buying = paiseFromRupees(price)
+  const milliNow = milliFromUnits(amount)
+
+  // Who the shop has had goods from before. Only when something is arriving, and quietly: a shop
+  // that has never typed a vendor simply gets an empty list and a plain box.
+  useEffect(() => {
+    if (!arriving) {
+      return
+    }
+    api.get<string[]>('/api/stock/vendors').then(setVendorsSoFar).catch(() => setVendorsSoFar([]))
+  }, [arriving])
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -375,7 +392,15 @@ function MovementDialog({ movement, onClose, onDone, onToast }: {
     try {
       const body = movement.kind === 'adjustments'
         ? { productId: movement.row.productId, deltaMilli: milli, note }
-        : { productId: movement.row.productId, quantityMilli: Math.abs(milli), note }
+        : arriving
+          ? {
+            productId: movement.row.productId,
+            quantityMilli: Math.abs(milli),
+            note,
+            buyingPricePaise: paiseFromRupees(price),
+            vendorName: vendor.trim(),
+          }
+          : { productId: movement.row.productId, quantityMilli: Math.abs(milli), note }
       await api.post(`/api/stock/${movement.kind}`, body)
       onToast({ tone: 'good', text: `Stock updated for ${movement.row.name}` })
       onDone()
@@ -399,7 +424,29 @@ function MovementDialog({ movement, onClose, onDone, onToast }: {
           <input className={`${inputClass} num text-lg`} inputMode="decimal" autoFocus value={amount}
                  onChange={(event) => setAmount(event.target.value)} />
         </Field>
-        <Field label="Note" hint="Supplier, invoice number, reason" error={errorFor(errors?.fields ?? {}, 'note')}>
+        {arriving && (
+          <div className="grid grid-cols-2 gap-3">
+            <Field
+              label="Buying price"
+              hint={buying > 0 && milliNow > 0
+                ? `${quantity(milliNow)} × ${rupees(buying)} = ${rupees(Math.round(milliNow * buying / 1000))}`
+                : 'What one costs you. Leave it empty if you do not track this.'}
+              error={errorFor(errors?.fields ?? {}, 'buyingPricePaise')}
+            >
+              <input className={`${inputClass} num`} inputMode="decimal" placeholder="0.00" value={price}
+                     onChange={(event) => setPrice(event.target.value)} />
+            </Field>
+            <Field label="Vendor" hint="Who it came from" error={errorFor(errors?.fields ?? {}, 'vendorName')}>
+              <input className={inputClass} list="vendors-so-far" value={vendor} autoComplete="off"
+                     onChange={(event) => setVendor(event.target.value)} />
+              <datalist id="vendors-so-far">
+                {vendorsSoFar.map((name) => <option key={name} value={name} />)}
+              </datalist>
+            </Field>
+          </div>
+        )}
+        <Field label="Note" hint={arriving ? 'Invoice number, lorry, anything worth keeping' : 'Reason'}
+               error={errorFor(errors?.fields ?? {}, 'note')}>
           <input className={inputClass} value={note} onChange={(event) => setNote(event.target.value)} />
         </Field>
         <div className="flex justify-end gap-2">

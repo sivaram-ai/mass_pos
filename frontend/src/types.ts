@@ -98,6 +98,10 @@ export interface StockMovement {
   counterCode: string
   by: string
   note: string
+  /** What one unit cost, on goods arriving; 0 on everything else. */
+  buyingPricePaise: number
+  /** Who the goods came from, as it was typed when they arrived. */
+  vendorName: string
 }
 
 export interface StockRow {

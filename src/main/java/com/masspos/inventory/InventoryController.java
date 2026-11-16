@@ -8,6 +8,7 @@ import com.masspos.user.UserRole;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -55,6 +56,19 @@ public class InventoryController {
     public record AdjustmentRequest(@NotNull UUID productId, long deltaMilli, @Size(max = 200) String note) {
     }
 
+    /**
+     * Goods arriving. The price and the vendor are optional: a shop that does not track what it
+     * pays leaves them alone and is never asked again, which is why neither is {@code @NotNull}.
+     *
+     * @param buyingPricePaise what one unit cost, not what the delivery cost - the figure a
+     *                         shopkeeper knows and checks against the next delivery
+     */
+    public record ReceiptRequest(@NotNull UUID productId, @Positive long quantityMilli,
+                                 @Size(max = 200) String note,
+                                 @PositiveOrZero long buyingPricePaise,
+                                 @Size(max = 120) String vendorName) {
+    }
+
 
     /**
      * Stock on hand for every product the shop still has, valued at the current selling price.
@@ -97,9 +111,17 @@ public class InventoryController {
     @PostMapping("/receipts")
     @RequiresRole({UserRole.MANAGER})
     @ResponseStatus(HttpStatus.CREATED)
-    public StockRow receive(@Valid @RequestBody MovementRequest request) {
-        inventory.receive(request.productId(), request.quantityMilli(), request.note());
+    public StockRow receive(@Valid @RequestBody ReceiptRequest request) {
+        inventory.receive(request.productId(), request.quantityMilli(), request.note(),
+                request.buyingPricePaise(), request.vendorName());
         return rowFor(request.productId());
+    }
+
+    /** Who this shop has had goods from before, so the vendor box suggests instead of asking. */
+    @GetMapping("/vendors")
+    @RequiresRole({UserRole.MANAGER, UserRole.AUDITOR})
+    public List<String> vendors() {
+        return inventory.vendorsSoFar();
     }
 
     @PostMapping("/adjustments")

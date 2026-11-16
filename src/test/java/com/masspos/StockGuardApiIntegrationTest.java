@@ -171,6 +171,45 @@ class StockGuardApiIntegrationTest {
         }
     }
 
+    /**
+     * What a delivery cost and who it came from, kept on the movement itself. An item has one
+     * price now; a shop has a different delivery every week, and "what did we pay for these" is a
+     * question about the delivery.
+     */
+    @Test
+    void keepsWhatADeliveryCostAndWhoItCameFrom() throws Exception {
+        String productId = newProduct("GUARD-8", "Ghee tin", false);
+
+        call(post("/api/stock/receipts"), managerToken, """
+                {"productId":"%s","quantityMilli":6000,"note":"Lorry 44",
+                 "buyingPricePaise":48000,"vendorName":"Kumar Traders"}"""
+                .formatted(productId), status().isCreated());
+
+        JsonNode arrived = call(get("/api/stock/history?productId=" + productId), managerToken, null,
+                status().isOk()).get(0);
+        assertThat(arrived.get("buyingPricePaise").asLong()).isEqualTo(48_000);
+        assertThat(arrived.get("vendorName").asText()).isEqualTo("Kumar Traders");
+        assertThat(arrived.get("note").asText()).isEqualTo("Lorry 44");
+
+        assertThat(call(get("/api/stock/vendors"), managerToken, null, status().isOk()).toString())
+                .as("offered back the next time somebody takes a delivery in")
+                .contains("Kumar Traders");
+    }
+
+    /** And a shop that does not track what it pays is never made to: both are optional. */
+    @Test
+    void takesADeliveryInWithNoPriceAndNoVendor() throws Exception {
+        String productId = newProduct("GUARD-9", "Salt 1kg", false);
+
+        receive(productId, 4_000);
+
+        JsonNode arrived = call(get("/api/stock/history?productId=" + productId), managerToken, null,
+                status().isOk()).get(0);
+        assertThat(arrived.get("buyingPricePaise").asLong()).isZero();
+        assertThat(arrived.get("vendorName").asText()).isEmpty();
+        assertThat(arrived.get("quantityDeltaMilli").asLong()).isEqualTo(4_000);
+    }
+
     private void receive(String productId, long quantityMilli) throws Exception {
         call(post("/api/stock/receipts"), managerToken, """
                 {"productId":"%s","quantityMilli":%d,"note":"Opening"}"""

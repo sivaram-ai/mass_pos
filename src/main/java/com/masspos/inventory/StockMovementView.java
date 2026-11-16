@@ -21,10 +21,14 @@ import java.util.UUID;
  * @param note              what the movement was for, in the words of whoever recorded it. Sales,
  *                          returns and cancellations name their document here, which is how the
  *                          screen answers "which bill took these five off".
+ * @param buyingPricePaise  what one unit cost, on goods arriving; zero on everything else, and on
+ *                          deliveries taken before anybody was asked for a price
+ * @param vendorName        who the goods came from, as it was typed when they arrived
  */
 public record StockMovementView(UUID id, Instant occurredAt, LedgerEventType type, long quantityDeltaMilli,
                                 Long balanceAfterMilli, UUID productId, String sku, String name, UnitOfMeasure unit,
-                                String counterCode, String by, String note) {
+                                String counterCode, String by, String note,
+                                long buyingPricePaise, String vendorName) {
 
     static StockMovementView of(InventoryLedgerEvent event, Long balanceAfterMilli) {
         Product product = event.getProduct();
@@ -32,6 +36,7 @@ public record StockMovementView(UUID id, Instant occurredAt, LedgerEventType typ
                 event.getQuantityDeltaMilli(), balanceAfterMilli, product.getId(), product.getSku(),
                 product.getName(), product.getUnit(), event.getTerminalCode(),
                 event.getRecordedBy() == null ? "" : event.getRecordedBy().getDisplayName(),
-                event.getNote() == null ? "" : event.getNote());
+                event.getNote() == null ? "" : event.getNote(),
+                event.getBuyingPricePaise(), event.getVendorName());
     }
 }

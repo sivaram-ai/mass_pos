@@ -44,6 +44,14 @@ public interface InventoryLedgerRepository extends JpaRepository<InventoryLedger
             """)
     List<Object[]> movedBy(@Param("referenceId") UUID referenceId, @Param("type") LedgerEventType type);
 
+    /** Everyone this shop has already had goods from, so the box can suggest rather than ask. */
+    @Query("""
+            select distinct e.vendorName from InventoryLedgerEvent e
+            where e.vendorName <> ''
+            order by e.vendorName
+            """)
+    List<String> vendorsSoFar();
+
     List<InventoryLedgerEvent> findByProductIdOrderByOccurredAtDesc(UUID productId);
 
     List<InventoryLedgerEvent> findByOccurredAtBetweenOrderByOccurredAtDesc(Instant from, Instant to);

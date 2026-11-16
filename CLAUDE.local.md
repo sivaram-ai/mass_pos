@@ -29,6 +29,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3Q | Signing in where that account is already open on another till stops and says where - counter, number, floor and when - and offers Go back or sign that one out and carry on here, chosen with the arrow keys and Enter | Done: 368 tests green, driven in the browser |
 | 3R | Nothing from inside the program reaches a counter's screen: every refusal is a sentence written for a shop, and the exception, its stack, the SQL, the paths and the ids go to the log. `ApiExceptionHandler.forTheScreen` is the gate; `api.ts` guards the browser end | Done: 377 tests green, refusals driven against a running till |
 | 3S | A counter's settings are reachable while nobody is signed in: the sign-in screen opens, from its corner, the very page the counter serves itself at first start, so the connection mode, the server's address and which of the shop's counters this machine is can all be changed without closing the program. A counter that is already billing is given a way back that changes nothing | Done: 385 tests green, driven in the browser |
+| 3X | Goods received asks what a delivery cost and who it came from, both optional, both kept on the movement for good and shown in the history; the vendor box suggests from whoever the shop has had deliveries from before | Done: 396 tests green, driven in the browser against an upgraded database |
 | 3W | Where a count came from: F6 on Products and Stock opens every movement ever recorded against the item - what came in, what sold, what came back, corrections and losses - each with the count after it, the till, the person and the time, searchable and orderable, or across the whole shop for the last 30 days | Done: 393 tests green, driven in the browser |
 | 3V | The stock count stops at empty: a sale takes off what the shelf has and no more, the bill still carries the full quantity, and cancelling puts back what was taken off rather than what was sold | Done: 391 tests green |
 | 3U | One bill per counter, not one per address: the bill on screen is kept by the print agent on that machine, so moving a counter from the cable to Wi-Fi comes back to the same bill instead of to a separate one the browser kept against each address | Done: 389 tests green, driven across two addresses in the browser |
@@ -210,6 +211,9 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
   - **Read-only, deliberately.** The ledger is append-only, which is what makes the count worth
     anything; a correction is made on the Stock screen and turns up here as its own line with
     whatever reason was typed against it.
+  - **The whole-shop view filtered to "Came in" is the goods received report** - every delivery
+    with its vendor, what it cost and who took it in, searchable by vendor. There is no second
+    screen for it, and there should not be one until purchase orders need somewhere of their own.
   - **A dialog focuses itself at once *and* again through a frame** (`useLayoutEffect` +
     `requestAnimationFrame`). At once, because F6 then F2 is one movement of a hand and a frame is
     long enough for both keys to arrive - the second would land on the screen behind. Again through
@@ -529,6 +533,25 @@ folder and everything under it, so that is the only copy that survives one.
   - A new immutable table, or a new fiscal or seller column on `Invoice`, must also be added to
     `AuditTrailGuard.FROZEN_INVOICE_COLUMNS`.
 - **Stock** is `SUM(quantity_delta_milli)` from the ledger. Never add a stock column.
+- **What a delivery cost and who it came from live on the movement** (`buying_price_paise`,
+  `vendor_name` on `inventory_ledger_event`), not on the item. An item has one price now; a shop
+  has a different delivery every week, and "what did we pay for these" is a question about the
+  delivery. Both are optional: a shop that does not track its buying prices leaves them alone.
+  - **Per unit, not per delivery.** It is the figure a shopkeeper knows and checks against the next
+    lorry, and the total is the quantity times it - which the dialog shows back as it is typed,
+    because a per-unit price entered as the whole delivery is a quiet, expensive slip.
+  - **The vendor is a name, not a reference**, and for the same reason the seller on an invoice is
+    a snapshot: a vendor renamed or removed later must not rewrite the history of what this shop
+    bought and from whom. When vendors become records of their own, an event keeps the name it was
+    recorded under. `GET /api/stock/vendors` offers back the distinct names already used, so the
+    box suggests rather than asks.
+  - **Both columns carry SQL defaults** (`bigint default 0`, `varchar(120) default ''`), which is
+    the only way a column reaches a populated table on SQLite.
+    `RestartOnExistingDatabaseTest.goodsThatArrivedBeforeAnybodyWasAskedWhatTheyCostStillCount`
+    drops them from a ledger that has a delivery in it, restarts, and proves the count that
+    delivery contributed has not moved.
+  - **Goods received has its own request record** (`ReceiptRequest`), because damages and
+    corrections are never asked a price or a vendor and should not carry fields they ignore.
 - **A product is never deleted for real** (`Product.delete`). `invoice_item`, `credit_note_item` and
   `inventory_ledger_event` all hold a foreign key to `product` and are append-only, so the row cannot
   go and the references cannot be rewritten. Delete therefore sets `deleted`, clears `active`, rewrites

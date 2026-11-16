@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { api, billDate, clockTime, messageOfFailure, quantity } from '../api'
+import { api, billDate, clockTime, messageOfFailure, quantity, rupees } from '../api'
 import type { StockMovement, StockMovementType } from '../types'
 import { Banner, Empty, KeyBox, Modal, smallInputClass } from '../components/ui'
 
@@ -126,7 +126,7 @@ export function StockHistory({ of, onClose }: { of: HistoryOf; onClose: () => vo
       if (!looking) {
         return true
       }
-      return `${row.name} ${row.sku} ${row.note} ${row.by} ${row.counterCode} ${WHAT[row.type]}`
+      return `${row.name} ${row.sku} ${row.note} ${row.by} ${row.counterCode} ${row.vendorName} ${WHAT[row.type]}`
         .toLowerCase().includes(looking)
     })
     const byTime = (a: StockMovement, b: StockMovement) => a.occurredAt.localeCompare(b.occurredAt)
@@ -333,7 +333,25 @@ export function StockHistory({ of, onClose }: { of: HistoryOf; onClose: () => vo
                     <td className="num py-1.5 text-right text-slate-500">
                       {row.balanceAfterMilli === null ? '—' : quantity(row.balanceAfterMilli)}
                     </td>
-                    <td className="truncate py-1.5 pl-3 text-slate-600" title={row.note}>{row.note || '—'}</td>
+                    {/* Who it came from and what it cost sit under the note rather than in columns
+                        of their own: they are only ever filled in on goods arriving, and a column
+                        that is empty on nine rows out of ten is a column nobody reads. */}
+                    <td className="py-1.5 pl-3 text-slate-600">
+                      <div className="truncate" title={row.note}>{row.note || '—'}</div>
+                      {(row.vendorName || row.buyingPricePaise > 0) && (
+                        <div className="truncate text-xs text-slate-400">
+                          {row.vendorName}
+                          {row.vendorName && row.buyingPricePaise > 0 && ' · '}
+                          {row.buyingPricePaise > 0 && (
+                            <span className="num">
+                              {rupees(row.buyingPricePaise)} each
+                              {' · '}
+                              {rupees(Math.round(Math.abs(row.quantityDeltaMilli) * row.buyingPricePaise / 1000))} in all
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </td>
                     <td className="truncate py-1.5 pr-2 text-right text-slate-500" title={row.by}>
                       {row.by || '—'}
                       {row.counterCode && <span className="num ml-1 text-xs text-slate-400">{row.counterCode}</span>}

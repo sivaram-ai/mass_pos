@@ -65,11 +65,41 @@ public class InventoryLedgerEvent extends BaseEntity {
     @Column(length = 200, updatable = false)
     private String note;
 
+    /**
+     * What the shop paid for one unit of what came in, in paise. Zero on everything that is not
+     * goods arriving, and on goods that arrived before anybody was asked for a price.
+     *
+     * <p>Per unit rather than per delivery: it is the figure a shopkeeper knows and checks against
+     * the next delivery, and the total is the quantity times it. Kept on the movement itself, so
+     * what a delivery cost is still answerable years later whatever the item is priced at now.
+     */
+    @Column(nullable = false, updatable = false, columnDefinition = "bigint default 0")
+    private long buyingPricePaise;
+
+    /**
+     * Who the goods came from, as it was typed at the time.
+     *
+     * <p>A name and not a reference, deliberately, and the same reasoning as the seller on an
+     * invoice: this is a snapshot of what was true when the delivery arrived. A vendor renamed or
+     * removed later must not rewrite the history of what the shop bought and from whom. When
+     * vendors become records of their own, an event keeps the name it was recorded under.
+     */
+    @Size(max = 120)
+    @Column(length = 120, nullable = false, updatable = false, columnDefinition = "varchar(120) default ''")
+    private String vendorName = "";
+
     protected InventoryLedgerEvent() {
     }
 
     public InventoryLedgerEvent(Product product, LedgerEventType type, long quantityDeltaMilli, UUID referenceId,
                                 String terminalCode, Instant occurredAt, User recordedBy, String note) {
+        this(product, type, quantityDeltaMilli, referenceId, terminalCode, occurredAt, recordedBy, note, 0, "");
+    }
+
+    /** Goods arriving, which are the only movement anybody is asked a price or a vendor for. */
+    public InventoryLedgerEvent(Product product, LedgerEventType type, long quantityDeltaMilli, UUID referenceId,
+                                String terminalCode, Instant occurredAt, User recordedBy, String note,
+                                long buyingPricePaise, String vendorName) {
         type.checkDelta(quantityDeltaMilli);
         this.product = product;
         this.type = type;
@@ -79,6 +109,8 @@ public class InventoryLedgerEvent extends BaseEntity {
         this.occurredAt = occurredAt;
         this.recordedBy = recordedBy;
         this.note = note;
+        this.buyingPricePaise = Math.max(0, buyingPricePaise);
+        this.vendorName = vendorName == null ? "" : vendorName.trim();
     }
 
     public Product getProduct() {
@@ -107,6 +139,14 @@ public class InventoryLedgerEvent extends BaseEntity {
 
     public User getRecordedBy() {
         return recordedBy;
+    }
+
+    public long getBuyingPricePaise() {
+        return buyingPricePaise;
+    }
+
+    public String getVendorName() {
+        return vendorName == null ? "" : vendorName;
     }
 
     public String getNote() {
