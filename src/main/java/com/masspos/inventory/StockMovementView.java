@@ -26,8 +26,8 @@ import java.util.UUID;
  * @param vendorName        who the goods came from, as it was typed when they arrived
  */
 public record StockMovementView(UUID id, Instant occurredAt, LedgerEventType type, long quantityDeltaMilli,
-                                Long balanceAfterMilli, UUID productId, String sku, String name, UnitOfMeasure unit,
-                                String counterCode, String by, String note,
+                                Long balanceAfterMilli, UUID itemId, String itemCode, String name,
+                                UnitOfMeasure unit, String counterCode, String by, String note,
                                 long buyingPricePaise, String vendorName) {
 
     static StockMovementView of(InventoryLedgerEvent event, Long balanceAfterMilli) {

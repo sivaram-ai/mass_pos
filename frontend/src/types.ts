@@ -78,21 +78,31 @@ export interface Product {
   stockMilli: number
 }
 
-/** Every kind of movement the ledger records. The screen's own words for them are in StockHistory. */
+/** Every kind of movement the stock ledger records. The shop's own words are in StockHistory. */
 export type StockMovementType =
   | 'OPENING_STOCK' | 'PURCHASE_RECEIPT' | 'PURCHASE_RETURN' | 'SALE' | 'SALE_RETURN'
   | 'SALE_CANCELLED' | 'DAMAGE' | 'TRANSFER_IN' | 'TRANSFER_OUT' | 'ADJUSTMENT'
 
-/** One movement in an item's history. */
+/** And the store behind the kitchen, which is never sold from and does get cooked with. */
+export type RawMovementType =
+  | 'OPENING_STOCK' | 'PURCHASE' | 'CONSUMED' | 'WASTAGE' | 'RETURNED_TO_VENDOR' | 'ADJUSTMENT'
+
+export type MovementType = StockMovementType | RawMovementType
+
+/**
+ * One movement in an item's history, on the shelf or in the store. Both ends send the same shape
+ * on purpose: the question being asked of them - why does it say four - is the same question, so
+ * one screen answers it.
+ */
 export interface StockMovement {
   id: string
   occurredAt: string
-  type: StockMovementType
+  type: MovementType
   quantityDeltaMilli: number
-  /** What the shelf held once this was applied, or null over a window across every item. */
+  /** What was held once this was applied, or null over a window across every item. */
   balanceAfterMilli: number | null
-  productId: string
-  sku: string
+  itemId: string
+  itemCode: string
   name: string
   unit: Unit
   counterCode: string
@@ -102,6 +112,20 @@ export interface StockMovement {
   buyingPricePaise: number
   /** Who the goods came from, as it was typed when they arrived. */
   vendorName: string
+}
+
+/** Something the shop buys and uses but never sells: butter, onions, oil, carrier bags. */
+export interface RawMaterial {
+  id: string
+  code: string
+  name: string
+  unit: Unit
+  inStoreMilli: number
+  /** Tell me before it runs below this; 0 means nobody is watching it. */
+  reorderLevelMilli: number
+  active: boolean
+  /** At or below the level the shop asked to be told about. */
+  lowOnIt: boolean
 }
 
 export interface StockRow {

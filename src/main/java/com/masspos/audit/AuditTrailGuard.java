@@ -62,6 +62,9 @@ public class AuditTrailGuard {
             // Stock is the sum of ledger events; corrections are new compensating events.
             forbid("inventory_ledger_event", "UPDATE");
             forbid("inventory_ledger_event", "DELETE");
+            // The store behind the kitchen is counted the same way, so it is frozen the same way.
+            forbid("raw_material_ledger_event", "UPDATE");
+            forbid("raw_material_ledger_event", "DELETE");
 
             // GST: an issued invoice is cancelled, never deleted or edited.
             forbid("invoice", "DELETE");

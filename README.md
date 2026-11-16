@@ -153,6 +153,25 @@ services and anything else whose stock is never counted. It only matters when *R
 the stock says you do not have* is ticked in Settings: items with this box ticked are the exception
 to that rule, and the list shows them as "not counted".
 
+### Raw materials
+
+**Raw materials** is the store behind the kitchen: butter, onions, oil, flour, spices, carrier
+bags — everything the shop buys and uses but never sells. It sits in the menu beside Stock and
+works the same way, so there is nothing new to learn: the cursor starts in the list, ↑ ↓ choose a
+material, ← → choose **Bought · Used · Wasted · Correct · Edit**, and Enter does it. **F3** adds
+one, **F2** searches, **Delete** removes, and **F6** shows where its count came from.
+
+A purchase asks the buying price and the vendor, exactly as Goods received does. Give a material a
+*tell me below* level and the list marks it when the store runs down to it, so it gets onto the
+next order.
+
+**Raw materials never appear when billing.** They are kept apart from the catalogue entirely
+rather than hidden from it, so a cashier typing "on" is never offered Onions among the things they
+can ring up. The store's count stops at empty too: asking to use 30 kg when there are 25 takes off
+25 and says so.
+
+### Goods received
+
 **Goods received** asks two more things, both optional: the **buying price** — what one unit cost
 you, with the total shown back as you type it — and the **vendor** it came from, which is suggested
 from whoever you have taken deliveries from before. Both are kept against that delivery for good,

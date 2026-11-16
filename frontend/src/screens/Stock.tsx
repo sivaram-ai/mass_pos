@@ -322,7 +322,7 @@ export default function Stock({ onToast }: { onToast: Toast }) {
 
       {historyOpen && (
         <StockHistory
-          of={current ? { productId: current.productId, sku: current.sku, name: current.name } : null}
+          of={current ? { itemId: current.productId, itemCode: current.sku, name: current.name } : null}
           onClose={() => {
             setHistoryOpen(false)
             requestAnimationFrame(() => list.current?.focus())

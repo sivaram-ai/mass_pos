@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { api, billDate, clockTime, messageOfFailure, quantity, rupees } from '../api'
-import type { StockMovement, StockMovementType } from '../types'
+import type { MovementType, StockMovement } from '../types'
 import { Banner, Empty, KeyBox, Modal, smallInputClass } from '../components/ui'
 
 const SEARCH_KEY = 'F2'
@@ -15,31 +15,37 @@ const SHOP_DAYS = 30
  * The shop's own word for each kind of movement. The server sends the ledger's name; a cashier
  * reads "Sold", not "SALE", and "Correction", not "ADJUSTMENT".
  */
-const WHAT: Record<StockMovementType, string> = {
+const WHAT: Record<MovementType, string> = {
   OPENING_STOCK: 'Opening stock',
   PURCHASE_RECEIPT: 'Received',
+  PURCHASE: 'Bought',
   PURCHASE_RETURN: 'Sent back',
+  RETURNED_TO_VENDOR: 'Sent back',
   SALE: 'Sold',
   SALE_RETURN: 'Returned',
   SALE_CANCELLED: 'Bill cancelled',
+  CONSUMED: 'Used',
   DAMAGE: 'Damage',
+  WASTAGE: 'Wasted',
   TRANSFER_IN: 'Transfer in',
   TRANSFER_OUT: 'Transfer out',
   ADJUSTMENT: 'Correction',
 }
 
 /**
- * The kinds somebody actually asks for, each gathering the ledger names that mean it. "Why is this
- * four" is answered by what came in, what went out on bills, what came back, what was written off
- * and what somebody corrected by hand - not by ten separate names for those five things.
+ * The kinds somebody actually asks for, each gathering the names that mean it. "Why is this four"
+ * is answered by what came in, what went out, what came back and what somebody corrected - not by
+ * a dozen separate names for those few things. The shelf and the store have different vocabularies
+ * underneath and are asked the same questions, so one list covers both: a kind that cannot happen
+ * on the one you are looking at simply never matches.
  */
-const KINDS: { label: string; types: StockMovementType[] }[] = [
+const KINDS: { label: string; types: MovementType[] }[] = [
   { label: 'Everything', types: [] },
-  { label: 'Came in', types: ['PURCHASE_RECEIPT', 'OPENING_STOCK', 'TRANSFER_IN'] },
-  { label: 'Sold', types: ['SALE'] },
+  { label: 'Came in', types: ['PURCHASE_RECEIPT', 'PURCHASE', 'OPENING_STOCK', 'TRANSFER_IN'] },
+  { label: 'Went out', types: ['SALE', 'CONSUMED'] },
   { label: 'Came back', types: ['SALE_RETURN', 'SALE_CANCELLED'] },
   { label: 'Corrections', types: ['ADJUSTMENT'] },
-  { label: 'Losses', types: ['DAMAGE', 'PURCHASE_RETURN', 'TRANSFER_OUT'] },
+  { label: 'Losses', types: ['DAMAGE', 'WASTAGE', 'PURCHASE_RETURN', 'RETURNED_TO_VENDOR', 'TRANSFER_OUT'] },
 ]
 
 type Order = 'newest' | 'oldest' | 'biggest'
@@ -51,7 +57,19 @@ const ORDERS: { key: Order; label: string }[] = [
 ]
 
 /** The item a history was opened on, or null for the whole shop. */
-export type HistoryOf = { productId: string; sku: string; name: string } | null
+export type HistoryOf = { itemId: string; itemCode: string; name: string } | null
+
+/**
+ * Which store is being asked. The two have their own tables, their own words for what happened to
+ * them and their own screens; what they share is this one, because "why does it say four" is the
+ * same question wherever it is asked.
+ */
+export type HistorySource = 'stock' | 'raw'
+
+const SOURCES: Record<HistorySource, { path: string; of: string; what: string }> = {
+  stock: { path: '/api/stock/history', of: 'productId', what: 'Stock history' },
+  raw: { path: '/api/raw-materials/history', of: 'materialId', what: 'Store history' },
+}
 
 /**
  * Where a count came from.
@@ -69,7 +87,11 @@ export type HistoryOf = { productId: string; sku: string; name: string } | null
  * and right choose what kind of movement to show, F2 searches, F3 swaps between this item and the
  * whole shop, F4 orders. Esc closes and hands the cursor back where it came from.
  */
-export function StockHistory({ of, onClose }: { of: HistoryOf; onClose: () => void }) {
+export function StockHistory({ of, source = 'stock', onClose }: {
+  of: HistoryOf
+  source?: HistorySource
+  onClose: () => void
+}) {
   const [movements, setMovements] = useState<StockMovement[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [wholeShop, setWholeShop] = useState(of === null)
@@ -84,16 +106,17 @@ export function StockHistory({ of, onClose }: { of: HistoryOf; onClose: () => vo
   const load = useCallback(() => {
     setMovements(null)
     setError(null)
+    const where = SOURCES[source]
     const asking = wholeShop || !of
-      ? `/api/stock/history?days=${SHOP_DAYS}`
-      : `/api/stock/history?productId=${of.productId}`
+      ? `${where.path}?days=${SHOP_DAYS}`
+      : `${where.path}?${where.of}=${of.itemId}`
     api.get<StockMovement[]>(asking)
       .then(setMovements)
       .catch((failure) => {
         setMovements([])
-        setError(messageOfFailure(failure, 'Could not read the stock history'))
+        setError(messageOfFailure(failure, 'Could not read the history'))
       })
-  }, [of, wholeShop])
+  }, [of, wholeShop, source])
 
   useEffect(load, [load])
 
@@ -126,8 +149,8 @@ export function StockHistory({ of, onClose }: { of: HistoryOf; onClose: () => vo
       if (!looking) {
         return true
       }
-      return `${row.name} ${row.sku} ${row.note} ${row.by} ${row.counterCode} ${row.vendorName} ${WHAT[row.type]}`
-        .toLowerCase().includes(looking)
+      return `${row.name} ${row.itemCode} ${row.note} ${row.by} ${row.counterCode} ${row.vendorName}`
+        .concat(' ', WHAT[row.type]).toLowerCase().includes(looking)
     })
     const byTime = (a: StockMovement, b: StockMovement) => a.occurredAt.localeCompare(b.occurredAt)
     return [...rows].sort((a, b) => {
@@ -186,8 +209,8 @@ export function StockHistory({ of, onClose }: { of: HistoryOf; onClose: () => vo
   }
 
   const title = wholeShop || !of
-    ? `Stock history · the whole shop, last ${SHOP_DAYS} days`
-    : `Stock history · ${of.name}`
+    ? `${SOURCES[source].what} · everything, last ${SHOP_DAYS} days`
+    : `${SOURCES[source].what} · ${of.name}`
 
   return (
     <Modal title={title} size="5xl" onClose={onClose}>
@@ -224,7 +247,7 @@ export function StockHistory({ of, onClose }: { of: HistoryOf; onClose: () => vo
               }}
               className="whitespace-nowrap rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
             >
-              {wholeShop ? `Just ${of.sku}` : 'The whole shop'} <kbd>{SCOPE_KEY}</kbd>
+              {wholeShop ? `Just ${of.itemCode}` : 'The whole shop'} <kbd>{SCOPE_KEY}</kbd>
             </button>
           )}
           <button
@@ -261,7 +284,7 @@ export function StockHistory({ of, onClose }: { of: HistoryOf; onClose: () => vo
         ref={list}
         tabIndex={0}
         role="grid"
-        aria-label="Stock history"
+        aria-label="Movement history"
         onKeyDown={onListKeyDown}
         className="max-h-[60vh] overflow-auto rounded-md outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
       >
@@ -322,8 +345,8 @@ export function StockHistory({ of, onClose }: { of: HistoryOf; onClose: () => vo
                       <span className="num ml-2 text-xs text-slate-400">{clockTime(when)}</span>
                     </td>
                     {(wholeShop || !of) && (
-                      <td className="truncate py-1.5 pr-2" title={`${row.sku} · ${row.name}`}>
-                        <span className="num text-xs text-slate-400">{row.sku}</span> {row.name}
+                      <td className="truncate py-1.5 pr-2" title={`${row.itemCode} · ${row.name}`}>
+                        <span className="num text-xs text-slate-400">{row.itemCode}</span> {row.name}
                       </td>
                     )}
                     <td className="py-1.5">{WHAT[row.type]}</td>

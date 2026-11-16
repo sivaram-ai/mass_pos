@@ -11,6 +11,7 @@ import Billing from './screens/Billing'
 import type { BillingRequest } from './screens/Billing'
 import Products from './screens/Products'
 import Stock from './screens/Stock'
+import RawMaterials from './screens/RawMaterials'
 import Invoices from './screens/Invoices'
 import Reports from './screens/Reports'
 import Settings from './screens/Settings'
@@ -21,7 +22,8 @@ import License, { LicenseBanner } from './screens/License'
 import { Banner, isModalOpen } from './components/ui'
 import { MENU_KEY, useScreenKeys } from './shortcuts'
 
-type Screen = 'billing' | 'products' | 'stock' | 'invoices' | 'reports' | 'users' | 'theme' | 'settings' | 'license'
+type Screen = 'billing' | 'products' | 'stock' | 'raw' | 'invoices' | 'reports' | 'users' | 'theme'
+  | 'settings' | 'license'
 
 const SCREEN_KEY = 'masspos.screen'
 
@@ -63,6 +65,9 @@ const SCREENS: { id: Screen; label: string; roles: Role[] }[] = [
   { id: 'invoices', label: 'Bills', roles: ['CASHIER', 'MANAGER', 'AUDITOR'] },
   { id: 'products', label: 'Products', roles: ['MANAGER'] },
   { id: 'stock', label: 'Stock', roles: ['MANAGER'] },
+  // The store behind the kitchen. A manager's screen, and an auditor may read it, exactly as
+  // stock is: nothing here is part of taking a bill.
+  { id: 'raw', label: 'Raw materials', roles: ['MANAGER', 'AUDITOR'] },
   { id: 'reports', label: 'Reports', roles: ['MANAGER', 'AUDITOR'] },
   { id: 'users', label: 'Staff', roles: ['MANAGER', 'AUDITOR'] },
   // Everyone may look at the shop's theme; only an administrator may change it (the screen enforces
@@ -522,6 +527,7 @@ export default function App() {
         )}
         {current === 'products' && <Products onToast={setToast} />}
         {current === 'stock' && <Stock onToast={setToast} />}
+        {current === 'raw' && <RawMaterials onToast={setToast} />}
         {current === 'reports' && <Reports onToast={setToast} />}
         {current === 'users' && <Users role={user.role} onToast={setToast} />}
         {current === 'theme' && (

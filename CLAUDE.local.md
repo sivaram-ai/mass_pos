@@ -29,6 +29,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3Q | Signing in where that account is already open on another till stops and says where - counter, number, floor and when - and offers Go back or sign that one out and carry on here, chosen with the arrow keys and Enter | Done: 368 tests green, driven in the browser |
 | 3R | Nothing from inside the program reaches a counter's screen: every refusal is a sentence written for a shop, and the exception, its stack, the SQL, the paths and the ids go to the log. `ApiExceptionHandler.forTheScreen` is the gate; `api.ts` guards the browser end | Done: 377 tests green, refusals driven against a running till |
 | 3S | A counter's settings are reachable while nobody is signed in: the sign-in screen opens, from its corner, the very page the counter serves itself at first start, so the connection mode, the server's address and which of the shop's counters this machine is can all be changed without closing the program. A counter that is already billing is given a way back that changes nothing | Done: 385 tests green, driven in the browser |
+| 3Y | Raw materials: the store behind the kitchen in a module of its own - butter, onions, oil, carrier bags - bought, used, wasted and corrected on a screen worked exactly like Stock, with its own table, its own ledger and its own History (F6). Never in the billing search, by construction | Done: 402 tests green, driven in the browser |
 | 3X | Goods received asks what a delivery cost and who it came from, both optional, both kept on the movement for good and shown in the history; the vendor box suggests from whoever the shop has had deliveries from before | Done: 396 tests green, driven in the browser against an upgraded database |
 | 3W | Where a count came from: F6 on Products and Stock opens every movement ever recorded against the item - what came in, what sold, what came back, corrections and losses - each with the count after it, the till, the person and the time, searchable and orderable, or across the whole shop for the last 30 days | Done: 393 tests green, driven in the browser |
 | 3V | The stock count stops at empty: a sale takes off what the shelf has and no more, the bill still carries the full quantity, and cancelling puts back what was taken off rather than what was sold | Done: 391 tests green |
@@ -533,6 +534,35 @@ folder and everything under it, so that is the only copy that survives one.
   - A new immutable table, or a new fiscal or seller column on `Invoice`, must also be added to
     `AuditTrailGuard.FROZEN_INVOICE_COLUMNS`.
 - **Stock** is `SUM(quantity_delta_milli)` from the ledger. Never add a stock column.
+- **Raw materials are a table of their own, not a flag on `Product`** (`com.masspos.rawmaterial`).
+  Butter, onions, oil, carrier bags: what the shop buys and uses and never sells.
+  - **The billing grid is the reason.** A cashier typing "on" must never be offered Onions among
+    the things they can ring up, and the surest way to see to that is for raw materials never to
+    be in the catalogue at all - not filtered out of it by a query somebody later forgets. Nothing
+    a product needs means anything here either: no selling price, no MRP, no GST rate, no HSN.
+  - **Its own ledger too** (`raw_material_ledger_event`). `inventory_ledger_event.product_id` is
+    NOT NULL with an FK to the catalogue and the table is append-only on every till in the field;
+    making it nullable would be an ALTER on a populated table, which SQLite will not do. A new
+    table it takes. Registered in `AuditTrailGuard` like the other one - **a new append-only table
+    must be, or it is only append-only in Hibernate.**
+  - **Its own movement enum** (`RawMaterialMovement`), and this is the subtle one. Hibernate writes
+    `@Enumerated(STRING)` as a CHECK constraint listing every value, on the table *and* its `_aud`
+    twin, and SQLite cannot alter one. Adding CONSUMED to the shared `LedgerEventType` would have
+    put a value in a list every shipped till would then refuse. A new enum on a new table carries
+    its own constraint. It also drops three values that can never occur here (nothing is sold) and
+    adds the one a kitchen lives by: **CONSUMED**, which is where most of an onion goes.
+  - **The store stops at empty, like the shelf** (`RawMaterialService.takeOut`), and what was
+    actually taken off comes straight back on the view, so the screen can say "0 KGS in the store"
+    to somebody who typed 30 when there were 25.
+  - **One History screen serves both** (`StockHistory`, `source="stock" | "raw"`). The two have
+    different tables and different words for what happened to them; what they share is the question
+    - why does it say four - so `RawMaterialMovementView` is field-for-field the same shape as
+    `StockMovementView`, down to `itemId` and `itemCode` rather than `productId` and `sku`.
+  - **A derived query name can take the whole application down at startup.**
+    `findByRawMaterialIdOrderByOccurredAtDesc` read `rawMaterialId` as one attribute, which the
+    entity does not have, so the repository bean refused to be created and every context failed.
+    A convenience `getRawMaterialId()` getter was what made Spring Data believe in it. The finders
+    are spelled out with `@Query` now, and that getter is gone.
 - **What a delivery cost and who it came from live on the movement** (`buying_price_paise`,
   `vendor_name` on `inventory_ledger_event`), not on the item. An item has one price now; a shop
   has a different delivery every week, and "what did we pay for these" is a question about the
