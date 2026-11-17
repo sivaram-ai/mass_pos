@@ -94,10 +94,10 @@ public class InventoryService {
      */
     @Transactional
     public InventoryLedgerEvent receive(UUID productId, long quantityMilli, String note,
-                                        long buyingPricePaise, String vendorName) {
+                                        long buyingPricePaise, String vendorName, UUID vendorId) {
         Product product = productOrRefuse(productId);
         return ledger.save(new InventoryLedgerEvent(product, LedgerEventType.PURCHASE_RECEIPT, quantityMilli, null,
-                counter.code(), Instant.now(), currentUser(), note, buyingPricePaise, vendorName));
+                counter.code(), Instant.now(), currentUser(), note, buyingPricePaise, vendorName, vendorId));
     }
 
     /** Every vendor this shop has already received goods from, for the box to suggest from. */

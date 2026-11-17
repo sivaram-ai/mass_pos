@@ -73,13 +73,18 @@ public class RawMaterialLedgerEvent extends BaseEntity {
     @Column(length = 120, nullable = false, updatable = false)
     private String vendorName = "";
 
+    /** The vendor on the shop's list, where it was one of them. Null is ordinary; see the shelf. */
+    @Column(name = "vendor_id", updatable = false)
+    private UUID vendorId;
+
     protected RawMaterialLedgerEvent() {
     }
 
     public RawMaterialLedgerEvent(RawMaterial rawMaterial, RawMaterialMovement type, long quantityDeltaMilli,
                                   String terminalCode, Instant occurredAt, User recordedBy, String note,
-                                  long buyingPricePaise, String vendorName) {
+                                  long buyingPricePaise, String vendorName, UUID vendorId) {
         type.checkDelta(quantityDeltaMilli);
+        this.vendorId = vendorId;
         this.rawMaterial = rawMaterial;
         this.type = type;
         this.quantityDeltaMilli = quantityDeltaMilli;
@@ -125,5 +130,9 @@ public class RawMaterialLedgerEvent extends BaseEntity {
 
     public String getVendorName() {
         return vendorName == null ? "" : vendorName;
+    }
+
+    public UUID getVendorId() {
+        return vendorId;
     }
 }

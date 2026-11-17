@@ -63,7 +63,7 @@ public class HoldController {
     @GetMapping
     @Transactional(readOnly = true)
     public List<HoldView> list() {
-        return holds.findByTerminalCodeOrderByCreatedAtDesc(counter.code()).stream().map(this::viewOf).toList();
+        return holds.heldOn(counter.code()).stream().map(this::viewOf).toList();
     }
 
     @PostMapping

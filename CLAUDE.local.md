@@ -29,6 +29,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3Q | Signing in where that account is already open on another till stops and says where - counter, number, floor and when - and offers Go back or sign that one out and carry on here, chosen with the arrow keys and Enter | Done: 368 tests green, driven in the browser |
 | 3R | Nothing from inside the program reaches a counter's screen: every refusal is a sentence written for a shop, and the exception, its stack, the SQL, the paths and the ids go to the log. `ApiExceptionHandler.forTheScreen` is the gate; `api.ts` guards the browser end | Done: 377 tests green, refusals driven against a running till |
 | 3S | A counter's settings are reachable while nobody is signed in: the sign-in screen opens, from its corner, the very page the counter serves itself at first start, so the connection mode, the server's address and which of the shop's counters this machine is can all be changed without closing the program. A counter that is already billing is given a way back that changes nothing | Done: 385 tests green, driven in the browser |
+| 3Z | Vendors: who the shop buys from, what it has had from them across both the shelf and the store, what it has paid and what it still owes. The vendor is chosen from a dropdown when goods arrive, deliveries taken before the list existed are found by name, and a payment waits for an administrator before it moves the balance | Done: 407 tests green, driven in the browser |
 | 3Y | Raw materials: the store behind the kitchen in a module of its own - butter, onions, oil, carrier bags - bought, used, wasted and corrected on a screen worked exactly like Stock, with its own table, its own ledger and its own History (F6). Never in the billing search, by construction | Done: 402 tests green, driven in the browser |
 | 3X | Goods received asks what a delivery cost and who it came from, both optional, both kept on the movement for good and shown in the history; the vendor box suggests from whoever the shop has had deliveries from before | Done: 396 tests green, driven in the browser against an upgraded database |
 | 3W | Where a count came from: F6 on Products and Stock opens every movement ever recorded against the item - what came in, what sold, what came back, corrections and losses - each with the count after it, the till, the person and the time, searchable and orderable, or across the whole shop for the last 30 days | Done: 393 tests green, driven in the browser |
@@ -292,7 +293,11 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 - **Services return views, not entities.** `SaleService` maps to `InvoiceView` inside the
   transaction: returning a detached `Invoice` blew up on the lazy payments collection (caught by
   `SaleApiIntegrationTest`). Keep that rule for every new service.
-- **Held bills** are not invoices: no number, no stock effect, deleted on resume.
+- **Held bills** are not invoices: no number, no stock effect, deleted on resume. Listed newest
+  first with **the id breaking the tie** (`HeldBillRepository.heldOn`): `createdAt` is a
+  millisecond, two bills held in the same breath share one, and the order was then whatever the
+  database felt like - a flake that failed the suite about once in ten runs. Every key here is a
+  UUIDv7, which carries its timestamp in its leading bits, so `id desc` settles it correctly.
 - **Test accounts**: `TestAccounts.tokenFor(auth, username, role)` creates a user and completes the
   forced PIN change, returning a usable bearer token.
 
@@ -534,6 +539,31 @@ folder and everything under it, so that is the only copy that survives one.
   - A new immutable table, or a new fiscal or seller column on `Invoice`, must also be added to
     `AuditTrailGuard.FROZEN_INVOICE_COLUMNS`.
 - **Stock** is `SUM(quantity_delta_milli)` from the ledger. Never add a stock column.
+- **The people the shop buys from are `Vendor`s, never `Supplier`s** (`com.masspos.vendor`). That
+  word is taken and means the opposite end of the shop: the steward who carried the order to the
+  table, printed on hotel bills, with `supplier_id` frozen on every invoice. Freeing it would mean
+  altering a populated, audited, printed column - the SQLite trap this project has been bitten by.
+  So goods come *from* vendors and food goes *out* with suppliers, and the two never meet.
+  - **A delivery still writes the vendor's *name* onto itself**, as `SellerDetails` does on an
+    invoice: a vendor renamed next year must not rewrite what the shop bought this year. The new
+    `vendor_id` beside it is only the link that lets a vendor's page gather his deliveries without
+    matching on spelling. **Nullable, always** - a delivery from somebody off a lorry, or one taken
+    before the shop kept a list, has a name and no link, and that is ordinary. Nullable is also
+    what lets the column reach tills whose ledger is already full.
+  - **A vendor's page gathers both ledgers.** A man who sells the shop bottled water for the
+    counter and onions for the kitchen is one vendor; the shelf and the store are the shop's
+    business, not his.
+  - **Old deliveries are found by name** (`boughtFrom(vendorId, name)`), so writing a vendor down
+    for the first time picks up everything already bought from them.
+  - **The balance is arithmetic, not accounting**: everything bought at what it was bought for,
+    less every payment an administrator has agreed to. No accruals, no postings, no accounts.
+  - **A payment waits for an administrator** and is left out of the balance until then, shown as
+    its own figure instead. The person who hands money over is rarely the person who decides it
+    should be handed over. `@RequiresRole({})` is how "administrator only" is said: ADMIN
+    short-circuits the interceptor and an empty list contains nobody else.
+  - **`VendorPayment` is the one audited row here that is not immutable**, because approving it
+    happens after it is written. Its amount and its vendor are `updatable = false`, so the thing
+    approved is the thing that was recorded.
 - **Raw materials are a table of their own, not a flag on `Product`** (`com.masspos.rawmaterial`).
   Butter, onions, oil, carrier bags: what the shop buys and uses and never sells.
   - **The billing grid is the reason.** A cashier typing "on" must never be offered Onions among

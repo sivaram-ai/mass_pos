@@ -114,6 +114,62 @@ export interface StockMovement {
   vendorName: string
 }
 
+/** Somebody the shop buys from. Not a Supplier: that word means the steward on a hotel bill. */
+export interface Vendor {
+  id: string
+  code: string
+  name: string
+  phone: string
+  gstin: string
+  address: string
+  note: string
+  active: boolean
+  /** Everything ever bought from them, at what it was bought for. */
+  boughtPaise: number
+  /** What an administrator has agreed was paid. */
+  paidPaise: number
+  /** Recorded but not yet agreed to, and deliberately not counted in the balance. */
+  waitingPaise: number
+  /** Bought less paid. Negative means the shop has paid ahead. */
+  outstandingPaise: number
+}
+
+export type VendorPaymentMode = 'CASH' | 'UPI' | 'BANK_TRANSFER' | 'CHEQUE' | 'CARD'
+
+export interface VendorPurchase {
+  id: string
+  occurredAt: string
+  /** True when it was a raw material rather than something off the shelf. */
+  fromTheStore: boolean
+  itemCode: string
+  name: string
+  unit: Unit
+  quantityMilli: number
+  buyingPricePaise: number
+  valuePaise: number
+  note: string
+  by: string
+}
+
+export interface VendorPaymentRow {
+  id: string
+  paidOn: string
+  amountPaise: number
+  mode: VendorPaymentMode
+  reference: string
+  note: string
+  by: string
+  approved: boolean
+  approvedBy: string
+  approvedAt: string | null
+}
+
+export interface VendorProfile {
+  vendor: Vendor
+  purchases: VendorPurchase[]
+  payments: VendorPaymentRow[]
+}
+
 /** Something the shop buys and uses but never sells: butter, onions, oil, carrier bags. */
 export interface RawMaterial {
   id: string

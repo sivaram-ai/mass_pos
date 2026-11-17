@@ -8,6 +8,8 @@ import {
 import { useScreenKeys } from '../shortcuts'
 import { SortMenu } from '../components/SortMenu'
 import { StockHistory } from '../components/StockHistory'
+import { VendorPicker } from '../components/VendorPicker'
+import type { ChosenVendor } from '../components/VendorPicker'
 import { loadSort, saveSort, SORT_LABELS, sorted, STOCK_SORT_KEY } from '../sorting'
 import type { Sort } from '../sorting'
 import type { Toast } from '../App'
@@ -363,23 +365,13 @@ function MovementDialog({ movement, onClose, onDone, onToast }: {
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
   const [price, setPrice] = useState('')
-  const [vendor, setVendor] = useState('')
-  const [vendorsSoFar, setVendorsSoFar] = useState<string[]>([])
+  const [vendor, setVendor] = useState<ChosenVendor>({ vendorId: null, vendorName: '' })
   const [errors, setErrors] = useState<{ message: string; fields: Record<string, string> } | null>(null)
   const arriving = movement.kind === 'receipts'
   // Shown back as a total while it is typed, because that is the figure on the delivery note and
   // the one worth checking: a price per unit entered as the whole lorry is a quiet, expensive slip.
   const buying = paiseFromRupees(price)
   const milliNow = milliFromUnits(amount)
-
-  // Who the shop has had goods from before. Only when something is arriving, and quietly: a shop
-  // that has never typed a vendor simply gets an empty list and a plain box.
-  useEffect(() => {
-    if (!arriving) {
-      return
-    }
-    api.get<string[]>('/api/stock/vendors').then(setVendorsSoFar).catch(() => setVendorsSoFar([]))
-  }, [arriving])
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -398,7 +390,8 @@ function MovementDialog({ movement, onClose, onDone, onToast }: {
             quantityMilli: Math.abs(milli),
             note,
             buyingPricePaise: paiseFromRupees(price),
-            vendorName: vendor.trim(),
+            vendorName: vendor.vendorName.trim(),
+            vendorId: vendor.vendorId,
           }
           : { productId: movement.row.productId, quantityMilli: Math.abs(milli), note }
       await api.post(`/api/stock/${movement.kind}`, body)
@@ -436,13 +429,8 @@ function MovementDialog({ movement, onClose, onDone, onToast }: {
               <input className={`${inputClass} num`} inputMode="decimal" placeholder="0.00" value={price}
                      onChange={(event) => setPrice(event.target.value)} />
             </Field>
-            <Field label="Vendor" hint="Who it came from" error={errorFor(errors?.fields ?? {}, 'vendorName')}>
-              <input className={inputClass} list="vendors-so-far" value={vendor} autoComplete="off"
-                     onChange={(event) => setVendor(event.target.value)} />
-              <datalist id="vendors-so-far">
-                {vendorsSoFar.map((name) => <option key={name} value={name} />)}
-              </datalist>
-            </Field>
+            <VendorPicker value={vendor} onChange={setVendor}
+                          error={errorFor(errors?.fields ?? {}, 'vendorName')} />
           </div>
         )}
         <Field label="Note" hint={arriving ? 'Invoice number, lorry, anything worth keeping' : 'Reason'}

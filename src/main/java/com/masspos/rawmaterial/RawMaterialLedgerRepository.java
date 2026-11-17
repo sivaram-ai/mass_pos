@@ -25,6 +25,33 @@ public interface RawMaterialLedgerRepository extends JpaRepository<RawMaterialLe
             """)
     List<Object[]> inStoreForAll();
 
+    /** Everything bought from one vendor, newest first, for that vendor's own page. */
+    @Query("""
+            select e from RawMaterialLedgerEvent e
+            where e.type = com.masspos.rawmaterial.RawMaterialMovement.PURCHASE
+              and (e.vendorId = :vendorId or (e.vendorId is null and e.vendorName = :name))
+            order by e.occurredAt desc
+            """)
+    List<RawMaterialLedgerEvent> boughtFrom(@Param("vendorId") UUID vendorId, @Param("name") String name);
+
+    /** See the shelf's version: summed first, divided by the caller. */
+    @Query("""
+            select e.vendorId, coalesce(sum(e.quantityDeltaMilli * e.buyingPricePaise), 0)
+            from RawMaterialLedgerEvent e
+            where e.type = com.masspos.rawmaterial.RawMaterialMovement.PURCHASE and e.vendorId is not null
+            group by e.vendorId
+            """)
+    List<Object[]> boughtPerVendorId();
+
+    @Query("""
+            select e.vendorName, coalesce(sum(e.quantityDeltaMilli * e.buyingPricePaise), 0)
+            from RawMaterialLedgerEvent e
+            where e.type = com.masspos.rawmaterial.RawMaterialMovement.PURCHASE
+              and e.vendorId is null and e.vendorName <> ''
+            group by e.vendorName
+            """)
+    List<Object[]> boughtPerVendorName();
+
     /** Everyone this shop has already bought raw materials from, for the box to suggest from. */
     @Query("""
             select distinct e.vendorName from RawMaterialLedgerEvent e

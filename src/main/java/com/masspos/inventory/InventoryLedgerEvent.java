@@ -88,19 +88,33 @@ public class InventoryLedgerEvent extends BaseEntity {
     @Column(length = 120, nullable = false, updatable = false, columnDefinition = "varchar(120) default ''")
     private String vendorName = "";
 
+    /**
+     * Which vendor on the shop's list this came from, when it was one of them.
+     *
+     * <p>Null is ordinary and always will be: a delivery taken before the shop kept a vendor list,
+     * or one from somebody it buys from once and never records. The name above stays the record of
+     * who it was; this is only the link that lets a vendor's own page gather its deliveries
+     * without matching on spelling. Nullable, which is also what lets the column reach the tills
+     * that already have this table full.
+     */
+    @Column(name = "vendor_id", updatable = false)
+    private UUID vendorId;
+
     protected InventoryLedgerEvent() {
     }
 
     public InventoryLedgerEvent(Product product, LedgerEventType type, long quantityDeltaMilli, UUID referenceId,
                                 String terminalCode, Instant occurredAt, User recordedBy, String note) {
-        this(product, type, quantityDeltaMilli, referenceId, terminalCode, occurredAt, recordedBy, note, 0, "");
+        this(product, type, quantityDeltaMilli, referenceId, terminalCode, occurredAt, recordedBy, note,
+                0, "", null);
     }
 
     /** Goods arriving, which are the only movement anybody is asked a price or a vendor for. */
     public InventoryLedgerEvent(Product product, LedgerEventType type, long quantityDeltaMilli, UUID referenceId,
                                 String terminalCode, Instant occurredAt, User recordedBy, String note,
-                                long buyingPricePaise, String vendorName) {
+                                long buyingPricePaise, String vendorName, UUID vendorId) {
         type.checkDelta(quantityDeltaMilli);
+        this.vendorId = vendorId;
         this.product = product;
         this.type = type;
         this.quantityDeltaMilli = quantityDeltaMilli;
@@ -147,6 +161,11 @@ public class InventoryLedgerEvent extends BaseEntity {
 
     public String getVendorName() {
         return vendorName == null ? "" : vendorName;
+    }
+
+    /** The vendor on the shop's list, or null where there was not one. */
+    public UUID getVendorId() {
+        return vendorId;
     }
 
     public String getNote() {

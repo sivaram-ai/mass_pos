@@ -81,9 +81,9 @@ public class RawMaterialService {
     /** Bought in, which is the only movement anybody is asked a price or a vendor for. */
     @Transactional
     public RawMaterialView purchase(UUID id, long quantityMilli, String note, long buyingPricePaise,
-                                    String vendorName) {
+                                    String vendorName, UUID vendorId) {
         return after(record(id, RawMaterialMovement.PURCHASE, Math.abs(quantityMilli), note,
-                buyingPricePaise, vendorName), id);
+                buyingPricePaise, vendorName, vendorId), id);
     }
 
     /** Taken into the kitchen. */
@@ -118,7 +118,7 @@ public class RawMaterialService {
         if (delta == 0) {
             return after(null, id);
         }
-        return after(record(id, RawMaterialMovement.ADJUSTMENT, delta, note, 0, ""), id);
+        return after(record(id, RawMaterialMovement.ADJUSTMENT, delta, note, 0, "", null), id);
     }
 
     /**
@@ -164,13 +164,13 @@ public class RawMaterialService {
             return after(null, id);
         }
         String said = take < wanted ? trim(note) + " - the store ran out, so only part of it came off" : note;
-        return after(record(id, type, -take, said, 0, ""), id);
+        return after(record(id, type, -take, said, 0, "", null), id);
     }
 
     private RawMaterialLedgerEvent record(UUID id, RawMaterialMovement type, long deltaMilli, String note,
-                                          long buyingPricePaise, String vendorName) {
+                                          long buyingPricePaise, String vendorName, UUID vendorId) {
         return ledger.save(new RawMaterialLedgerEvent(onTheList(id), type, deltaMilli, counter.code(),
-                Instant.now(), currentUser(), note, buyingPricePaise, vendorName));
+                Instant.now(), currentUser(), note, buyingPricePaise, vendorName, vendorId));
     }
 
     private RawMaterialView after(RawMaterialLedgerEvent ignored, UUID id) {

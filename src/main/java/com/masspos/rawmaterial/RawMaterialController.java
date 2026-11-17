@@ -58,7 +58,8 @@ public class RawMaterialController {
 
     public record PurchaseRequest(@Positive long quantityMilli, @Size(max = 200) String note,
                                   @PositiveOrZero long buyingPricePaise,
-                                  @Size(max = 120) String vendorName) {
+                                  @Size(max = 120) String vendorName,
+                                  UUID vendorId) {
     }
 
     public record CorrectionRequest(long deltaMilli, @Size(max = 200) String note) {
@@ -96,7 +97,7 @@ public class RawMaterialController {
     @ResponseStatus(HttpStatus.CREATED)
     public RawMaterialView purchase(@PathVariable UUID id, @Valid @RequestBody PurchaseRequest request) {
         return store.purchase(id, request.quantityMilli(), request.note(), request.buyingPricePaise(),
-                request.vendorName());
+                request.vendorName(), request.vendorId());
     }
 
     @PostMapping("/{id}/consumption")

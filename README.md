@@ -153,6 +153,26 @@ services and anything else whose stock is never counted. It only matters when *R
 the stock says you do not have* is ticked in Settings: items with this box ticked are the exception
 to that rule, and the list shows them as "not counted".
 
+### Vendors
+
+**Vendors** are the people the shop buys from. The list shows what has been bought from each of
+them, what has been paid, and what is still owed; **Enter** opens one, where you get every
+delivery — off the shelf and out of the store together — and every payment. **F3** adds one, **F2**
+searches.
+
+When goods arrive, the vendor is **chosen from a dropdown** rather than typed, on both Goods
+received and raw material purchases. Somebody you buy from once, off a lorry, can still just be
+typed in: the delivery then carries their name and nothing else, exactly as it did before.
+
+**A payment waits for an administrator.** A manager records money handed over and it shows at once,
+marked as waiting; it does not change what the shop believes it owes until an administrator
+approves it. The person who hands money over is rarely the person who decides it should be handed
+over.
+
+> Note on the word: a **vendor** is somebody the shop buys *from*. A **supplier** in this till is
+> the steward who carried the order to the table, named on hotel bills. They are different lists
+> and they always were.
+
 ### Raw materials
 
 **Raw materials** is the store behind the kitchen: butter, onions, oil, flour, spices, carrier

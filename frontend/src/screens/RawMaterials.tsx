@@ -10,6 +10,8 @@ import {
 } from '../components/ui'
 import { useScreenKeys } from '../shortcuts'
 import { StockHistory } from '../components/StockHistory'
+import { VendorPicker } from '../components/VendorPicker'
+import type { ChosenVendor } from '../components/VendorPicker'
 import type { Toast } from '../App'
 
 const SEARCH_KEY = 'F2'
@@ -383,19 +385,11 @@ function MovementDialog({ kind, row, onClose, onDone, onToast }: {
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
   const [price, setPrice] = useState('')
-  const [vendor, setVendor] = useState('')
-  const [vendorsSoFar, setVendorsSoFar] = useState<string[]>([])
+  const [vendor, setVendor] = useState<ChosenVendor>({ vendorId: null, vendorName: '' })
   const [errors, setErrors] = useState<{ message: string; fields: Record<string, string> } | null>(null)
   const buying = kind === 'purchase'
   const unitCost = paiseFromRupees(price)
   const milliNow = milliFromUnits(amount)
-
-  useEffect(() => {
-    if (!buying) {
-      return
-    }
-    api.get<string[]>('/api/raw-materials/vendors').then(setVendorsSoFar).catch(() => setVendorsSoFar([]))
-  }, [buying])
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -409,7 +403,13 @@ function MovementDialog({ kind, row, onClose, onDone, onToast }: {
       const body = kind === 'correct'
         ? { deltaMilli: milli, note }
         : buying
-          ? { quantityMilli: Math.abs(milli), note, buyingPricePaise: unitCost, vendorName: vendor.trim() }
+          ? {
+            quantityMilli: Math.abs(milli),
+            note,
+            buyingPricePaise: unitCost,
+            vendorName: vendor.vendorName.trim(),
+            vendorId: vendor.vendorId,
+          }
           : { quantityMilli: Math.abs(milli), note }
       const after = await api.post<RawMaterial>(`/api/raw-materials/${row.id}/${MOVEMENTS[kind].path}`, body)
       // What the store holds now, said back: a take-out stops at empty, so somebody who typed five
@@ -448,13 +448,8 @@ function MovementDialog({ kind, row, onClose, onDone, onToast }: {
               <input className={`${inputClass} num`} inputMode="decimal" placeholder="0.00" value={price}
                      onChange={(event) => setPrice(event.target.value)} />
             </Field>
-            <Field label="Vendor" hint="Who it came from" error={errorFor(errors?.fields ?? {}, 'vendorName')}>
-              <input className={inputClass} list="raw-vendors-so-far" value={vendor} autoComplete="off"
-                     onChange={(event) => setVendor(event.target.value)} />
-              <datalist id="raw-vendors-so-far">
-                {vendorsSoFar.map((name) => <option key={name} value={name} />)}
-              </datalist>
-            </Field>
+            <VendorPicker value={vendor} onChange={setVendor}
+                          error={errorFor(errors?.fields ?? {}, 'vendorName')} />
           </div>
         )}
         <Field label="Note" hint={buying ? 'Invoice number, lorry, anything worth keeping' : 'Reason'}

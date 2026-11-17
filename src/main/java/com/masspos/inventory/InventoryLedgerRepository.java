@@ -44,6 +44,38 @@ public interface InventoryLedgerRepository extends JpaRepository<InventoryLedger
             """)
     List<Object[]> movedBy(@Param("referenceId") UUID referenceId, @Param("type") LedgerEventType type);
 
+    /** Everything bought from one vendor, newest first, for that vendor's own page. */
+    @Query("""
+            select e from InventoryLedgerEvent e
+            where e.type = com.masspos.inventory.LedgerEventType.PURCHASE_RECEIPT
+              and (e.vendorId = :vendorId or (e.vendorId is null and e.vendorName = :name))
+            order by e.occurredAt desc
+            """)
+    List<InventoryLedgerEvent> boughtFrom(@Param("vendorId") UUID vendorId, @Param("name") String name);
+
+    /**
+     * What every vendor on the list has been bought from, in quantity x unit price. Divided by
+     * 1000 by the caller, after the sum: milli-units times paise is a thousand times the money,
+     * and dividing each row first would throw away a fraction of every delivery.
+     */
+    @Query("""
+            select e.vendorId, coalesce(sum(e.quantityDeltaMilli * e.buyingPricePaise), 0)
+            from InventoryLedgerEvent e
+            where e.type = com.masspos.inventory.LedgerEventType.PURCHASE_RECEIPT and e.vendorId is not null
+            group by e.vendorId
+            """)
+    List<Object[]> boughtPerVendorId();
+
+    /** And the same for deliveries taken before the shop kept a list, which carry only a name. */
+    @Query("""
+            select e.vendorName, coalesce(sum(e.quantityDeltaMilli * e.buyingPricePaise), 0)
+            from InventoryLedgerEvent e
+            where e.type = com.masspos.inventory.LedgerEventType.PURCHASE_RECEIPT
+              and e.vendorId is null and e.vendorName <> ''
+            group by e.vendorName
+            """)
+    List<Object[]> boughtPerVendorName();
+
     /** Everyone this shop has already had goods from, so the box can suggest rather than ask. */
     @Query("""
             select distinct e.vendorName from InventoryLedgerEvent e

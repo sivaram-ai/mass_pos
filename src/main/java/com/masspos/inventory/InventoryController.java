@@ -66,7 +66,8 @@ public class InventoryController {
     public record ReceiptRequest(@NotNull UUID productId, @Positive long quantityMilli,
                                  @Size(max = 200) String note,
                                  @PositiveOrZero long buyingPricePaise,
-                                 @Size(max = 120) String vendorName) {
+                                 @Size(max = 120) String vendorName,
+                                 UUID vendorId) {
     }
 
 
@@ -113,7 +114,7 @@ public class InventoryController {
     @ResponseStatus(HttpStatus.CREATED)
     public StockRow receive(@Valid @RequestBody ReceiptRequest request) {
         inventory.receive(request.productId(), request.quantityMilli(), request.note(),
-                request.buyingPricePaise(), request.vendorName());
+                request.buyingPricePaise(), request.vendorName(), request.vendorId());
         return rowFor(request.productId());
     }
 
