@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { SORT_FIELDS, SORT_LABELS } from '../sorting'
-import type { Sort } from '../sorting'
+import type { SortDir } from '../sorting'
 
 /**
  * The sort control, as a popover that takes focus when it opens. It has to: a list cell that kept
@@ -11,9 +10,12 @@ import type { Sort } from '../sorting'
  * in nothing but which key the person reached for. A sort that previewed and then reverted on Esc
  * would be the only control on these screens that did.
  */
-export function SortMenu({ sort, onChange, onClose }: {
-  sort: Sort
-  onChange: (sort: Sort) => void
+export function SortMenu<F extends string>({ sort, fields, labels, onChange, onClose }: {
+  sort: { field: F; dir: SortDir }
+  /** The fields this list offers, in the order the arrows walk them. */
+  fields: readonly F[]
+  labels: Record<F, string>
+  onChange: (sort: { field: F; dir: SortDir }) => void
   onClose: () => void
 }) {
   const box = useRef<HTMLDivElement>(null)
@@ -28,8 +30,8 @@ export function SortMenu({ sort, onChange, onClose }: {
   }, [sort.field])
 
   const move = (step: number) => {
-    const at = SORT_FIELDS.indexOf(sort.field)
-    onChange({ ...sort, field: SORT_FIELDS[Math.max(0, Math.min(SORT_FIELDS.length - 1, at + step))] })
+    const at = fields.indexOf(sort.field)
+    onChange({ ...sort, field: fields[Math.max(0, Math.min(fields.length - 1, at + step))] })
   }
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -41,7 +43,7 @@ export function SortMenu({ sort, onChange, onClose }: {
       onChange({ ...sort, dir: event.key === 'ArrowRight' ? 'desc' : 'asc' })
     } else if (event.key === 'Home' || event.key === 'End') {
       event.preventDefault()
-      onChange({ ...sort, field: event.key === 'Home' ? SORT_FIELDS[0] : SORT_FIELDS[SORT_FIELDS.length - 1] })
+      onChange({ ...sort, field: event.key === 'Home' ? fields[0] : fields[fields.length - 1] })
     } else if (event.key === 'Enter' || event.key === 'Escape') {
       event.preventDefault()
       // Esc here only closes the popover: it must not count toward Esc Esc back to billing.
@@ -66,7 +68,7 @@ export function SortMenu({ sort, onChange, onClose }: {
       >
         <p className="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Sort by</p>
         <div className="max-h-60 overflow-y-auto">
-          {SORT_FIELDS.map((field) => {
+          {fields.map((field) => {
             const isChosen = field === sort.field
             return (
               <button
@@ -81,7 +83,7 @@ export function SortMenu({ sort, onChange, onClose }: {
                 className={`block w-full rounded-md px-2 py-1.5 text-left text-sm transition ${
                   isChosen ? 'bg-sky-600 font-medium text-on-primary' : 'text-slate-700 hover:bg-slate-100'}`}
               >
-                {SORT_LABELS[field]}
+                {labels[field]}
               </button>
             )
           })}

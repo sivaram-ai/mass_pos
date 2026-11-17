@@ -34,9 +34,11 @@ import java.util.UUID;
 public class PurchaseOrderController {
 
     private final PurchaseOrderService purchases;
+    private final PurchasePrices prices;
 
-    public PurchaseOrderController(PurchaseOrderService purchases) {
+    public PurchaseOrderController(PurchaseOrderService purchases, PurchasePrices prices) {
         this.purchases = purchases;
+        this.prices = prices;
     }
 
     public record LineRequest(UUID productId, UUID rawMaterialId, long quantityMilli, long unitCostPaise) {
@@ -71,6 +73,26 @@ public class PurchaseOrderController {
         LocalDate today = LocalDate.now(IndiaTime.ZONE);
         return purchases.search(from == null ? today.minusDays(90) : from, to == null ? today : to,
                 vendorId, status);
+    }
+
+    /**
+     * What the shop has paid for one thing over the years, every delivery of it with the vendor,
+     * the quantity, the price each, the order and who agreed to it.
+     *
+     * <p>Asked of an item or of a raw material, because the question is the same either way: are
+     * we paying more than we were, and is this man dearer than that one.
+     */
+    @GetMapping("/prices")
+    @RequiresRole({UserRole.MANAGER, UserRole.AUDITOR})
+    public List<PurchasePrices.PaidPrice> prices(@RequestParam(required = false) UUID productId,
+                                                 @RequestParam(required = false) UUID rawMaterialId) {
+        if (productId != null) {
+            return prices.forProduct(productId);
+        }
+        if (rawMaterialId != null) {
+            return prices.forMaterial(rawMaterialId);
+        }
+        throw new IllegalArgumentException("Choose an item first, then ask what it has cost.");
     }
 
     @GetMapping("/waiting")

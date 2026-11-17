@@ -12,6 +12,7 @@ import com.masspos.rawmaterial.RawMaterialService;
 import com.masspos.user.User;
 import com.masspos.user.UserRepository;
 import com.masspos.vendor.Vendor;
+import com.masspos.vendor.VendorPaymentRepository;
 import com.masspos.vendor.VendorRepository;
 import com.masspos.web.FieldRejectedException;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -47,11 +49,13 @@ public class PurchaseOrderService {
     private final InventoryService shelf;
     private final RawMaterialService store;
     private final UserRepository users;
+    private final VendorPaymentRepository paid;
 
     public PurchaseOrderService(PurchaseOrderRepository orders, PurchaseOrderSequenceRepository sequences,
                                 VendorRepository vendors, ProductRepository products,
                                 RawMaterialRepository materials, InventoryService shelf,
-                                RawMaterialService store, UserRepository users) {
+                                RawMaterialService store, UserRepository users,
+                                VendorPaymentRepository paid) {
         this.orders = orders;
         this.sequences = sequences;
         this.vendors = vendors;
@@ -60,6 +64,7 @@ public class PurchaseOrderService {
         this.shelf = shelf;
         this.store = store;
         this.users = users;
+        this.paid = paid;
     }
 
     /** What to put on an order: one item, how much of it, and what it is expected to cost. */
@@ -70,20 +75,46 @@ public class PurchaseOrderService {
     public record Arrived(UUID lineId, long quantityMilli, long unitCostPaise) {
     }
 
+    /**
+     * Orders in a window. Everything else - the item, the person, the state of the money, a word
+     * typed into a search box - is sifted on the screen, over the window it asked for, exactly as
+     * the items list sifts the catalogue. A server that filtered as well would have to be asked
+     * again on every keystroke, and would sort the wrong rows when it capped the answer.
+     */
     @Transactional(readOnly = true)
     public List<PurchaseOrderView> search(LocalDate from, LocalDate to, UUID vendorId,
                                           PurchaseOrderStatus status) {
-        return orders.search(from, to, vendorId, status).stream().map(PurchaseOrderView::of).toList();
+        Map<UUID, Long> settled = allocated();
+        return orders.search(from, to, vendorId, status).stream()
+                .map(order -> PurchaseOrderView.of(order, settled.getOrDefault(order.getId(), 0L)))
+                .toList();
     }
 
     @Transactional(readOnly = true)
     public PurchaseOrderView one(UUID id) {
-        return PurchaseOrderView.of(order(id));
+        return view(order(id));
     }
 
     @Transactional(readOnly = true)
     public List<PurchaseOrderView> waitingForApproval() {
-        return orders.waitingForApproval().stream().map(PurchaseOrderView::of).toList();
+        Map<UUID, Long> settled = allocated();
+        return orders.waitingForApproval().stream()
+                .map(order -> PurchaseOrderView.of(order, settled.getOrDefault(order.getId(), 0L)))
+                .toList();
+    }
+
+    /** One order, with whatever an administrator has agreed was paid against it. */
+    private PurchaseOrderView view(PurchaseOrder order) {
+        return PurchaseOrderView.of(order, paid.approvedForOrder(order.getId()));
+    }
+
+    /** Every order's approved payments in one query, so a list of two hundred costs one. */
+    private Map<UUID, Long> allocated() {
+        Map<UUID, Long> settled = new HashMap<>();
+        for (Object[] row : paid.approvedPerOrder()) {
+            settled.put((UUID) row[0], ((Number) row[1]).longValue());
+        }
+        return settled;
     }
 
     @Transactional
@@ -102,7 +133,7 @@ public class PurchaseOrderService {
             order.add(new PurchaseOrderLine(productFor(line), materialFor(line), line.quantityMilli(),
                     line.unitCostPaise()));
         }
-        return PurchaseOrderView.of(orders.save(order));
+        return view(orders.save(order));
     }
 
     @Transactional
@@ -153,13 +184,13 @@ public class PurchaseOrderService {
             String note = "Order " + order.getNumber();
             if (line.isFromTheStore()) {
                 store.purchase(line.getRawMaterial().getId(), quantity, note, cost,
-                        order.getVendor().getName(), order.getVendor().getId());
+                        order.getVendor().getName(), order.getVendor().getId(), order.getNumber());
             } else {
                 shelf.receive(line.getProduct().getId(), quantity, note, cost,
-                        order.getVendor().getName(), order.getVendor().getId());
+                        order.getVendor().getName(), order.getVendor().getId(), order.getNumber());
             }
         }
-        return PurchaseOrderView.of(order);
+        return view(order);
     }
 
     private Product productFor(Wanted line) {

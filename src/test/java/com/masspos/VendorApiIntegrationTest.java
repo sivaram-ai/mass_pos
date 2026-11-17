@@ -3,6 +3,11 @@ package com.masspos;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.masspos.auth.AuthService;
+import com.masspos.catalog.Product;
+import com.masspos.catalog.ProductRepository;
+import com.masspos.inventory.InventoryLedgerEvent;
+import com.masspos.inventory.InventoryLedgerRepository;
+import com.masspos.inventory.LedgerEventType;
 import com.masspos.user.UserRole;
 import com.masspos.web.LocalApiGuard;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,6 +22,8 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import org.springframework.util.FileSystemUtils;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
@@ -51,6 +58,10 @@ class VendorApiIntegrationTest {
     AuthService auth;
     @Autowired
     ObjectMapper json;
+    @Autowired
+    InventoryLedgerRepository ledger;
+    @Autowired
+    ProductRepository products;
 
     @BeforeEach
     void staffOnShift() {
@@ -70,23 +81,25 @@ class VendorApiIntegrationTest {
         String productId = newProduct("VP-1", "Bottled water");
         String materialId = newMaterial("VM-1", "Onions");
 
-        // 6 bottles at Rs 20 = Rs 120, and 25 kg of onions at Rs 32 = Rs 800.
-        call(post("/api/stock/receipts"), managerToken, """
-                {"productId":"%s","quantityMilli":6000,"note":"Van",
-                 "buyingPricePaise":2000,"vendorName":"Selvam Traders","vendorId":"%s"}"""
-                .formatted(productId, vendorId), status().isCreated());
-        call(post("/api/raw-materials/" + materialId + "/purchases"), managerToken, """
-                {"quantityMilli":25000,"note":"Monday market","buyingPricePaise":3200,
-                 "vendorName":"Selvam Traders","vendorId":"%s"}""".formatted(vendorId), status().isCreated());
+        // 6 bottles at Rs 20 = Rs 120, and 25 kg of onions at Rs 32 = Rs 800 - one order, because
+        // that is how a lorry arrives: things off the shelf and things out of the store together.
+        delivered(vendorId, productId, 6_000, 2_000, materialId, 25_000, 3_200);
 
         JsonNode profile = call(get("/api/vendors/" + vendorId), managerToken, null, status().isOk());
 
         assertThat(profile.at("/vendor/boughtPaise").asLong()).isEqualTo(92_000);
         assertThat(profile.at("/vendor/outstandingPaise").asLong()).isEqualTo(92_000);
         assertThat(profile.get("purchases")).hasSize(2);
-        assertThat(profile.at("/purchases/0/fromTheStore").asBoolean()).isTrue();
-        assertThat(profile.at("/purchases/0/valuePaise").asLong()).isEqualTo(80_000);
-        assertThat(profile.at("/purchases/1/valuePaise").asLong()).isEqualTo(12_000);
+        // Both ends of the shop, in whichever order the two movements landed: they are written in
+        // the same breath, so asserting which came first would be asserting the clock.
+        List<Long> values = new ArrayList<>();
+        boolean fromTheStore = false;
+        for (JsonNode purchase : profile.get("purchases")) {
+            values.add(purchase.get("valuePaise").asLong());
+            fromTheStore |= purchase.get("fromTheStore").asBoolean();
+        }
+        assertThat(values).containsExactlyInAnyOrder(80_000L, 12_000L);
+        assertThat(fromTheStore).as("the store is on his page as well as the shelf").isTrue();
     }
 
     /**
@@ -98,10 +111,7 @@ class VendorApiIntegrationTest {
     void aPaymentOnlyCountsOnceAnAdministratorHasAgreedToIt() throws Exception {
         String vendorId = newVendor("V-2", "Gas agency");
         String productId = newProduct("VP-2", "Cylinder");
-        call(post("/api/stock/receipts"), managerToken, """
-                {"productId":"%s","quantityMilli":2000,"note":"","buyingPricePaise":90000,
-                 "vendorName":"Gas agency","vendorId":"%s"}""".formatted(productId, vendorId),
-                status().isCreated());
+        delivered(vendorId, productId, 2_000, 90_000, null, 0, 0);
 
         String paymentId = call(post("/api/vendors/" + vendorId + "/payments"), managerToken, """
                 {"amountPaise":100000,"paidOn":"2026-11-17","mode":"CASH","reference":"","note":"Part payment"}""",
@@ -124,6 +134,53 @@ class VendorApiIntegrationTest {
         assertThat(settled.at("/payments/0/approvedBy").asText()).isNotEmpty();
     }
 
+    /**
+     * Money can be put against the order it was for, and that order then says so.
+     *
+     * <p>A vendor's balance is a running figure and answers "what do we owe him"; it cannot answer
+     * "has this delivery been paid for", which is the question somebody asks with an invoice in
+     * their hand. So a payment may name an order, and the order works out where that leaves it -
+     * only from money an administrator has agreed to, exactly as the balance does.
+     */
+    @Test
+    void putsAPaymentAgainstTheOrderItWasFor() throws Exception {
+        String vendorId = newVendor("V-7", "Flour mill");
+        String productId = newProduct("VP-7", "Flour 10kg");
+        delivered(vendorId, productId, 4_000, 50_000, null, 0, 0);
+        String orderId = call(get("/api/purchase-orders?vendorId=" + vendorId), managerToken, null,
+                status().isOk()).get(0).get("id").asText();
+
+        JsonNode owed = call(get("/api/purchase-orders/" + orderId), managerToken, null, status().isOk());
+        assertThat(owed.get("owedPaise").asLong()).as("what actually arrived came to").isEqualTo(200_000);
+        assertThat(owed.get("settled").asText()).isEqualTo("UNPAID");
+
+        String paymentId = call(post("/api/vendors/" + vendorId + "/payments"), managerToken, """
+                {"amountPaise":120000,"paidOn":"2026-11-17","mode":"UPI","reference":"abc","note":"",
+                 "purchaseOrderId":"%s"}""".formatted(orderId), status().isCreated()).get("id").asText();
+
+        assertThat(call(get("/api/purchase-orders/" + orderId), managerToken, null, status().isOk())
+                .get("settled").asText())
+                .as("nobody has agreed to it yet, so the order has not been paid for")
+                .isEqualTo("UNPAID");
+
+        call(post("/api/vendors/payments/" + paymentId + "/approve"), adminToken, null, status().isNoContent());
+
+        JsonNode part = call(get("/api/purchase-orders/" + orderId), managerToken, null, status().isOk());
+        assertThat(part.get("paidPaise").asLong()).isEqualTo(120_000);
+        assertThat(part.get("settled").asText()).isEqualTo("PART_PAID");
+
+        String rest = call(post("/api/vendors/" + vendorId + "/payments"), managerToken, """
+                {"amountPaise":80000,"paidOn":"2026-11-17","mode":"CASH","reference":"","note":"",
+                 "purchaseOrderId":"%s"}""".formatted(orderId), status().isCreated()).get("id").asText();
+        call(post("/api/vendors/payments/" + rest + "/approve"), adminToken, null, status().isNoContent());
+
+        assertThat(call(get("/api/purchase-orders/" + orderId), managerToken, null, status().isOk())
+                .get("settled").asText()).isEqualTo("PAID");
+        // And the payment keeps the order it was for, so the vendor's page can name it.
+        assertThat(call(get("/api/vendors/" + vendorId), managerToken, null, status().isOk())
+                .at("/payments/0/purchaseOrderId").asText()).isEqualTo(orderId);
+    }
+
     /** And agreeing twice to the same money is not a thing. */
     @Test
     void refusesToApproveTheSamePaymentTwice() throws Exception {
@@ -143,9 +200,12 @@ class VendorApiIntegrationTest {
     @Test
     void findsDeliveriesTakenBeforeTheVendorWasOnTheList() throws Exception {
         String productId = newProduct("VP-4", "Sugar 1kg");
-        call(post("/api/stock/receipts"), managerToken, """
-                {"productId":"%s","quantityMilli":10000,"note":"","buyingPricePaise":4500,
-                 "vendorName":"Kumar Traders"}""".formatted(productId), status().isCreated());
+        // Written straight to the ledger, because nothing in the app can produce one any more:
+        // a delivery now comes in against an order, and an order always names a vendor on the
+        // list. This is what an upgraded till's older rows look like - a name and no link.
+        Product sugar = products.findById(java.util.UUID.fromString(productId)).orElseThrow();
+        ledger.save(new InventoryLedgerEvent(sugar, LedgerEventType.PURCHASE_RECEIPT, 10_000, null, "T1",
+                java.time.Instant.now(), null, "", 4_500, "Kumar Traders", null, ""));
 
         String vendorId = newVendor("V-4", "Kumar Traders");
 
@@ -169,6 +229,30 @@ class VendorApiIntegrationTest {
         assertThat(call(post("/api/vendors"), managerToken, """
                 {"code":"V-6","name":"Dairy","phone":"","gstin":"NOTAGSTIN","address":"","note":"","active":true}""",
                 status().isBadRequest()).at("/errors/gstin").asText()).contains("valid GSTIN");
+    }
+
+    /**
+     * Goods arriving, the only way they can now: a manager writes an order, an administrator
+     * agrees to the money, and the lorry turns up. The vendor and the price reach both ledgers
+     * through the order, which is what a vendor's page is gathering.
+     *
+     * @param materialId a second line out of the store, or null for an order off the shelf alone
+     */
+    private void delivered(String vendorId, String productId, long quantityMilli, long unitCostPaise,
+                           String materialId, long storeMilli, long storeCostPaise) throws Exception {
+        String lines = """
+                {"productId":"%s","rawMaterialId":null,"quantityMilli":%d,"unitCostPaise":%d}"""
+                .formatted(productId, quantityMilli, unitCostPaise);
+        if (materialId != null) {
+            lines += ", " + """
+                    {"productId":null,"rawMaterialId":"%s","quantityMilli":%d,"unitCostPaise":%d}"""
+                    .formatted(materialId, storeMilli, storeCostPaise);
+        }
+        String orderId = call(post("/api/purchase-orders"), managerToken, """
+                {"vendorId":"%s","expectedOn":null,"note":"","lines":[%s]}""".formatted(vendorId, lines),
+                status().isCreated()).get("id").asText();
+        call(post("/api/purchase-orders/" + orderId + "/approve"), adminToken, null, status().isOk());
+        call(post("/api/purchase-orders/" + orderId + "/receive"), managerToken, "{}", status().isOk());
     }
 
     private String newVendor(String code, String name) throws Exception {

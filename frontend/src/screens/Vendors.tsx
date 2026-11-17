@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { api, billDate, fieldErrorsOf, messageOfFailure, paiseFromRupees, quantity, rupees } from '../api'
-import type { Role, Vendor, VendorPaymentMode, VendorProfile } from '../types'
+import type { PurchaseOrder, Role, Vendor, VendorPaymentMode, VendorProfile } from '../types'
 import {
   Banner, Button, Empty, errorFor, Field, inputClass, KeyBox, Modal, Panel, smallInputClass,
 } from '../components/ui'
@@ -326,6 +326,7 @@ function VendorPage({ vendorId, role, onToast, onChanged, onEdit, onClose }: {
   onClose: () => void
 }) {
   const [profile, setProfile] = useState<VendorProfile | null>(null)
+  const [orders, setOrders] = useState<PurchaseOrder[]>([])
   const [paying, setPaying] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const canApprove = role === 'ADMIN'
@@ -334,6 +335,14 @@ function VendorPage({ vendorId, role, onToast, onChanged, onEdit, onClose }: {
     api.get<VendorProfile>(`/api/vendors/${vendorId}`)
       .then(setProfile)
       .catch((failure) => setError(messageOfFailure(failure, 'Could not open this vendor')))
+    // The vendor's own orders, so money paid can be put against the one it was for - and so the
+    // payments below can say which. A whole year of them, because an old order gets paid late.
+    const since = new Date()
+    since.setFullYear(since.getFullYear() - 1)
+    api.get<PurchaseOrder[]>(
+      `/api/purchase-orders?vendorId=${vendorId}&from=${since.toISOString().slice(0, 10)}`)
+      .then(setOrders)
+      .catch(() => setOrders([]))
   }, [vendorId])
 
   useEffect(load, [load])
@@ -441,6 +450,7 @@ function VendorPage({ vendorId, role, onToast, onChanged, onEdit, onClose }: {
                   <colgroup>
                     <col className="w-36" />
                     <col className="w-32" />
+                    <col className="w-32" />
                     <col />
                     <col className="w-28" />
                     <col className="w-28" />
@@ -450,6 +460,11 @@ function VendorPage({ vendorId, role, onToast, onChanged, onEdit, onClose }: {
                       <tr key={payment.id} className="border-t border-slate-100">
                         <td className="num py-1.5 pl-2 text-slate-500">{payment.paidOn}</td>
                         <td className="py-1.5 text-slate-600">{MODE_LABELS[payment.mode]}</td>
+                        <td className="num truncate py-1.5 text-xs text-slate-500">
+                          {payment.purchaseOrderId
+                            ? orders.find((order) => order.id === payment.purchaseOrderId)?.number ?? 'an order'
+                            : <span className="text-slate-400">on account</span>}
+                        </td>
                         <td className="truncate py-1.5 text-xs text-slate-400" title={payment.reference}>
                           {payment.reference}
                         </td>
@@ -479,6 +494,7 @@ function VendorPage({ vendorId, role, onToast, onChanged, onEdit, onClose }: {
       {paying && vendor && (
         <PaymentDialog
           vendor={vendor}
+          orders={orders}
           onToast={onToast}
           onClose={() => setPaying(false)}
           onDone={() => {
@@ -493,8 +509,9 @@ function VendorPage({ vendorId, role, onToast, onChanged, onEdit, onClose }: {
 }
 
 /** Money handed over, which waits for an administrator before the balance moves. */
-function PaymentDialog({ vendor, onClose, onDone, onToast }: {
+function PaymentDialog({ vendor, orders, onClose, onDone, onToast }: {
   vendor: Vendor
+  orders: PurchaseOrder[]
   onClose: () => void
   onDone: () => void
   onToast: Toast
@@ -503,7 +520,14 @@ function PaymentDialog({ vendor, onClose, onDone, onToast }: {
   const [mode, setMode] = useState<VendorPaymentMode>('CASH')
   const [reference, setReference] = useState('')
   const [note, setNote] = useState('')
+  const [against, setAgainst] = useState('')
   const [errors, setErrors] = useState<{ message: string; fields: Record<string, string> } | null>(null)
+
+  /**
+   * The orders money can be put against: ones the goods are owed for and not yet settled. An
+   * order nobody has approved is not owed for, and a rejected one never will be.
+   */
+  const owing = orders.filter((order) => order.owedPaise > 0 && order.settled !== 'PAID')
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -519,6 +543,7 @@ function PaymentDialog({ vendor, onClose, onDone, onToast }: {
         mode,
         reference: reference.trim(),
         note: note.trim(),
+        purchaseOrderId: against || null,
       })
       onToast({ tone: 'good', text: 'Recorded. It waits for an administrator to approve it.' })
       onDone()
@@ -551,6 +576,33 @@ function PaymentDialog({ vendor, onClose, onDone, onToast }: {
                    onChange={(event) => setReference(event.target.value)} />
           </Field>
         </div>
+        <Field
+          label="Against which order"
+          optional
+          hint={owing.length === 0
+            ? 'Nothing is waiting to be paid for. This goes against the running account.'
+            : 'Leave it on the account if this is not for one delivery'}
+          error={errorFor(errors?.fields ?? {}, 'purchaseOrderId')}
+        >
+          <select className={inputClass} value={against}
+                  onChange={(event) => {
+                    setAgainst(event.target.value)
+                    // Fills in what is left on that order, which is what somebody is usually
+                    // paying. Typed over freely: a part payment is ordinary.
+                    const order = owing.find((one) => one.id === event.target.value)
+                    if (order && !amount.trim()) {
+                      setAmount(((order.owedPaise - order.paidPaise) / 100).toFixed(2))
+                    }
+                  }}>
+            <option value="">The running account</option>
+            {owing.map((order) => (
+              <option key={order.id} value={order.id}>
+                {order.number} · {billDate(new Date(order.orderedOn))} ·{' '}
+                {rupees(order.owedPaise - order.paidPaise)} left
+              </option>
+            ))}
+          </select>
+        </Field>
         <Field label="Note" error={errorFor(errors?.fields ?? {}, 'note')}>
           <input className={inputClass} value={note} onChange={(event) => setNote(event.target.value)} />
         </Field>

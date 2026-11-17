@@ -43,4 +43,22 @@ public interface VendorPaymentRepository extends JpaRepository<VendorPayment, UU
             group by p.vendor.id
             """)
     List<Object[]> waitingPerVendor();
+
+    /**
+     * What has been paid against each order, so an order can say whether it is settled. Approved
+     * only, for the same reason the vendor's balance counts only approved money.
+     */
+    @Query("""
+            select p.purchaseOrderId, coalesce(sum(p.amountPaise), 0)
+            from VendorPayment p
+            where p.approved = true and p.purchaseOrderId is not null
+            group by p.purchaseOrderId
+            """)
+    List<Object[]> approvedPerOrder();
+
+    @Query("""
+            select coalesce(sum(p.amountPaise), 0) from VendorPayment p
+            where p.approved = true and p.purchaseOrderId = :orderId
+            """)
+    long approvedForOrder(@Param("orderId") UUID orderId);
 }

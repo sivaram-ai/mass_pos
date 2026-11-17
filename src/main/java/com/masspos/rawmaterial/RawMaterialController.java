@@ -2,6 +2,7 @@ package com.masspos.rawmaterial;
 
 import com.masspos.auth.RequiresRole;
 import com.masspos.catalog.UnitOfMeasure;
+import com.masspos.inventory.CorrectionReason;
 import com.masspos.user.UserRole;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -56,13 +57,9 @@ public class RawMaterialController {
     public record TakeOutRequest(@Positive long quantityMilli, @Size(max = 200) String note) {
     }
 
-    public record PurchaseRequest(@Positive long quantityMilli, @Size(max = 200) String note,
-                                  @PositiveOrZero long buyingPricePaise,
-                                  @Size(max = 120) String vendorName,
-                                  UUID vendorId) {
-    }
-
-    public record CorrectionRequest(long deltaMilli, @Size(max = 200) String note) {
+    /** A count put right by hand: how far out it was, why, and whatever is worth keeping. */
+    public record CorrectionRequest(long deltaMilli, @NotNull CorrectionReason reason,
+                                    @Size(max = 160) String notes) {
     }
 
     @GetMapping
@@ -92,14 +89,6 @@ public class RawMaterialController {
         store.delete(id);
     }
 
-    @PostMapping("/{id}/purchases")
-    @RequiresRole({UserRole.MANAGER})
-    @ResponseStatus(HttpStatus.CREATED)
-    public RawMaterialView purchase(@PathVariable UUID id, @Valid @RequestBody PurchaseRequest request) {
-        return store.purchase(id, request.quantityMilli(), request.note(), request.buyingPricePaise(),
-                request.vendorName(), request.vendorId());
-    }
-
     @PostMapping("/{id}/consumption")
     @RequiresRole({UserRole.MANAGER})
     @ResponseStatus(HttpStatus.CREATED)
@@ -107,25 +96,16 @@ public class RawMaterialController {
         return store.consume(id, request.quantityMilli(), request.note());
     }
 
-    @PostMapping("/{id}/wastage")
-    @RequiresRole({UserRole.MANAGER})
-    @ResponseStatus(HttpStatus.CREATED)
-    public RawMaterialView waste(@PathVariable UUID id, @Valid @RequestBody TakeOutRequest request) {
-        return store.waste(id, request.quantityMilli(), request.note());
-    }
-
-    @PostMapping("/{id}/vendor-returns")
-    @RequiresRole({UserRole.MANAGER})
-    @ResponseStatus(HttpStatus.CREATED)
-    public RawMaterialView returnToVendor(@PathVariable UUID id, @Valid @RequestBody TakeOutRequest request) {
-        return store.returnToVendor(id, request.quantityMilli(), request.note());
-    }
-
+    /**
+     * A count put right by hand, which with deliveries gone is the only way anything moves here
+     * besides the kitchen taking it. The reason decides the movement - wasted, sent back, or
+     * simply counted again - so there is one dialog rather than three buttons.
+     */
     @PostMapping("/{id}/corrections")
     @RequiresRole({UserRole.MANAGER})
     @ResponseStatus(HttpStatus.CREATED)
     public RawMaterialView correct(@PathVariable UUID id, @Valid @RequestBody CorrectionRequest request) {
-        return store.adjust(id, request.deltaMilli(), request.note());
+        return store.correct(id, request.deltaMilli(), request.reason(), request.notes());
     }
 
     /** One material's whole history, or every material's movements over the last {@code days}. */
@@ -139,9 +119,4 @@ public class RawMaterialController {
         return store.historySince(Instant.now().minus(Duration.ofDays(Math.max(1, Math.min(days, 370)))));
     }
 
-    @GetMapping("/vendors")
-    @RequiresRole({UserRole.MANAGER, UserRole.AUDITOR})
-    public List<String> vendors() {
-        return store.vendorsSoFar();
-    }
 }

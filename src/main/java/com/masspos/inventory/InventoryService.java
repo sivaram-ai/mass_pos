@@ -139,50 +139,53 @@ public class InventoryService {
     }
 
     /**
-     * Goods arriving from a vendor, with what they cost and who they came from.
+     * Goods arriving from a vendor, with what they cost, who they came from and which order they
+     * came in against.
      *
-     * <p>Both are kept on the movement rather than on the item: an item has one price now, a shop
-     * has a different delivery every week, and "what did we pay for these" is a question about the
-     * delivery. They are optional - a shop that does not track its buying prices leaves the price
-     * at zero and the vendor empty, and nothing asks again.
+     * <p>All three are kept on the movement rather than on the item: an item has one price now, a
+     * shop has a different delivery every week, and "what did we pay for these" is a question
+     * about the delivery.
+     *
+     * <p><b>Not reachable from a screen any more.</b> The only caller is the purchase-order
+     * service, when the goods actually turn up against an order an administrator agreed to. A
+     * manager typing a delivery straight into the stock screen was how a purchase used to reach
+     * the shop with nobody having agreed to the money.
      */
     @Transactional
     public InventoryLedgerEvent receive(UUID productId, long quantityMilli, String note,
-                                        long buyingPricePaise, String vendorName, UUID vendorId) {
+                                        long buyingPricePaise, String vendorName, UUID vendorId,
+                                        String orderNumber) {
         Product product = productOrRefuse(productId);
         return ledger.save(new InventoryLedgerEvent(product, LedgerEventType.PURCHASE_RECEIPT, quantityMilli, null,
-                counter.code(), Instant.now(), currentUser(), note, buyingPricePaise, vendorName, vendorId));
+                counter.code(), Instant.now(), currentUser(), note, buyingPricePaise, vendorName, vendorId,
+                orderNumber));
     }
 
-    /** Every vendor this shop has already received goods from, for the box to suggest from. */
-    @Transactional(readOnly = true)
-    public List<String> vendorsSoFar() {
-        return ledger.vendorsSoFar();
-    }
 
     /**
-     * Stock-take correction, either direction. The difference is recorded as its own event, so the
-     * count before the correction stays visible in the ledger.
+     * A count put right by hand: how much it moves, why, and whatever was typed beside it.
+     *
+     * <p>The one way a manager moves a count now, and the reason is what decides which movement
+     * is written - a stock take is an ADJUSTMENT, something broken is DAMAGE, goods going back to
+     * the vendor are a PURCHASE_RETURN. It replaces a Correct button and a Damage button that did
+     * the same thing with different arithmetic, and the Damage one did not stop at empty.
+     *
+     * <p>Capped at empty in both directions, as every other way out of the shelf is. A correction
+     * is the shop telling the till what is on the floor, and what is on the floor is never less
+     * than nothing: one big enough to go below zero is somebody saying "there are minus five",
+     * which is not a count of anything.
      */
     @Transactional
-    public InventoryLedgerEvent adjust(UUID productId, long deltaMilli, String note) {
-        // Capped at empty, as every other way out of the shelf is. A correction is the shop
-        // telling the till what is on the floor, and what is on the floor is never less than
-        // nothing: a correction big enough to go below zero is somebody saying "there are minus
-        // five", which is not a count of anything.
+    public InventoryLedgerEvent correct(UUID productId, long deltaMilli, CorrectionReason reason, String notes) {
+        long wanted = reason.applyTo(deltaMilli);
         long onShelf = Math.max(0, onHand(productId));
-        long delta = deltaMilli < 0 ? -Math.min(onShelf, -deltaMilli) : deltaMilli;
+        long delta = wanted < 0 ? -Math.min(onShelf, -wanted) : wanted;
         if (delta == 0) {
-            throw new IllegalArgumentException(deltaMilli == 0
+            throw new IllegalArgumentException(wanted == 0
                     ? "Say how far out the count was."
                     : "There is nothing on the shelf to take off.");
         }
-        return record(productId, LedgerEventType.ADJUSTMENT, delta, null, note);
-    }
-
-    @Transactional
-    public InventoryLedgerEvent damage(UUID productId, long quantityMilli, String note) {
-        return record(productId, LedgerEventType.DAMAGE, -Math.abs(quantityMilli), null, note);
+        return record(productId, reason.onTheShelf(), delta, null, reason.wording(notes));
     }
 
     /**

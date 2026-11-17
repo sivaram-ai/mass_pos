@@ -95,7 +95,7 @@ public class VendorService {
                 .map(payment -> new VendorProfile.Payment(payment.getId(), payment.getPaidOn(),
                         payment.getAmountPaise(), payment.getMode(), payment.getReference(), payment.getNote(),
                         who(payment.getRecordedBy()), payment.isApproved(), who(payment.getApprovedBy()),
-                        payment.getApprovedAt()))
+                        payment.getApprovedAt(), payment.getPurchaseOrderId()))
                 .toList();
 
         long boughtPaise = bought.stream().mapToLong(VendorProfile.Purchase::valuePaise).sum();
@@ -137,17 +137,17 @@ public class VendorService {
      */
     @Transactional
     public VendorProfile.Payment pay(UUID vendorId, long amountPaise, LocalDate paidOn, VendorPaymentMode mode,
-                                     String reference, String note) {
+                                     String reference, String note, UUID purchaseOrderId) {
         if (amountPaise <= 0) {
             throw new FieldRejectedException("amountPaise", "must be more than nothing");
         }
         Vendor vendor = onTheList(vendorId);
         VendorPayment payment = payments.save(new VendorPayment(vendor, amountPaise,
                 paidOn == null ? LocalDate.now(IndiaTime.ZONE) : paidOn, mode, reference, note,
-                currentUser(), Instant.now()));
+                currentUser(), Instant.now(), purchaseOrderId));
         return new VendorProfile.Payment(payment.getId(), payment.getPaidOn(), payment.getAmountPaise(),
                 payment.getMode(), payment.getReference(), payment.getNote(), who(payment.getRecordedBy()),
-                false, "", null);
+                false, "", null, payment.getPurchaseOrderId());
     }
 
     /** Only an administrator, and only once: agreeing twice to the same money is not a thing. */
@@ -167,7 +167,8 @@ public class VendorService {
         return payments.waitingForApproval().stream()
                 .map(payment -> new VendorProfile.Payment(payment.getId(), payment.getPaidOn(),
                         payment.getAmountPaise(), payment.getMode(), payment.getReference(),
-                        payment.getVendor().getName(), who(payment.getRecordedBy()), false, "", null))
+                        payment.getVendor().getName(), who(payment.getRecordedBy()), false, "", null,
+                        payment.getPurchaseOrderId()))
                 .toList();
     }
 

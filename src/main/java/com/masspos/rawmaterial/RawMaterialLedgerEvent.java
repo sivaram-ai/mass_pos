@@ -77,14 +77,24 @@ public class RawMaterialLedgerEvent extends BaseEntity {
     @Column(name = "vendor_id", updatable = false)
     private UUID vendorId;
 
+    /**
+     * The purchase order the goods came in against, by its number. Empty on everything that is not
+     * a delivery. The shelf's ledger carries the same column, for the same reason.
+     */
+    @Size(max = 16)
+    @Column(name = "order_number", length = 16, nullable = false, updatable = false,
+            columnDefinition = "varchar(16) default ''")
+    private String orderNumber = "";
+
     protected RawMaterialLedgerEvent() {
     }
 
     public RawMaterialLedgerEvent(RawMaterial rawMaterial, RawMaterialMovement type, long quantityDeltaMilli,
                                   String terminalCode, Instant occurredAt, User recordedBy, String note,
-                                  long buyingPricePaise, String vendorName, UUID vendorId) {
+                                  long buyingPricePaise, String vendorName, UUID vendorId, String orderNumber) {
         type.checkDelta(quantityDeltaMilli);
         this.vendorId = vendorId;
+        this.orderNumber = orderNumber == null ? "" : orderNumber.trim();
         this.rawMaterial = rawMaterial;
         this.type = type;
         this.quantityDeltaMilli = quantityDeltaMilli;
@@ -130,6 +140,11 @@ public class RawMaterialLedgerEvent extends BaseEntity {
 
     public String getVendorName() {
         return vendorName == null ? "" : vendorName;
+    }
+
+    /** The order these came in against, or empty where there was not one. */
+    public String getOrderNumber() {
+        return orderNumber == null ? "" : orderNumber;
     }
 
     public UUID getVendorId() {

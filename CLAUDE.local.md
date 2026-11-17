@@ -29,6 +29,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3Q | Signing in where that account is already open on another till stops and says where - counter, number, floor and when - and offers Go back or sign that one out and carry on here, chosen with the arrow keys and Enter | Done: 368 tests green, driven in the browser |
 | 3R | Nothing from inside the program reaches a counter's screen: every refusal is a sentence written for a shop, and the exception, its stack, the SQL, the paths and the ids go to the log. `ApiExceptionHandler.forTheScreen` is the gate; `api.ts` guards the browser end | Done: 377 tests green, refusals driven against a running till |
 | 3S | A counter's settings are reachable while nobody is signed in: the sign-in screen opens, from its corner, the very page the counter serves itself at first start, so the connection mode, the server's address and which of the shop's counters this machine is can all be changed without closing the program. A counter that is already billing is given a way back that changes nothing | Done: 385 tests green, driven in the browser |
+| 4C | One **Items** screen where Products and Stock were two; stock reaches a count only through a purchase order somebody approved, and **Correct** moves one by hand with a reason that decides the movement; **Space** ticks several items onto one order; the order dialog searches both lists as you type; the orders list searches and sorts like Items and says whether each one has been paid for; **F8** shows what an item has cost on every delivery; raw materials are **Non billable items** | Done: 416 tests green, driven in the browser |
 | 4B | Counts that went below zero on an older build are brought up to it, one correction each with its reason; and a stock-take correction can no longer go under either, which was the last way in | Done: 413 tests green, driven against a till carrying a -357 |
 | 4A | Purchase orders: a manager writes what the shop needs, an administrator approves or turns it down, and the counts move only when the goods are taken in - with what actually arrived, which is not always what was ordered. One order can hold things off the shelf and out of the store | Done: 413 tests green, driven in the browser |
 | 3Z | Vendors: who the shop buys from, what it has had from them across both the shelf and the store, what it has paid and what it still owes. The vendor is chosen from a dropdown when goods arrive, deliveries taken before the list existed are found by name, and a payment waits for an administrator before it moves the balance | Done: 407 tests green, driven in the browser |
@@ -196,11 +197,53 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
   only because `useShortcuts` is passed `inFront && !modalOpen` - keep that guard.
 - **F9 opens the menu everywhere** (`MENU_KEY`, handled in `App`), so it is deliberately absent from
   `ASSIGNABLE_KEYS`; `isModalOpen()` (a counter kept by `Modal`) stops it opening behind a dialog.
+- **Items is one screen where Products and Stock were two** (`screens/Items.tsx`; the two old files
+  are gone). They listed the same rows from the same table and made somebody remember which of
+  them held the price and which held the count. One list, one sort, one search, and six actions per
+  row: Edit, History, Purchase, Correct, Stop/Start, Delete. `masspos.screen` holding `products` or
+  `stock` is mapped to `items` in `remembered()`, or the machine that used them most would come
+  back to a screen that no longer exists.
+  - **Space ticks a row for an order**, and Esc puts the ticks down again (with
+    `stopPropagation`, so it does not count toward Esc Esc back to billing while there is something
+    in hand). Billing's Space takes the bill; nothing on this screen competes for it, and the
+    search box is a text field, where Space is a space.
+  - **Purchase is the only way a count goes up by buying**, and it opens `OrderDialog` with
+    whatever is ticked - or with the row the cursor is on when nothing is.
+- **Nothing on a screen takes a delivery any more.** `POST /api/stock/receipts` and
+  `POST /api/raw-materials/{id}/purchases` are gone, not hidden: stock reaches a count through
+  `PurchaseOrderService.receive` and nowhere else. `VendorPicker` went with them, and so did
+  `GET /api/stock/vendors` - a delivery now carries the vendor off the order.
+  - **Opening stock is a correction, not a purchase.** A shop installing this has 400 items on its
+    shelves that it did not buy today; `CorrectionReason.OPENING_STOCK` is how they get counted,
+    and it is what the tests use to put stock on a shelf.
+- **One Correction dialog for both stores** (`components/CorrectionDialog.tsx`, `source: 'stock' |
+  'raw'`). It asks why first, because the reason decides the movement - `DAMAGED` writes a DAMAGE,
+  `SENT_BACK` a PURCHASE_RETURN, a stock take an ADJUSTMENT - and it replaces the Received, Correct
+  and Damage buttons that did the same arithmetic three ways, one of which did not stop at empty.
+  - **The labels come from the server** (`GET /api/stock/correction-reasons`), because the server
+    writes the same label into the note the history will show. Two copies of a word drift.
+  - **A sign-constrained reason turns the quantity round** rather than refusing it: nobody means
+    "damaged minus five". The box's own label changes with the reason, and says what the count will
+    read afterwards.
+- **The order dialog searches like the billing grid** (`components/OrderDialog.tsx`): type a code or
+  part of a name, matches appear as you type from both lists at once, ↑↓ walk them, Enter or Tab
+  takes one and the cursor lands on the quantity. Ranked exact code → code prefix → name prefix →
+  contains, capped at 12, the same order the billing grid uses, because it is the same hand doing
+  the same thing. Picking on the last line opens another, so a long order is one hand on the keys.
+  - **Its Esc closes the dropdown and nothing else** (`stopPropagation` + `stopImmediatePropagation`),
+    or the dialog behind it would close with the list.
+  - **Both lists are loaded once into the dialog** rather than asked per keystroke: the catalogue is
+    already loaded on these screens, and a server-capped answer would rank the wrong rows.
 - **Where a count came from is a screen** (`components/StockHistory.tsx`, `GET /api/stock/history`).
   A count on its own has to be taken on trust, and the first thing anybody does when the screen
-  says four and the shelf holds six is ask why. **F6** on both Products and Stock opens the item
-  the cursor is on: every movement ever recorded against it, newest first, each with what the shelf
-  held once it had been applied, and with the till, the person and the time.
+  says four and the shelf holds six is ask why. **F6** on Items and Non billable items opens the
+  item the cursor is on: every movement ever recorded against it, newest first, each with what the
+  shelf held once it had been applied, and with the till, the person and the time.
+  - **The reason column may wrap, and is the only one that may.** Every other column is fixed, so a
+    table 56rem wide left it about a centimetre across in the whole-shop view and cut
+    "Bill T1-171126-0004" - the one thing somebody opens this screen to read - to "Bil…". It is
+    `whitespace-normal break-words` now, and the table is `min-w-[74rem]` when the Item column is
+    there. A bill number broken across two lines is readable; a truncated one is not.
   - **The running count is only offered where it is honest.** `InventoryService.historyOf` walks it
     backwards from today's count, which works over a whole history and not over a window that
     starts in the middle - so the shop-wide view (**F3**, last 30 days) sends `balanceAfterMilli`
@@ -213,30 +256,38 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
     without the inventory package reading the billing package back, which would be a cycle for one
     string. Movements recorded before this build have no bill on them.
   - **Read-only, deliberately.** The ledger is append-only, which is what makes the count worth
-    anything; a correction is made on the Stock screen and turns up here as its own line with
-    whatever reason was typed against it.
-  - **The whole-shop view filtered to "Came in" is the goods received report** - every delivery
-    with its vendor, what it cost and who took it in, searchable by vendor. There is no second
-    screen for it, and there should not be one until purchase orders need somewhere of their own.
+    anything; a correction is made with **Correct** and turns up here as its own line with the
+    reason written on it.
   - **A dialog focuses itself at once *and* again through a frame** (`useLayoutEffect` +
     `requestAnimationFrame`). At once, because F6 then F2 is one movement of a hand and a frame is
     long enough for both keys to arrive - the second would land on the screen behind. Again through
     a frame, because the screen underneath hands focus back to its own list when a dialog closes
     and does that through a frame, so Esc then F6 would otherwise leave the cursor behind. **Both
     were real, and both were found by driving it.**
-- **Sorting is one module for both lists** (`sorting.ts`: the six fields, the comparator, and the
-  per-machine `masspos.productSort` / `masspos.stockSort`), with `SortMenu` as a popover that *takes
-  focus* - a grid cell that kept focus behind it would still receive the arrows. F4 opens it on both
-  screens; ↑↓ pick the field, ←→ the direction, Enter and Esc both close and hand focus back, because
+- **What an item has cost is its own screen** (`components/PriceHistory.tsx`, **F8**,
+  `GET /api/purchase-orders/prices`). An item carries one buying price - whatever the last lorry
+  charged - and that answers none of the questions a shopkeeper asks. Every delivery, with the
+  vendor, the quantity, the price each, the order it came in against and who approved it; the
+  dearest row is marked. Opened from Items, from Non billable items and from any line of an order.
+- **Sorting is one module** (`sorting.ts`: the seven fields including stock value, the comparator,
+  and the per-machine `masspos.itemSort`), with `SortMenu` as a popover that *takes focus* - a grid
+  cell that kept focus behind it would still receive the arrows. **`SortMenu` takes its fields and
+  labels as props**, so the orders list uses the same popover with its own eight fields. F4 opens
+  it; ↑↓ pick the field, ←→ the direction, Enter and Esc both close and hand focus back, because
   every key applies at once and there is no pending state to discard. Its Esc calls `stopPropagation`,
   so it never counts toward Esc Esc back to billing. Code and name compare through an `Intl.Collator`
   with `numeric: true`, or "10" sorts before "2" in a shop whose codes are numbers.
-- **The Products list is the whole catalogue, filtered and sorted on screen** (`?all=true`), stopped
+- **The Items list is the whole catalogue, filtered and sorted on screen** (`?all=true`), stopped
   items included. `?q=` stays as it was for the billing grid - ranked by closeness, capped at 25,
   sellable only - because sorting a server-capped 25 rows would sort the wrong 25.
-- **Products and Stock share one list pattern** (and Bills a close cousin): a focused `div role=grid`, arrows for row and action,
-  Enter to run, dialogs returning focus to the list. Products' table is `table-fixed` with a colgroup
-  and `truncate` + `title` on the name, so a 150-character name cannot push the columns off screen.
+- **Items, Non billable items and Purchase orders share one list pattern** (and Bills a close
+  cousin): a focused `div role=grid`, arrows for row and action, Enter to run, dialogs returning
+  focus to the list. The tables are `table-fixed` with a colgroup and `truncate` + `title` on the
+  name, so a 150-character name cannot push the columns off screen.
+- **The orders list sifts what the server sent** (`screens/Purchases.tsx`). Only the dates and the
+  state go to the server; the word somebody typed, the money chips and the sort are applied here,
+  over the window that came back - the same reasoning as the Items list, and the search covers the
+  things on an order's lines so it can be found by the onions on it.
 - **Bills screen is keyboard-first** (`Invoices.tsx`): the list `div` holds focus (`role=grid`) and
   handles arrows/Enter; row actions come from `actionsFor`, which gives each action its blocked
   reason, and ←/→ skip blocked ones. F2 (window listener, off while a dialog is open) focuses the
@@ -545,9 +596,9 @@ folder and everything under it, so that is the only copy that survives one.
   writes down what is needed, an administrator agrees to the money, and the counts move only when
   the lorry arrives. Before this, a delivery was the first anybody heard of a purchase.
   - **Receiving writes no stock movements of its own.** It calls `InventoryService.receive` and
-    `RawMaterialService.purchase` - the same two the Stock and Raw materials screens call - so a
-    delivery against an order lands in the history looking exactly like one typed in by hand, with
-    the vendor, the price and the order number on it. **Never add a second way for stock to move.**
+    `RawMaterialService.purchase`, which are now the only callers either has - no screen takes a
+    delivery any more. A delivery lands in the history with the vendor, the price and the order
+    number on it. **Never add a second way for stock to move.**
   - **What arrived is not what was ordered.** Receiving takes a quantity and a cost per line and
     records what actually came; a line left out came in full at the cost on the order, which is the
     common case and should not need typing. `receivedMilli` is the only thing on a line that is not
@@ -628,15 +679,61 @@ folder and everything under it, so that is the only copy that survives one.
   - **The vendor is a name, not a reference**, and for the same reason the seller on an invoice is
     a snapshot: a vendor renamed or removed later must not rewrite the history of what this shop
     bought and from whom. When vendors become records of their own, an event keeps the name it was
-    recorded under. `GET /api/stock/vendors` offers back the distinct names already used, so the
-    box suggests rather than asks.
+    recorded under. The vendor on a delivery now comes off the order it arrived against, so
+    nothing asks anybody to type one and `GET /api/stock/vendors` has gone with the dialog that
+    did.
   - **Both columns carry SQL defaults** (`bigint default 0`, `varchar(120) default ''`), which is
     the only way a column reaches a populated table on SQLite.
     `RestartOnExistingDatabaseTest.goodsThatArrivedBeforeAnybodyWasAskedWhatTheyCostStillCount`
     drops them from a ledger that has a delivery in it, restarts, and proves the count that
     delivery contributed has not moved.
-  - **Goods received has its own request record** (`ReceiptRequest`), because damages and
-    corrections are never asked a price or a vendor and should not carry fields they ignore.
+  - **Nothing on a screen is asked a price or a vendor any more.** They come off the purchase
+    order, and `ReceiptRequest` went with the endpoint that took one.
+- **Stock reaches a count through a purchase order and nowhere else.** `POST /api/stock/receipts`
+  and `POST /api/raw-materials/{id}/purchases` are deleted, with `/adjustments`, `/damages`,
+  `/wastage` and `/vendor-returns`; what is left is `POST /api/stock/corrections` and the store's
+  own `/corrections`. A manager typing a delivery into a screen was how a purchase reached a shop
+  with nobody having agreed to the money, and a rule that only a screen enforces is not a rule -
+  which is why the endpoints are gone rather than hidden
+  (`StockGuardApiIntegrationTest.refusesToPutGoodsOnTheShelfByHand`).
+  - **What a shop already had is a correction, with Opening stock as its reason.** A shop
+    installing this has 400 items on its shelves it did not buy today, and making it write a
+    purchase order to itself for them would be a lie about where they came from. It is also how
+    every test now puts stock on a shelf.
+- **`CorrectionReason` is deliberately not persisted** (`com.masspos.inventory`). It decides which
+  ledger type a correction writes - a stock take an ADJUSTMENT, something broken a DAMAGE, goods
+  going back a PURCHASE_RETURN - and is recorded in the movement's note, so no ledger enum gains a
+  value. A new value in a persisted enum is a CHECK constraint SQLite will not alter on a till that
+  is already in a shop; this is how to add vocabulary without touching one.
+  - **The shelf maps it; the store maps it separately** (`RawMaterialService.inTheStore`), because
+    the two have their own enums and their own tables and should keep them.
+  - **The label is the server's**, served by `GET /api/stock/correction-reasons` and written into
+    the note by `CorrectionReason.wording`. The dialog shows the same string it will be filed
+    under, which two copies of the word would not survive.
+  - **A correction is capped at empty in both directions**, as every other way out of a count is.
+    The old Damage path was not, which is one of the ways a count could still go below zero.
+- **The order a delivery came in against is a column, not a note** (`order_number` on
+  `inventory_ledger_event` and `raw_material_ledger_event`, `varchar(16) default ''`). "What have we
+  paid for these over the years" is then one query; parsing it back out of "Order PO-2627-0001"
+  would be a string contract between two packages. Empty on everything that is not a delivery, and
+  on deliveries tills took in by hand before orders were the only way in.
+  `RestartOnExistingDatabaseTest.goodsThatArrivedBeforeAnybodyWasAskedWhatTheyCostStillCount`
+  drops it along with the price and the vendor and proves an upgraded till still counts.
+- **What an item has cost is read from the ledgers** (`PurchasePrices`), not from the orders: a
+  delivery is where a price is a fact, and an order that was never received never cost anything.
+  The approver is looked up once per distinct order number (`PurchaseOrderRepository.byNumbers`),
+  not once per row.
+- **A vendor payment may name the order it was for** (`VendorPayment.purchaseOrderId`), as a bare
+  UUID column and not a mapping: the purchase package already reads the vendor package, and a
+  reference back would be a cycle for one column. Nullable and always will be - a shop settling a
+  running account is not paying for one delivery.
+  - **An order's payment state is worked out, never stored** (`PurchaseOrderView.settled`), from
+    approved payments only, exactly as a vendor's balance is. A shop that pays off a balance leaves
+    every order UNPAID, which is the honest answer: nobody said which delivery the money was for.
+  - **Nothing is owed until the goods are in the shop.** An order waiting for an administrator is a
+    request and an approved one is a promise; neither is a debt. `owedPaise` is what actually
+    arrived, at the costs on the order, and zero before that - or every shop would open the screen
+    to a figure it does not owe anybody.
 - **A product is never deleted for real** (`Product.delete`). `invoice_item`, `credit_note_item` and
   `inventory_ledger_event` all hold a foreign key to `product` and are append-only, so the row cannot
   go and the references cannot be rewritten. Delete therefore sets `deleted`, clears `active`, rewrites
@@ -674,7 +771,7 @@ folder and everything under it, so that is the only copy that survives one.
     is somebody saying "there are minus five", which is not a count of anything. This was the one
     way left in.
   - **Counts recorded by an older build are put right, not rewritten** (`bringUpToZero`, offered on
-    the Stock screen when there is something to correct, `GET /api/stock/below-empty` to ask what).
+    the Items screen when there is something to correct, `GET /api/stock/below-empty` to ask what).
     One ADJUSTMENT per item, each carrying its reason, so the history reads as the stock-take it is
     rather than as a number that changed itself. The ledger is append-only; nothing else would be
     honest.

@@ -211,10 +211,11 @@ class ProductLifecycleApiIntegrationTest {
         call(post("/api/products/" + id + "/deactivate"), managerToken, null, status().isOk());
     }
 
+    /** Opening stock: what the shop already had, which is a correction and not a purchase. */
     private void receive(String id, long quantityMilli) throws Exception {
-        call(post("/api/stock/receipts"), managerToken,
+        call(post("/api/stock/corrections"), managerToken,
                 """
-                {"productId":"%s","quantityMilli":%d,"note":"opening"}
+                {"productId":"%s","deltaMilli":%d,"reason":"OPENING_STOCK","notes":"On the shelf already"}
                 """.formatted(id, quantityMilli), status().isCreated());
     }
 

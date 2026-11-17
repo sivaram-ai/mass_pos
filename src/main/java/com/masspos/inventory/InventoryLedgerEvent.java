@@ -100,21 +100,37 @@ public class InventoryLedgerEvent extends BaseEntity {
     @Column(name = "vendor_id", updatable = false)
     private UUID vendorId;
 
+    /**
+     * The purchase order the goods came in against, by its number rather than its key.
+     *
+     * <p>Written here and not read back out of a note, because "what have we paid for these over
+     * the years" is a question this column answers in one query. A number and not a reference for
+     * the same reason the vendor is a name: it is what was true when the delivery arrived.
+     *
+     * <p>Empty on everything that is not goods arriving, and on the deliveries tills took in by
+     * hand before an order was the only way in.
+     */
+    @Size(max = 16)
+    @Column(name = "order_number", length = 16, nullable = false, updatable = false,
+            columnDefinition = "varchar(16) default ''")
+    private String orderNumber = "";
+
     protected InventoryLedgerEvent() {
     }
 
     public InventoryLedgerEvent(Product product, LedgerEventType type, long quantityDeltaMilli, UUID referenceId,
                                 String terminalCode, Instant occurredAt, User recordedBy, String note) {
         this(product, type, quantityDeltaMilli, referenceId, terminalCode, occurredAt, recordedBy, note,
-                0, "", null);
+                0, "", null, "");
     }
 
     /** Goods arriving, which are the only movement anybody is asked a price or a vendor for. */
     public InventoryLedgerEvent(Product product, LedgerEventType type, long quantityDeltaMilli, UUID referenceId,
                                 String terminalCode, Instant occurredAt, User recordedBy, String note,
-                                long buyingPricePaise, String vendorName, UUID vendorId) {
+                                long buyingPricePaise, String vendorName, UUID vendorId, String orderNumber) {
         type.checkDelta(quantityDeltaMilli);
         this.vendorId = vendorId;
+        this.orderNumber = orderNumber == null ? "" : orderNumber.trim();
         this.product = product;
         this.type = type;
         this.quantityDeltaMilli = quantityDeltaMilli;
@@ -166,6 +182,11 @@ public class InventoryLedgerEvent extends BaseEntity {
     /** The vendor on the shop's list, or null where there was not one. */
     public UUID getVendorId() {
         return vendorId;
+    }
+
+    /** The order these came in against, or empty where there was not one. */
+    public String getOrderNumber() {
+        return orderNumber == null ? "" : orderNumber;
     }
 
     public String getNote() {

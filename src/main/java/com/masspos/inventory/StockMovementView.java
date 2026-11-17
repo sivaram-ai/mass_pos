@@ -24,11 +24,14 @@ import java.util.UUID;
  * @param buyingPricePaise  what one unit cost, on goods arriving; zero on everything else, and on
  *                          deliveries taken before anybody was asked for a price
  * @param vendorName        who the goods came from, as it was typed when they arrived
+ * @param orderNumber       the purchase order the goods came in against, or empty where there was
+ *                          none: a delivery a till took in by hand before an order was the only
+ *                          way in
  */
 public record StockMovementView(UUID id, Instant occurredAt, LedgerEventType type, long quantityDeltaMilli,
                                 Long balanceAfterMilli, UUID itemId, String itemCode, String name,
                                 UnitOfMeasure unit, String counterCode, String by, String note,
-                                long buyingPricePaise, String vendorName) {
+                                long buyingPricePaise, String vendorName, String orderNumber) {
 
     static StockMovementView of(InventoryLedgerEvent event, Long balanceAfterMilli) {
         Product product = event.getProduct();
@@ -37,6 +40,6 @@ public record StockMovementView(UUID id, Instant occurredAt, LedgerEventType typ
                 product.getName(), product.getUnit(), event.getTerminalCode(),
                 event.getRecordedBy() == null ? "" : event.getRecordedBy().getDisplayName(),
                 event.getNote() == null ? "" : event.getNote(),
-                event.getBuyingPricePaise(), event.getVendorName());
+                event.getBuyingPricePaise(), event.getVendorName(), event.getOrderNumber());
     }
 }

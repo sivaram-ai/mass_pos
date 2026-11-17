@@ -16,6 +16,7 @@ import org.hibernate.envers.Audited;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.UUID;
 
 /**
  * Money paid to a vendor, and whether an administrator has agreed to it yet.
@@ -63,6 +64,18 @@ public class VendorPayment extends BaseEntity {
     @Column(nullable = false, updatable = false)
     private Instant recordedAt;
 
+    /**
+     * The purchase order this money was against, where it was against one.
+     *
+     * <p>A bare id and not a mapping, because the purchase package already reads this one and a
+     * reference back would be a cycle between the two for the sake of one column. Nullable and
+     * always will be: a shop paying off a running account rather than an invoice is ordinary, and
+     * so is one paying for a delivery taken before orders existed. It is what lets an order say
+     * whether it has been paid for, which cannot be worked out from a vendor's running balance.
+     */
+    @Column(name = "purchase_order_id", updatable = false)
+    private UUID purchaseOrderId;
+
     @Column(nullable = false)
     private boolean approved;
 
@@ -76,7 +89,9 @@ public class VendorPayment extends BaseEntity {
     }
 
     public VendorPayment(Vendor vendor, long amountPaise, LocalDate paidOn, VendorPaymentMode mode,
-                         String reference, String note, User recordedBy, Instant recordedAt) {
+                         String reference, String note, User recordedBy, Instant recordedAt,
+                         UUID purchaseOrderId) {
+        this.purchaseOrderId = purchaseOrderId;
         this.vendor = vendor;
         this.amountPaise = amountPaise;
         this.paidOn = paidOn;
@@ -124,6 +139,11 @@ public class VendorPayment extends BaseEntity {
 
     public Instant getRecordedAt() {
         return recordedAt;
+    }
+
+    /** The order this was against, or null where it was against the running account. */
+    public UUID getPurchaseOrderId() {
+        return purchaseOrderId;
     }
 
     public boolean isApproved() {

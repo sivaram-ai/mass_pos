@@ -57,6 +57,7 @@ class RestartOnExistingDatabaseTest {
         try (Connection db = open(); Statement sql = db.createStatement()) {
             sql.execute("ALTER TABLE inventory_ledger_event DROP COLUMN buying_price_paise");
             sql.execute("ALTER TABLE inventory_ledger_event DROP COLUMN vendor_name");
+            sql.execute("ALTER TABLE inventory_ledger_event DROP COLUMN order_number");
             sql.execute("INSERT INTO product (id, version, created_at, updated_at, sku, name, hsn_code, unit,"
                     + " mrp_paise, selling_price_paise, tax_inclusive, gst_rate_bp, cess_rate_bp, active,"
                     + " bill_without_stock, deleted)"
@@ -73,11 +74,12 @@ class RestartOnExistingDatabaseTest {
         }
 
         try (Connection db = open(); Statement sql = db.createStatement();
-             ResultSet row = sql.executeQuery("SELECT buying_price_paise, vendor_name, quantity_delta_milli"
-                     + " FROM inventory_ledger_event WHERE product_id = '" + productId + "'")) {
+             ResultSet row = sql.executeQuery("SELECT buying_price_paise, vendor_name, quantity_delta_milli,"
+                     + " order_number FROM inventory_ledger_event WHERE product_id = '" + productId + "'")) {
             assertThat(row.next()).isTrue();
             assertThat(row.getLong(1)).as("nothing was paid, as far as this till knows").isZero();
             assertThat(row.getString(2)).as("and nobody was named").isEmpty();
+            assertThat(row.getString(4)).as("and it came in against no order, because there were none").isEmpty();
             assertThat(row.getLong(3)).as("the stock it brought in is untouched").isEqualTo(25_000);
         }
     }

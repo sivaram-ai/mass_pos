@@ -112,10 +112,45 @@ export interface StockMovement {
   buyingPricePaise: number
   /** Who the goods came from, as it was typed when they arrived. */
   vendorName: string
+  /** The order the goods came in against, or empty where there was none. */
+  orderNumber: string
+}
+
+/**
+ * Why a count was put right by hand. The labels come from the server (`/api/stock/
+ * correction-reasons`) rather than being written out here: the server builds the note the history
+ * will show from the same label, and two copies of a word drift.
+ */
+export type CorrectionReasonName =
+  | 'STOCK_TAKE' | 'OPENING_STOCK' | 'DAMAGED' | 'EXPIRED' | 'WASTED' | 'TAKEN' | 'SENT_BACK'
+  | 'ENTERED_WRONGLY'
+
+export interface CorrectionReason {
+  name: CorrectionReasonName
+  label: string
+  /** -1 can only take stock off, +1 can only put it on, 0 either way. */
+  sign: number
+}
+
+/** One delivery of one thing, at the price it came in at. */
+export interface PaidPrice {
+  when: string
+  vendorName: string
+  quantityMilli: number
+  unit: Unit
+  unitCostPaise: number
+  valuePaise: number
+  /** Empty for a delivery taken in by hand before an order was the only way in. */
+  orderNumber: string
+  approvedBy: string
+  by: string
 }
 
 export type PurchaseOrderStatus =
   'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'RECEIVED' | 'CANCELLED'
+
+/** Whether the money has followed the goods, worked out from the payments against the order. */
+export type Settled = 'UNPAID' | 'PART_PAID' | 'PAID' | 'NOT_DUE'
 
 export interface PurchaseOrderLine {
   id: string
@@ -149,6 +184,11 @@ export interface PurchaseOrder {
   decision: string
   receivedBy: string
   receivedAt: string | null
+  /** What the vendor can ask for: what arrived once received, what was asked for before that. */
+  owedPaise: number
+  /** What an administrator has agreed was paid against this order. */
+  paidPaise: number
+  settled: Settled
   lines: PurchaseOrderLine[]
 }
 
@@ -200,6 +240,8 @@ export interface VendorPaymentRow {
   approved: boolean
   approvedBy: string
   approvedAt: string | null
+  /** The order it was against, or null where it was against the running account. */
+  purchaseOrderId: string | null
 }
 
 export interface VendorProfile {

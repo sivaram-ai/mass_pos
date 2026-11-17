@@ -13,6 +13,10 @@ vendor-private.key
 licences.csv
 *.lic
 
+# The copy a till keeps outside its own folder. A dev run from the repo writes one here, and it
+# holds a shop's data: it never belongs in the repo.
+GoRockitPOS-backups/
+
 # Local SQLite databases
 *.db
 *.db-wal

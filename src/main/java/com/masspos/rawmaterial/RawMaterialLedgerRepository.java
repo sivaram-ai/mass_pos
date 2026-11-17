@@ -52,13 +52,6 @@ public interface RawMaterialLedgerRepository extends JpaRepository<RawMaterialLe
             """)
     List<Object[]> boughtPerVendorName();
 
-    /** Everyone this shop has already bought raw materials from, for the box to suggest from. */
-    @Query("""
-            select distinct e.vendorName from RawMaterialLedgerEvent e
-            where e.vendorName <> ''
-            order by e.vendorName
-            """)
-    List<String> vendorsSoFar();
 
     /**
      * Spelled out rather than derived from the method name: {@code findByRawMaterialId...} reads
@@ -78,4 +71,17 @@ public interface RawMaterialLedgerRepository extends JpaRepository<RawMaterialLe
             order by e.occurredAt desc
             """)
     List<RawMaterialLedgerEvent> between(@Param("from") Instant from, @Param("to") Instant to);
+
+    /**
+     * Every delivery of one material, newest first: what it cost each time and who it came from.
+     * The answer to "are we paying more for onions than we were", which is a question about the
+     * deliveries and not about the item.
+     */
+    @Query("""
+            select e from RawMaterialLedgerEvent e
+            where e.rawMaterial.id = :materialId
+              and e.type = com.masspos.rawmaterial.RawMaterialMovement.PURCHASE
+            order by e.occurredAt desc
+            """)
+    List<RawMaterialLedgerEvent> deliveriesOf(@Param("materialId") UUID materialId);
 }

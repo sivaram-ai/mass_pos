@@ -18,7 +18,8 @@ on different floors.
 |---|---|
 | Billing | Keyboard-first grid: code or name lookup in each row, rate, quantity and discount cells, Space to take the bill, hold and resume, split payments (cash / UPI / card / voucher), change due, print |
 | GST | Tax-inclusive or exclusive pricing, CGST + SGST or IGST by place of supply, cess, round-off to the rupee, gapless numbering per till. Shops without a GSTIN bill without tax |
-| Stock | Goods receipts, corrections, damages; stock is the sum of movements, never a number that gets overwritten. Items that are never counted (cooked food, loose produce) bill without it |
+| Items | One screen for what the shop sells and how many there are. Stock is the sum of movements, never a number that gets overwritten, and it never goes below zero. Items that are never counted (cooked food, loose produce) bill without it |
+| Buying | Purchase orders a manager writes and an administrator approves; counts move only when the goods are taken in. Vendors, what is owed them, and what every item has cost on every delivery. Non billable items - the store behind the kitchen - bought and corrected the same way |
 | Bills | Day list of bills and returns worked from the keyboard, search by bill number, full bill view with every version of an edited bill, reprint as DUPLICATE, edit, return, cancel with a reason (stock goes back) |
 | Reports | Day takings by tender, cashier and till; best sellers; GST rate-wise and HSN summaries for GSTR-1; the audit trail |
 | Staff | Cashier, manager, auditor and admin accounts; PIN sign-in that lasts the shift |
@@ -47,7 +48,8 @@ Then open **http://127.0.0.1:8765**.
 3. Open **Menu > Licence**, send the machine ID shown there to your GO RockIt supplier, and paste
    the licence key they send back. Until then everything works except issuing bills, edits and
    returns.
-4. Add a product under **Products**, record what arrived under **Stock**, and bill it.
+4. Add an item under **Items**, say what is already on the shelf with **Correct · Opening
+   stock**, and bill it. Anything bought after that comes in on a purchase order.
 
 Data lives in `%LOCALAPPDATA%\GoRockitPOS\data` (Windows) or `~/GoRockitPOS/data`: the database, logs,
 `pos.properties` and, when no printer is configured, the receipts as text files under
@@ -136,22 +138,48 @@ found on whatever day it belongs to. `Enter`, `Esc` or `↓` leaves a header box
 Opening a bill that was edited shows every version, oldest first, with the one opened marked
 **(Opened)**, so the cancelled original and its replacement read side by side.
 
-### The Products screen
+### The Items screen
 
-The same keyboard: the cursor starts in the list, `↑` `↓` choose an item, `←` `→` choose **Edit** or
-**Stop**, and `Enter` does it (Stop asks first). `F2` searches by name, code, barcode or HSN and `F3`
-adds a product; `Enter` or `Esc` goes back to the list. In the product dialog `Enter` saves from any
-box and `Esc` closes it. Long names are cut to keep the columns lined up, with the whole name on
-hover.
+**Items** is everything the shop sells: what each thing is, what it costs and how many there are.
+Products and Stock used to be two screens listing the same items from the same table, and a
+shopkeeper holding a thing in their hand has one question about it, not two.
+
+The same keyboard as everywhere else: the cursor starts in the list, `↑` `↓` choose an item,
+`←` `→` choose **Edit · History · Purchase · Correct · Stop · Delete**, and `Enter` does it (Stop
+and Delete ask first). `F2` searches by name, code, barcode or HSN, `F3` adds an item, `F4` sorts,
+`F6` opens the history, `F7` writes a purchase order and `F8` shows what the item has cost. Long
+names are cut to keep the columns lined up, with the whole name on hover.
+
+**`Space` ticks an item**, and the Purchase button then says how many are ticked: press it, or
+`F7`, and they all go onto one order. `Esc` puts them down again.
 
 The **item code** can be changed at any time, including after the item has been billed: it is the
-code the cashier types, and bills already taken keep the code they were sold under. One code belongs
-to one item, so a code another item already uses is refused and names that item.
+code the cashier types, and bills already taken keep the code they were sold under. One code
+belongs to one item, so a code another item already uses is refused and names that item.
 
 **Bill without stock** sells the item whatever the stock count says, for cooked food, loose produce,
 services and anything else whose stock is never counted. It only matters when *Refuse to sell items
 the stock says you do not have* is ticked in Settings: items with this box ticked are the exception
 to that rule, and the list shows them as "not counted".
+
+### Stock only arrives on a purchase order
+
+There is **no way to type a delivery straight into a count**. Goods reach the shelf and the store
+through a purchase order somebody agreed to, and nowhere else — which is the whole point of having
+orders: before them, a delivery was the first anybody in the shop heard of a purchase.
+
+**Correct** is what moves a count by hand, and it asks why. The reason decides what is recorded:
+
+| Reason | What it writes |
+|---|---|
+| Stock take, Entered wrongly | A correction, either direction |
+| Opening stock | What the shop already had on the day it started |
+| Damaged, Expired, Wasted or spilt, Taken without paying | A loss |
+| Sent back to the vendor | Goods going back |
+
+Notes go beside the reason, and the till records who did it and when. A count still never goes
+below zero: a correction big enough to take it under is capped at empty, because "minus five" is
+not a count of anything.
 
 ### Purchase orders
 
@@ -159,6 +187,11 @@ to that rule, and the list shows them as "not counted".
 the shop needs and from whom; it sits as **Waiting** until an **administrator approves it** — only
 they can agree to the money. When the lorry arrives, **Take the goods in** moves the counts, and
 not before.
+
+Write one from the orders screen (`F3`), or straight from Items and Non billable items with
+**Purchase** (`F7`), which starts the order with whatever was ticked. The item box searches as you
+type, by code or by name, across both lists at once: `↓` and `↑` walk the matches, `Enter` or `Tab`
+takes one and the cursor lands on the quantity.
 
 The receiving screen opens on what was ordered, so a delivery that came in full needs one key. If
 the lorry brought eight of the twelve, change the figure and that is what is recorded — the order
@@ -169,6 +202,17 @@ up.
 An order can hold things off the shelf and out of the store together, because a vendor who sells
 you bottled water and onions sends one lorry.
 
+**The list is worked like Items.** `F2` searches everything on an order — its number, the vendor,
+the people who wrote, approved and received it, and the things on its lines, so an order can be
+found by the onions on it. `←` `→` pick which states to show, the **Money** chips pick paid or
+unpaid, and the two date boxes pick a window (the last 90 days by default). `F4` sorts by date,
+vendor, item, how much, cost each, total, approval or payment, either way up, and the choice is
+remembered on that machine.
+
+**Nothing is owed until the goods are in the shop.** An order waiting or approved shows no money
+at all; once it is received it is owed for what actually arrived, and the vendor's payments say
+whether it has been paid.
+
 ### Vendors
 
 **Vendors** are the people the shop buys from. The list shows what has been bought from each of
@@ -176,62 +220,65 @@ them, what has been paid, and what is still owed; **Enter** opens one, where you
 delivery — off the shelf and out of the store together — and every payment. **F3** adds one, **F2**
 searches.
 
-When goods arrive, the vendor is **chosen from a dropdown** rather than typed, on both Goods
-received and raw material purchases. Somebody you buy from once, off a lorry, can still just be
-typed in: the delivery then carries their name and nothing else, exactly as it did before.
-
 **A payment waits for an administrator.** A manager records money handed over and it shows at once,
 marked as waiting; it does not change what the shop believes it owes until an administrator
 approves it. The person who hands money over is rarely the person who decides it should be handed
 over.
 
+**A payment can name the order it was for.** Choose one on the payment dialog and it fills in what
+is left owing on it; that order then reads **Part paid** or **Paid** on the orders screen. Leave it
+on the running account for a shop that pays off a balance rather than an invoice — the vendor's own
+figure is where that shop looks.
+
 > Note on the word: a **vendor** is somebody the shop buys *from*. A **supplier** in this till is
 > the steward who carried the order to the table, named on hotel bills. They are different lists
 > and they always were.
 
-### Raw materials
+### Non billable items
 
-**Raw materials** is the store behind the kitchen: butter, onions, oil, flour, spices, carrier
-bags — everything the shop buys and uses but never sells. It sits in the menu beside Stock and
-works the same way, so there is nothing new to learn: the cursor starts in the list, ↑ ↓ choose a
-material, ← → choose **Bought · Used · Wasted · Correct · Edit**, and Enter does it. **F3** adds
-one, **F2** searches, **Delete** removes, and **F6** shows where its count came from.
+**Non billable items** is the store behind the kitchen: butter, onions, oil, flour, spices, carrier
+bags — everything the shop buys and uses but never sells. It works exactly like Items, so there is
+nothing new to learn: the cursor starts in the list, `↑` `↓` choose, `←` `→` choose
+**Edit · History · Purchase · Used · Correct**, and `Enter` does it. `F3` adds one, `F2` searches,
+`Delete` removes, `F6` shows where a count came from, `F7` orders and `F8` shows what it has cost.
+`Space` ticks several for one order, as on Items.
 
-A purchase asks the buying price and the vendor, exactly as Goods received does. Give a material a
-*tell me below* level and the list marks it when the store runs down to it, so it gets onto the
-next order.
+Give one a *tell me below* level and the list marks it when the store runs down to it, so it gets
+onto the next order.
 
-**Raw materials never appear when billing.** They are kept apart from the catalogue entirely
-rather than hidden from it, so a cashier typing "on" is never offered Onions among the things they
-can ring up. The store's count stops at empty too: asking to use 30 kg when there are 25 takes off
-25 and says so.
+**They never appear when billing.** They are kept apart from the catalogue entirely rather than
+hidden from it, so a cashier typing "on" is never offered Onions among the things they can ring up.
+The store's count stops at empty too: asking to use 30 kg when there are 25 takes off 25 and says
+so.
 
-### Goods received
+### Where a count came from
 
-**Goods received** asks two more things, both optional: the **buying price** — what one unit cost
-you, with the total shown back as you type it — and the **vendor** it came from, which is suggested
-from whoever you have taken deliveries from before. Both are kept against that delivery for good,
-so what you paid in March is still answerable in December whatever the item is priced at now, and
-both show up in the history. Leave them empty and you are never asked again.
+**History (F6)** answers "why does it say four when there are six on the shelf". Press **F6** on
+the item the cursor is on: every movement ever recorded against it, newest first — what came in and
+against which order, what sold and on which bill, what came back, the losses, and the corrections
+somebody made by hand — each with the count after it, the till, the person and the time. `←` `→`
+pick a kind, `F2` searches, `F4` changes the order, and **F3** swaps between this item and the
+whole shop's last 30 days. Nothing here can be edited: a correction is made with **Correct** and
+appears here as its own line with the reason written on it.
 
-**History (F6)** answers "why does it say four when there are six on the shelf". On Products or
-Stock, press **F6** on the item you are on: every movement ever recorded against it, newest first —
-what came in, what sold and on which bill, what came back, the damage, and the corrections somebody
-made by hand — each with the count after it, the till, the person and the time. ← → pick a kind, F2
-searches, F4 changes the order, and **F3** swaps between this item and the whole shop's last 30
-days. Nothing here can be edited: a correction is made on the Stock screen and appears here as its
-own line with the reason typed against it.
+**What it has cost (F8)** is the other half of that question: every delivery of the item, with the
+vendor, how much came, what one cost, what it came to, the order it arrived against and who
+approved it. The item itself carries one buying price — whatever the last lorry charged — and that
+answers nothing; whether onions have got dearer, and which of two vegetable men is cheaper, are
+questions about the deliveries. It opens from Items, from Non billable items, and from any line of
+a purchase order.
 
 **The stock count never goes below zero.** A sale takes off what the shelf has and no more, so an
 item that has run out stays at 0 however many of it you sell. The bill is unaffected — it carries
 the full quantity, and so do the takings, the GST and the customer's copy. Cancelling a bill puts
-back exactly what it took off the shelf, not what it sold. A stock-take correction cannot take a
-count under either.
+back exactly what it took off the shelf, not what it sold. A correction cannot take a count under
+either.
 
-**If your counts already went below zero** on an older version, the Stock screen says how many and
+**If your counts already went below zero** on an older version, the Items screen says how many and
 by how much, and offers to **bring them to zero**. Each one gets its own correction with the reason
 written on it, so the history reads as the stock-take it is — nothing is rewritten, because the
 ledger never is.
+
 
 ### Changing a bill after it was taken
 
@@ -255,9 +302,9 @@ ledger never is.
 | Role | Can do |
 |---|---|
 | **Cashier** | Bill, park and resume, reprint, open the drawer with a reason |
-| **Manager** | Also products, prices, stock, cancelling or editing a bill, returns and refunds, day and GST reports |
+| **Manager** | Also items, prices, corrections, writing purchase orders and taking deliveries in, vendors and payments, cancelling or editing a bill, returns and refunds, day and GST reports |
 | **Auditor** | Read-only: every report, GST figures and the audit trail. Cannot bill or edit. |
-| **Admin** | Everything, plus staff accounts, shop settings and the shop's theme |
+| **Admin** | Everything, plus staff accounts, shop settings, the shop's theme, and the two decisions about money: approving a purchase order and approving a payment to a vendor |
 
 Signing in gives a token that **never expires** — a cashier stays signed in until Log out, which is
 what a shop floor needs. Changing a PIN signs that person out of every *other* till. A new or reset
@@ -388,7 +435,7 @@ is not a loopback name are refused. Together these stop a web page open on the t
 | Staff | `GET/POST /api/users`, `PUT /api/users/{id}`, `POST /api/users/{id}/pin` |
 | Catalogue | `GET /api/products?q=`, `POST /api/products`, `PUT /api/products/{id}`, `POST /api/products/{id}/deactivate` |
 | Catalogue as a sheet | `GET /api/products/export` (CSV out), `POST /api/products/import` (CSV in, all rows or none) |
-| Stock | `GET /api/stock`, `POST /api/stock/receipts`, `/adjustments`, `/damages` |
+| Stock | `GET /api/stock`, `/history`, `/correction-reasons`, `POST /api/stock/corrections` |
 | Billing | `POST /api/sales`, `POST /api/sales/quote`, `GET /api/invoices`, `GET /api/invoices/last`, `GET /api/invoices/lookup?number=`, `GET /api/invoices/{id}`, `GET /api/invoices/{id}/history`, `POST /api/invoices/{id}/cancel`, `POST /api/invoices/{id}/replace` (edit), `POST /api/invoices/{id}/receipt` |
 | Returns | `GET /api/invoices/{id}/returnable`, `POST /api/returns/quote`, `POST /api/returns`, `GET /api/returns`, `GET /api/returns/lookup?number=`, `GET /api/returns/{id}`, `POST /api/returns/{id}/receipt` |
 | Held bills | `GET/POST /api/holds`, `DELETE /api/holds/{id}` |
@@ -499,7 +546,8 @@ On macOS use `--type dmg --mac-package-identifier com.masspos.pos`.
 
 ```
 frontend/                React + TypeScript + Tailwind; builds into src/main/resources/static
-  src/screens/           Billing, Products, Stock, Invoices, Reports, Settings, Users, Login
+  src/screens/           Billing, Items, NonBillableItems, Purchases, Vendors, Invoices,
+                         Reports, Settings, Users, Login
   src/api.ts             fetch wrapper, money and quantity formatting
   src/shortcuts.ts       configurable keyboard map
 src/main/java/com/masspos/

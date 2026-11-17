@@ -158,7 +158,7 @@ class StockGuardApiIntegrationTest {
         assertThat(sold.get("by").asText()).isNotEmpty();
 
         JsonNode received = history.get(1);
-        assertThat(received.get("type").asText()).isEqualTo("PURCHASE_RECEIPT");
+        assertThat(received.get("type").asText()).isEqualTo("OPENING_STOCK");
         assertThat(received.get("quantityDeltaMilli").asLong()).isEqualTo(3_000);
         assertThat(received.get("balanceAfterMilli").asLong())
                 .as("what the shelf held after the goods came in").isEqualTo(3_000);
@@ -181,42 +181,67 @@ class StockGuardApiIntegrationTest {
     }
 
     /**
-     * What a delivery cost and who it came from, kept on the movement itself. An item has one
-     * price now; a shop has a different delivery every week, and "what did we pay for these" is a
-     * question about the delivery.
+     * Goods cannot be put on the shelf by hand at all any more.
+     *
+     * <p>That was the way a purchase used to reach a shop with nobody having agreed to the money:
+     * a manager typed a delivery into the stock screen and it was the first anybody heard of it.
+     * Stock now arrives against a purchase order an administrator approved, and the endpoint that
+     * took a delivery is gone - not hidden on a screen, gone, which is the only version of this
+     * that is worth anything.
      */
     @Test
-    void keepsWhatADeliveryCostAndWhoItCameFrom() throws Exception {
+    void refusesToPutGoodsOnTheShelfByHand() throws Exception {
         String productId = newProduct("GUARD-8", "Ghee tin", false);
 
         call(post("/api/stock/receipts"), managerToken, """
                 {"productId":"%s","quantityMilli":6000,"note":"Lorry 44",
                  "buyingPricePaise":48000,"vendorName":"Kumar Traders"}"""
-                .formatted(productId), status().isCreated());
+                .formatted(productId), status().is4xxClientError());
 
-        JsonNode arrived = call(get("/api/stock/history?productId=" + productId), managerToken, null,
-                status().isOk()).get(0);
-        assertThat(arrived.get("buyingPricePaise").asLong()).isEqualTo(48_000);
-        assertThat(arrived.get("vendorName").asText()).isEqualTo("Kumar Traders");
-        assertThat(arrived.get("note").asText()).isEqualTo("Lorry 44");
-
-        assertThat(call(get("/api/stock/vendors"), managerToken, null, status().isOk()).toString())
-                .as("offered back the next time somebody takes a delivery in")
-                .contains("Kumar Traders");
+        assertThat(stockOf(productId)).as("nothing reached the shelf").isZero();
     }
 
-    /** And a shop that does not track what it pays is never made to: both are optional. */
+    /**
+     * What a shop already had on its shelves the day it started is a correction, with Opening
+     * stock as its reason - the shop saying what is on the floor, which is a different thing from
+     * buying something. It carries no price and no vendor, because nobody bought it today.
+     */
     @Test
-    void takesADeliveryInWithNoPriceAndNoVendor() throws Exception {
+    void takesOpeningStockWithNoPriceAndNoVendor() throws Exception {
         String productId = newProduct("GUARD-9", "Salt 1kg", false);
 
         receive(productId, 4_000);
 
         JsonNode arrived = call(get("/api/stock/history?productId=" + productId), managerToken, null,
                 status().isOk()).get(0);
+        assertThat(arrived.get("type").asText()).isEqualTo("OPENING_STOCK");
         assertThat(arrived.get("buyingPricePaise").asLong()).isZero();
         assertThat(arrived.get("vendorName").asText()).isEmpty();
+        assertThat(arrived.get("orderNumber").asText()).isEmpty();
         assertThat(arrived.get("quantityDeltaMilli").asLong()).isEqualTo(4_000);
+        assertThat(arrived.get("note").asText()).contains("Opening stock");
+    }
+
+    /**
+     * The reason is what decides the movement, so damage is DAMAGE and not a correction - and it
+     * stops at empty, which the old Damage button did not.
+     */
+    @Test
+    void writesTheMovementTheReasonAsksFor() throws Exception {
+        String productId = newProduct("GUARD-12", "Glass tumbler", false);
+        receive(productId, 6_000);
+
+        call(post("/api/stock/corrections"), managerToken, """
+                {"productId":"%s","deltaMilli":2000,"reason":"DAMAGED","notes":"Crate dropped"}"""
+                .formatted(productId), status().isCreated());
+
+        JsonNode broken = call(get("/api/stock/history?productId=" + productId), managerToken, null,
+                status().isOk()).get(0);
+        assertThat(broken.get("type").asText()).as("damage, not a correction").isEqualTo("DAMAGE");
+        assertThat(broken.get("quantityDeltaMilli").asLong())
+                .as("turned round rather than refused: nobody means damaged minus two").isEqualTo(-2_000);
+        assertThat(broken.get("note").asText()).isEqualTo("Damaged - Crate dropped");
+        assertThat(stockOf(productId)).isEqualTo(4_000);
     }
 
     /**
@@ -259,16 +284,17 @@ class StockGuardApiIntegrationTest {
         String productId = newProduct("GUARD-11", "Payasam", true);
         receive(productId, 2_000);
 
-        call(post("/api/stock/adjustments"), managerToken, """
-                {"productId":"%s","deltaMilli":-5000,"note":"Counted the shelf"}""".formatted(productId),
-                status().isCreated());
+        call(post("/api/stock/corrections"), managerToken, """
+                {"productId":"%s","deltaMilli":-5000,"reason":"STOCK_TAKE","notes":"Counted the shelf"}"""
+                .formatted(productId), status().isCreated());
 
         assertThat(stockOf(productId)).isZero();
     }
 
+    /** Opening stock: the only way goods reach the shelf without a purchase order. */
     private void receive(String productId, long quantityMilli) throws Exception {
-        call(post("/api/stock/receipts"), managerToken, """
-                {"productId":"%s","quantityMilli":%d,"note":"Opening"}"""
+        call(post("/api/stock/corrections"), managerToken, """
+                {"productId":"%s","deltaMilli":%d,"reason":"OPENING_STOCK","notes":"On the shelf already"}"""
                 .formatted(productId, quantityMilli), status().isCreated());
     }
 

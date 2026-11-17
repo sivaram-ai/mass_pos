@@ -67,8 +67,8 @@ export type HistoryOf = { itemId: string; itemCode: string; name: string } | nul
 export type HistorySource = 'stock' | 'raw'
 
 const SOURCES: Record<HistorySource, { path: string; of: string; what: string }> = {
-  stock: { path: '/api/stock/history', of: 'productId', what: 'Stock history' },
-  raw: { path: '/api/raw-materials/history', of: 'materialId', what: 'Store history' },
+  stock: { path: '/api/stock/history', of: 'productId', what: 'History' },
+  raw: { path: '/api/raw-materials/history', of: 'materialId', what: 'Non billable history' },
 }
 
 /**
@@ -149,7 +149,7 @@ export function StockHistory({ of, source = 'stock', onClose }: {
       if (!looking) {
         return true
       }
-      return `${row.name} ${row.itemCode} ${row.note} ${row.by} ${row.counterCode} ${row.vendorName}`
+      return `${row.name} ${row.itemCode} ${row.note} ${row.by} ${row.counterCode} ${row.vendorName} ${row.orderNumber}`
         .concat(' ', WHAT[row.type]).toLowerCase().includes(looking)
     })
     const byTime = (a: StockMovement, b: StockMovement) => a.occurredAt.localeCompare(b.occurredAt)
@@ -297,7 +297,14 @@ export function StockHistory({ of, source = 'stock', onClose }: {
               : 'Nothing has moved this item yet.'}
           </Empty>
         ) : (
-          <table className="w-full min-w-[56rem] table-fixed text-sm">
+          /*
+           * Wider when the Item column is there. With every column fixed but the reason, a table
+           * only 56rem wide left that one about a centimetre across in the whole-shop view - so
+           * "Bill T1-171126-0004", the one thing somebody opens this screen to read, was cut to
+           * "Bilâ€¦". The reason column is also the only one that may wrap: a bill number broken
+           * across two lines is still readable, and a truncated one is not.
+           */
+          <table className={`w-full ${wholeShop || !of ? 'min-w-[74rem]' : 'min-w-[60rem]'} table-fixed text-sm`}>
             <colgroup>
               <col className="w-40" />
               {(wholeShop || !of) && <col className="w-56" />}
@@ -360,11 +367,13 @@ export function StockHistory({ of, source = 'stock', onClose }: {
                         of their own: they are only ever filled in on goods arriving, and a column
                         that is empty on nine rows out of ten is a column nobody reads. */}
                     <td className="py-1.5 pl-3 text-slate-600">
-                      <div className="truncate" title={row.note}>{row.note || '—'}</div>
-                      {(row.vendorName || row.buyingPricePaise > 0) && (
-                        <div className="truncate text-xs text-slate-400">
+                      <div className="whitespace-normal break-words" title={row.note}>{row.note || '—'}</div>
+                      {(row.vendorName || row.buyingPricePaise > 0 || row.orderNumber) && (
+                        <div className="whitespace-normal break-words text-xs text-slate-400">
+                          {row.orderNumber && <span className="num">{row.orderNumber}</span>}
+                          {row.orderNumber && row.vendorName && ' · '}
                           {row.vendorName}
-                          {row.vendorName && row.buyingPricePaise > 0 && ' · '}
+                          {(row.vendorName || row.orderNumber) && row.buyingPricePaise > 0 && ' · '}
                           {row.buyingPricePaise > 0 && (
                             <span className="num">
                               {rupees(row.buyingPricePaise)} each

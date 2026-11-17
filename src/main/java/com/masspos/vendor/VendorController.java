@@ -49,11 +49,16 @@ public class VendorController {
                                 boolean active) {
     }
 
+    /**
+     * @param purchaseOrderId the order being paid for, where the money is against one. Optional: a
+     *                        shop settling a running account is not paying for one delivery.
+     */
     public record PaymentRequest(@Positive long amountPaise,
                                  @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate paidOn,
                                  @NotNull VendorPaymentMode mode,
                                  @Size(max = 60) String reference,
-                                 @Size(max = 200) String note) {
+                                 @Size(max = 200) String note,
+                                 UUID purchaseOrderId) {
     }
 
     @GetMapping
@@ -97,7 +102,7 @@ public class VendorController {
     @ResponseStatus(HttpStatus.CREATED)
     public VendorProfile.Payment pay(@PathVariable UUID id, @Valid @RequestBody PaymentRequest request) {
         return vendors.pay(id, request.amountPaise(), request.paidOn(), request.mode(), request.reference(),
-                request.note());
+                request.note(), request.purchaseOrderId());
     }
 
     /** Everything waiting on an administrator, oldest first. */

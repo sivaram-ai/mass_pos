@@ -9,9 +9,8 @@ import type { LicenseStatus, Principal, Role, SettingsView } from './types'
 import { Login, ChangePin } from './screens/Login'
 import Billing from './screens/Billing'
 import type { BillingRequest } from './screens/Billing'
-import Products from './screens/Products'
-import Stock from './screens/Stock'
-import RawMaterials from './screens/RawMaterials'
+import Items from './screens/Items'
+import NonBillableItems from './screens/NonBillableItems'
 import Vendors from './screens/Vendors'
 import Purchases from './screens/Purchases'
 import Invoices from './screens/Invoices'
@@ -24,7 +23,7 @@ import License, { LicenseBanner } from './screens/License'
 import { Banner, isModalOpen } from './components/ui'
 import { MENU_KEY, useScreenKeys } from './shortcuts'
 
-type Screen = 'billing' | 'products' | 'stock' | 'raw' | 'vendors' | 'purchases' | 'invoices'
+type Screen = 'billing' | 'items' | 'raw' | 'vendors' | 'purchases' | 'invoices'
   | 'reports' | 'users' | 'theme' | 'settings' | 'license'
 
 const SCREEN_KEY = 'masspos.screen'
@@ -32,11 +31,18 @@ const SCREEN_KEY = 'masspos.screen'
 /**
  * Refreshing is a page reload, so the screen has to be remembered: a manager checking a report
  * should land back on the report, not on the billing grid.
+ *
+ * <p>A machine that was last on Products or Stock comes back to Items, which is what those two
+ * became. Without that it would come back to a screen that no longer exists and show nothing at
+ * all, on the one machine whose owner had been using them most.
  */
 function remembered(): Screen {
   try {
-    const saved = localStorage.getItem(SCREEN_KEY) as Screen | null
-    return saved ?? 'billing'
+    const saved = localStorage.getItem(SCREEN_KEY)
+    if (saved === 'products' || saved === 'stock') {
+      return 'items'
+    }
+    return (saved as Screen | null) ?? 'billing'
   } catch {
     return 'billing'
   }
@@ -65,11 +71,12 @@ const ASK_AGAIN_MS = 3000
 const SCREENS: { id: Screen; label: string; roles: Role[] }[] = [
   { id: 'billing', label: 'Billing', roles: ['CASHIER', 'MANAGER'] },
   { id: 'invoices', label: 'Bills', roles: ['CASHIER', 'MANAGER', 'AUDITOR'] },
-  { id: 'products', label: 'Products', roles: ['MANAGER'] },
-  { id: 'stock', label: 'Stock', roles: ['MANAGER'] },
-  // The store behind the kitchen. A manager's screen, and an auditor may read it, exactly as
-  // stock is: nothing here is part of taking a bill.
-  { id: 'raw', label: 'Raw materials', roles: ['MANAGER', 'AUDITOR'] },
+  // What the shop sells: what each thing is, and how many there are. One screen, because a
+  // shopkeeper holding a thing has one question about it.
+  { id: 'items', label: 'Items', roles: ['MANAGER'] },
+  // The store behind the kitchen: what the shop buys and uses but never sells. A manager's
+  // screen, and an auditor may read it, exactly as the items are.
+  { id: 'raw', label: 'Non billable items', roles: ['MANAGER', 'AUDITOR'] },
   // Who the shop buys from and what it owes them. Approving a payment is an administrator's job,
   // which the screen enforces and so does the server.
   { id: 'vendors', label: 'Vendors', roles: ['MANAGER', 'AUDITOR'] },
@@ -501,7 +508,7 @@ export default function App() {
 
       <main className="min-h-0 flex-1 overflow-auto p-3">
         {/* Billing stays mounted while other screens are open, so the bill on screen and the last
-            bill survive a look at Bills or Products. */}
+            bill survive a look at Bills or Items. */}
         {canBill && (
           <div hidden={current !== 'billing'} className="h-full">
             <Billing
@@ -532,9 +539,8 @@ export default function App() {
             } : undefined}
           />
         )}
-        {current === 'products' && <Products onToast={setToast} />}
-        {current === 'stock' && <Stock onToast={setToast} />}
-        {current === 'raw' && <RawMaterials onToast={setToast} />}
+        {current === 'items' && <Items by={user.displayName} onToast={setToast} />}
+        {current === 'raw' && <NonBillableItems by={user.displayName} onToast={setToast} />}
         {current === 'vendors' && <Vendors role={user.role} onToast={setToast} />}
         {current === 'purchases' && <Purchases role={user.role} onToast={setToast} />}
         {current === 'reports' && <Reports onToast={setToast} />}

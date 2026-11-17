@@ -61,31 +61,42 @@ class RawMaterialApiIntegrationTest {
         }
     }
 
-    /** What the kitchen does to a sack of onions, and what the store says after each of it. */
+    /**
+     * What the kitchen does to a sack of onions, and what the store says after each of it.
+     *
+     * <p>Nothing is bought here: a delivery arrives against a purchase order an administrator
+     * agreed to (see {@code PurchaseOrderApiIntegrationTest}), and the only other way anything
+     * reaches the store is the shop saying what was already in it. Taking things out, wasting
+     * them and counting them again are this screen's business, and the reason on a correction is
+     * what decides which movement gets written.
+     */
     @Test
-    void buysUsesWastesAndCorrects() throws Exception {
+    void fillsUsesWastesAndCorrects() throws Exception {
         String id = newMaterial("RM-1", "Onions", "KGS");
 
-        assertThat(move(id, "purchases", """
-                {"quantityMilli":25000,"note":"Monday market","buyingPricePaise":3200,
-                 "vendorName":"Selvam Vegetables"}""").get("inStoreMilli").asLong()).isEqualTo(25_000);
+        assertThat(move(id, "corrections", """
+                {"deltaMilli":25000,"reason":"OPENING_STOCK","notes":"Already in the store"}""")
+                .get("inStoreMilli").asLong()).isEqualTo(25_000);
         assertThat(move(id, "consumption", """
                 {"quantityMilli":4000,"note":"Lunch service"}""").get("inStoreMilli").asLong()).isEqualTo(21_000);
-        assertThat(move(id, "wastage", """
-                {"quantityMilli":1500,"note":"Sprouted"}""").get("inStoreMilli").asLong()).isEqualTo(19_500);
         assertThat(move(id, "corrections", """
-                {"deltaMilli":-500,"note":"Counted the store"}""").get("inStoreMilli").asLong()).isEqualTo(19_000);
+                {"deltaMilli":1500,"reason":"WASTED","notes":"Sprouted"}""")
+                .get("inStoreMilli").asLong()).isEqualTo(19_500);
+        assertThat(move(id, "corrections", """
+                {"deltaMilli":-500,"reason":"STOCK_TAKE","notes":"Counted the store"}""")
+                .get("inStoreMilli").asLong()).isEqualTo(19_000);
 
         JsonNode history = call(get("/api/raw-materials/history?materialId=" + id), managerToken, null,
                 status().isOk());
         assertThat(history).hasSize(4);
         assertThat(history.get(0).get("type").asText()).isEqualTo("ADJUSTMENT");
         assertThat(history.get(0).get("balanceAfterMilli").asLong()).isEqualTo(19_000);
-        JsonNode bought = history.get(3);
-        assertThat(bought.get("type").asText()).isEqualTo("PURCHASE");
-        assertThat(bought.get("buyingPricePaise").asLong()).isEqualTo(3_200);
-        assertThat(bought.get("vendorName").asText()).isEqualTo("Selvam Vegetables");
-        assertThat(bought.get("itemCode").asText()).as("the same shape the shelf's history sends").isEqualTo("RM-1");
+        assertThat(history.get(1).get("type").asText())
+                .as("the reason wrote a wastage, not a correction").isEqualTo("WASTAGE");
+        assertThat(history.get(1).get("note").asText()).isEqualTo("Wasted or spilt - Sprouted");
+        JsonNode first = history.get(3);
+        assertThat(first.get("type").asText()).isEqualTo("OPENING_STOCK");
+        assertThat(first.get("itemCode").asText()).as("the same shape the shelf's history sends").isEqualTo("RM-1");
     }
 
     /**
@@ -96,8 +107,8 @@ class RawMaterialApiIntegrationTest {
     @Test
     void takesOutWhatTheStoreHasAndNoMore() throws Exception {
         String id = newMaterial("RM-2", "Butter", "KGS");
-        move(id, "purchases", """
-                {"quantityMilli":2000,"note":"","buyingPricePaise":0,"vendorName":""}""");
+        move(id, "corrections", """
+                {"deltaMilli":2000,"reason":"OPENING_STOCK","notes":""}""");
 
         JsonNode after = move(id, "consumption", """
                 {"quantityMilli":5000,"note":"Baking"}""");
@@ -147,8 +158,8 @@ class RawMaterialApiIntegrationTest {
     @Test
     void removingOneFreesItsCodeAndKeepsWhatTheStoreDid() throws Exception {
         String id = newMaterial("RM-6", "Cardamom", "KGS");
-        move(id, "purchases", """
-                {"quantityMilli":1000,"note":"","buyingPricePaise":0,"vendorName":""}""");
+        move(id, "corrections", """
+                {"deltaMilli":1000,"reason":"OPENING_STOCK","notes":""}""");
 
         call(delete("/api/raw-materials/" + id), managerToken, null, status().isNoContent());
 

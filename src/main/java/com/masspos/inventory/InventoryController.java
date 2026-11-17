@@ -7,8 +7,6 @@ import com.masspos.catalog.UnitOfMeasure;
 import com.masspos.user.UserRole;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Positive;
-import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -49,26 +48,23 @@ public class InventoryController {
         }
     }
 
-    public record MovementRequest(@NotNull UUID productId, @Positive long quantityMilli,
-                                  @Size(max = 200) String note) {
-    }
-
-    public record AdjustmentRequest(@NotNull UUID productId, long deltaMilli, @Size(max = 200) String note) {
-    }
-
     /**
-     * Goods arriving. The price and the vendor are optional: a shop that does not track what it
-     * pays leaves them alone and is never asked again, which is why neither is {@code @NotNull}.
+     * A count put right by hand.
      *
-     * @param buyingPricePaise what one unit cost, not what the delivery cost - the figure a
-     *                         shopkeeper knows and checks against the next delivery
+     * @param deltaMilli how far the count moves. The reason settles which way it can go, so a
+     *                   quantity typed the wrong way round is turned round rather than refused.
+     * @param reason     why, which is what decides the movement that gets written
+     * @param notes      whatever is worth keeping beside it, in the words of whoever typed it
      */
-    public record ReceiptRequest(@NotNull UUID productId, @Positive long quantityMilli,
-                                 @Size(max = 200) String note,
-                                 @PositiveOrZero long buyingPricePaise,
-                                 @Size(max = 120) String vendorName,
-                                 UUID vendorId) {
+    public record CorrectionRequest(@NotNull UUID productId, long deltaMilli,
+                                    @NotNull CorrectionReason reason,
+                                    @Size(max = 160) String notes) {
     }
+
+    /** One reason, as the dialog offers it. The labels live on the server, in the enum. */
+    public record ReasonView(String name, String label, int sign) {
+    }
+
 
 
     /**
@@ -126,35 +122,29 @@ public class InventoryController {
         return inventory.bringUpToZero();
     }
 
-    @PostMapping("/receipts")
-    @RequiresRole({UserRole.MANAGER})
-    @ResponseStatus(HttpStatus.CREATED)
-    public StockRow receive(@Valid @RequestBody ReceiptRequest request) {
-        inventory.receive(request.productId(), request.quantityMilli(), request.note(),
-                request.buyingPricePaise(), request.vendorName(), request.vendorId());
-        return rowFor(request.productId());
-    }
-
-    /** Who this shop has had goods from before, so the vendor box suggests instead of asking. */
-    @GetMapping("/vendors")
+    /** Why a count might be put right, for the dialog to offer. */
+    @GetMapping("/correction-reasons")
     @RequiresRole({UserRole.MANAGER, UserRole.AUDITOR})
-    public List<String> vendors() {
-        return inventory.vendorsSoFar();
+    public List<ReasonView> reasons() {
+        return Arrays.stream(CorrectionReason.values())
+                .map(reason -> new ReasonView(reason.name(), reason.label(), reason.sign()))
+                .toList();
     }
 
-    @PostMapping("/adjustments")
+    /**
+     * A count put right by hand, which is the only way a manager moves one now.
+     *
+     * <p>There is deliberately no endpoint for goods arriving. Stock reaches the shelf through a
+     * purchase order an administrator agreed to and nowhere else, so that a delivery is never the
+     * first anybody hears of a purchase. What a shop already had on its shelves on the day it
+     * started is a correction, with Opening stock as its reason - that is the shop saying what is
+     * on the floor, which is a different thing from buying something.
+     */
+    @PostMapping("/corrections")
     @RequiresRole({UserRole.MANAGER})
     @ResponseStatus(HttpStatus.CREATED)
-    public StockRow adjust(@Valid @RequestBody AdjustmentRequest request) {
-        inventory.adjust(request.productId(), request.deltaMilli(), request.note());
-        return rowFor(request.productId());
-    }
-
-    @PostMapping("/damages")
-    @RequiresRole({UserRole.MANAGER})
-    @ResponseStatus(HttpStatus.CREATED)
-    public StockRow damage(@Valid @RequestBody MovementRequest request) {
-        inventory.damage(request.productId(), request.quantityMilli(), request.note());
+    public StockRow correct(@Valid @RequestBody CorrectionRequest request) {
+        inventory.correct(request.productId(), request.deltaMilli(), request.reason(), request.notes());
         return rowFor(request.productId());
     }
 

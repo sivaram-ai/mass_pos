@@ -11,7 +11,11 @@ import {
 import { useScreenKeys } from '../shortcuts'
 import { SortMenu } from '../components/SortMenu'
 import { StockHistory } from '../components/StockHistory'
-import { loadSort, PRODUCT_SORT_KEY, saveSort, SORT_LABELS, sorted } from '../sorting'
+import { PriceHistory } from '../components/PriceHistory'
+import { CorrectionDialog } from '../components/CorrectionDialog'
+import { OrderDialog } from '../components/OrderDialog'
+import type { Orderable } from '../components/OrderDialog'
+import { ITEM_SORT_KEY, loadSort, saveSort, SORT_FIELDS, SORT_LABELS, sorted } from '../sorting'
 import type { Sort } from '../sorting'
 import type { Toast } from '../App'
 
@@ -22,20 +26,39 @@ const SEARCH_KEY = 'F2'
 const ADD_KEY = 'F3'
 const SORT_KEY = 'F4'
 const HISTORY_KEY = 'F6'
+const ORDER_KEY = 'F7'
+const PRICES_KEY = 'F8'
 
-type Action = 'edit' | 'status' | 'delete'
+/** What can be done to the item the cursor is on, chosen with ← →. */
+type Action = 'edit' | 'history' | 'purchase' | 'correct' | 'status' | 'delete'
 
-const ACTIONS: Action[] = ['edit', 'status', 'delete']
+const ACTIONS: Action[] = ['edit', 'history', 'purchase', 'correct', 'status', 'delete']
 
-/** The middle action reads Stop for an item being sold and Start for one that was stopped. */
+/** The fifth action reads Stop for an item being sold and Start for one that was stopped. */
 function labelOf(action: Action, product: Product): string {
-  return action === 'edit' ? 'Edit' : action === 'delete' ? 'Delete' : product.active ? 'Stop' : 'Start'
+  switch (action) {
+    case 'edit':
+      return 'Edit'
+    case 'history':
+      return 'History'
+    case 'purchase':
+      return 'Purchase'
+    case 'correct':
+      return 'Correct'
+    case 'delete':
+      return 'Delete'
+    default:
+      return product.active ? 'Stop' : 'Start'
+  }
 }
 
 const TITLES: Record<Action, (product: Product) => string> = {
-  edit: () => 'Change this item',
+  edit: () => 'Change this item: its name, code, price, tax',
+  history: () => 'Where this count came from: everything that has ever moved it',
+  purchase: () => 'Write a purchase order for it. Stock only arrives that way.',
+  correct: () => 'Put the count right: a stock take, damage, wastage, opening stock',
   status: (product) => product.active
-    ? 'Stop selling it. It stays on this screen and in Stock, marked inactive.'
+    ? 'Stop selling it. It stays on this screen, marked, with its count.'
     : 'Sell it again',
   delete: () => 'Remove it from the system for good and free its code',
 }
@@ -75,87 +98,78 @@ function draftOf(product: Product): Draft {
   }
 }
 
+function orderable(product: Product): Orderable {
+  return { kind: 'p', id: product.id, code: product.sku, name: product.name, unit: product.unit }
+}
+
 /**
- * The catalogue, worked from the keyboard like the bills screen: the cursor starts in the list, up and
- * down choose an item, left and right choose Edit, Stop or Delete, and Enter does it. F2 searches,
- * F3 adds, F4 sorts.
+ * Everything the shop sells: what it is, what it costs, and how much of it there is.
  *
- * The whole catalogue is loaded once, stopped items included, and filtered and sorted here. The
- * server's ranked search is capped at twenty-five rows for the billing grid, and sorting by price or
- * stock has to cover every item rather than whichever twenty-five arrived first.
+ * <p>One screen, where there were two. Products and Stock listed the same items from the same
+ * table and asked somebody to remember which of them answered which question - the price was on
+ * one, the count on the other, and the item they were both about was in two places. A shopkeeper
+ * holding a thing in their hand has one question about it, and it is "what is this and how many
+ * are there".
+ *
+ * <p>Nothing here adds stock. Goods reach the shelf through a purchase order an administrator
+ * agreed to, which is what Purchase writes; what is already on the shelf and wrong is put right
+ * with Correct, which says why and shows up in the history as the correction it is.
+ *
+ * <p>Worked from the keyboard throughout: the cursor starts in the list, up and down choose an
+ * item, left and right choose what to do with it, Enter does it. Space ticks items for one order
+ * together. F2 searches, F3 adds, F4 sorts, F6 shows the history, F7 orders, F8 shows what it has
+ * cost.
  */
-export default function Products({ onToast }: { onToast: Toast }) {
+export default function Items({ by, onToast }: { by: string; onToast: Toast }) {
   const [search, setSearch] = useState('')
   const [products, setProducts] = useState<Product[]>([])
-  const [sort, setSort] = useState<Sort>(() => loadSort(PRODUCT_SORT_KEY))
+  const [sort, setSort] = useState<Sort>(() => loadSort(ITEM_SORT_KEY))
   const [sortOpen, setSortOpen] = useState(false)
   const [printing, setPrinting] = useState(false)
   const [selected, setSelected] = useState(0)
   const [action, setAction] = useState<Action>('edit')
   const [listFocused, setListFocused] = useState(false)
+  const [ticked, setTicked] = useState<string[]>([])
   const [editing, setEditing] = useState<{ id: string | null; draft: Draft } | null>(null)
   const [confirming, setConfirming] = useState<{ product: Product; kind: 'status' | 'delete' } | null>(null)
   const [saveErrors, setSaveErrors] = useState<{ message: string; fields: Record<string, string> } | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [pricesOn, setPricesOn] = useState<Product | null>(null)
+  const [correcting, setCorrecting] = useState<Product | null>(null)
+  const [ordering, setOrdering] = useState<Orderable[] | null>(null)
+  /** How far below zero this shop's counts have gone, and whether to offer to put it right. */
+  const [belowEmpty, setBelowEmpty] = useState<{ items: number; quantityMilli: number } | null>(null)
+  const [zeroing, setZeroing] = useState(false)
   const fileBox = useRef<HTMLInputElement>(null)
   const list = useRef<HTMLDivElement>(null)
   const searchBox = useRef<HTMLInputElement>(null)
   const rows = useRef(new Map<string, HTMLTableRowElement>())
-  const [historyOpen, setHistoryOpen] = useState(false)
-  const dialogOpen = editing !== null || confirming !== null || historyOpen
+  const dialogOpen = editing !== null || confirming !== null || historyOpen || pricesOn !== null
+    || correcting !== null || ordering !== null
 
   const load = useCallback(() => {
     api.get<Product[]>('/api/products?all=true')
       .then(setProducts)
-      .catch((failure) => onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not load the products') }))
+      .catch((failure) => onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not load the items') }))
+    // Counts that went below zero on an older build. Asked for separately so the offer to put them
+    // right can say what it would be correcting before anybody agrees to it.
+    api.get<{ items: number; quantityMilli: number }>('/api/stock/below-empty')
+      .then(setBelowEmpty)
+      .catch(() => setBelowEmpty(null))
   }, [onToast])
 
   useEffect(load, [load])
-
-  const chooseSort = (next: Sort) => {
-    setSort(next)
-    saveSort(PRODUCT_SORT_KEY, next)
-    setSelected(0)
-  }
-
-  /** A sheet of items: codes already in the catalogue are repriced, new codes are added. */
-  const loadFromFile = async (file: File) => {
-    try {
-      const done = await uploadCsv<{ added: number; updated: number }>('/api/products/import', await file.text())
-      onToast({
-        tone: 'good',
-        text: `${done.added} added and ${done.updated} updated from ${file.name}`,
-      })
-      load()
-    } catch (failure) {
-      onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not read that file') })
-    }
-  }
-
-  const extract = async () => {
-    try {
-      await downloadCsv('/api/products/export', `products-${new Date().toISOString().slice(0, 10)}.csv`)
-    } catch (failure) {
-      onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not make the file') })
-    }
-  }
-
-  /** The catalogue on paper, from the printer this till bills on. The server waits for the job. */
-  const printList = async () => {
-    setPrinting(true)
-    try {
-      await api.post('/api/products/print-list')
-      onToast({ tone: 'good', text: 'Price list sent to the printer' })
-    } catch (failure) {
-      onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not print the price list') })
-    } finally {
-      setPrinting(false)
-    }
-  }
 
   // The cursor starts in the list, so the arrows work the moment the screen opens.
   useEffect(() => {
     list.current?.focus()
   }, [])
+
+  const chooseSort = (next: Sort) => {
+    setSort(next)
+    saveSort(ITEM_SORT_KEY, next)
+    setSelected(0)
+  }
 
   // The same fields the server matches, minus its closest-match ranking: an explicit sort is the
   // point of this screen, and a ranking would fight it.
@@ -164,6 +178,9 @@ export default function Products({ onToast }: { onToast: Toast }) {
     || `${product.name} ${product.sku} ${product.barcode ?? ''} ${product.hsnCode}`.toLowerCase().includes(needle)),
   sort)
   const stopped = products.filter((product) => !product.active).length
+  const outOfStock = products.filter((product) => !product.billWithoutStock && product.stockMilli <= 0).length
+  const totalValue = products.reduce(
+    (sum, product) => sum + Math.round(product.stockMilli * product.sellingPricePaise / 1000), 0)
 
   const at = Math.min(selected, Math.max(shown.length - 1, 0))
   const current = shown[at]
@@ -179,6 +196,15 @@ export default function Products({ onToast }: { onToast: Toast }) {
     setEditing({ id, draft })
   }
 
+  /** What Purchase would put on an order: everything ticked, or whatever the cursor is on. */
+  const forOrder = (): Orderable[] => {
+    const chosen = products.filter((product) => ticked.includes(product.id))
+    if (chosen.length > 0) {
+      return chosen.map(orderable)
+    }
+    return current ? [orderable(current)] : []
+  }
+
   useScreenKeys({
     [SEARCH_KEY]: () => {
       searchBox.current?.focus()
@@ -187,6 +213,8 @@ export default function Products({ onToast }: { onToast: Toast }) {
     [ADD_KEY]: () => openEditor(null, EMPTY),
     [SORT_KEY]: () => setSortOpen(true),
     [HISTORY_KEY]: () => setHistoryOpen(true),
+    [ORDER_KEY]: () => setOrdering(forOrder()),
+    [PRICES_KEY]: () => setPricesOn(current ?? null),
   }, !dialogOpen && !sortOpen)
 
   const save = async (id: string | null, draft: Draft) => {
@@ -244,10 +272,66 @@ export default function Products({ onToast }: { onToast: Toast }) {
     }
   }
 
+  /**
+   * One correction per item, each with its reason. Nothing is rewritten: the ledger is
+   * append-only, and what it says happened is what happened.
+   */
+  const bringUpToZero = async () => {
+    setZeroing(true)
+    try {
+      const done = await api.post<{ items: number; quantityMilli: number }>('/api/stock/below-empty/correct')
+      onToast({
+        tone: 'good',
+        text: `${done.items} ${done.items === 1 ? 'count' : 'counts'} brought up to zero`,
+      })
+      load()
+    } catch (failure) {
+      onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not correct those counts') })
+    } finally {
+      setZeroing(false)
+    }
+  }
+
+  /** A sheet of items: codes already in the catalogue are repriced, new codes are added. */
+  const loadFromFile = async (file: File) => {
+    try {
+      const done = await uploadCsv<{ added: number; updated: number }>('/api/products/import', await file.text())
+      onToast({ tone: 'good', text: `${done.added} added and ${done.updated} updated from ${file.name}` })
+      load()
+    } catch (failure) {
+      onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not read that file') })
+    }
+  }
+
+  const extract = async () => {
+    try {
+      await downloadCsv('/api/products/export', `items-${new Date().toISOString().slice(0, 10)}.csv`)
+    } catch (failure) {
+      onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not make the file') })
+    }
+  }
+
+  /** The catalogue on paper, from the printer this till bills on. The server waits for the job. */
+  const printList = async () => {
+    setPrinting(true)
+    try {
+      await api.post('/api/products/print-list')
+      onToast({ tone: 'good', text: 'Price list sent to the printer' })
+    } catch (failure) {
+      onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not print the price list') })
+    } finally {
+      setPrinting(false)
+    }
+  }
+
   function closeDialog(reload = false) {
     setEditing(null)
     setConfirming(null)
     setSaveErrors(null)
+    setCorrecting(null)
+    setOrdering(null)
+    setPricesOn(null)
+    setHistoryOpen(false)
     if (reload) {
       load()
     }
@@ -258,8 +342,14 @@ export default function Products({ onToast }: { onToast: Toast }) {
   const run = (product: Product, chosen: Action) => {
     if (chosen === 'edit') {
       openEditor(product.id, draftOf(product))
+    } else if (chosen === 'history') {
+      setHistoryOpen(true)
+    } else if (chosen === 'purchase') {
+      setOrdering(forOrder())
+    } else if (chosen === 'correct') {
+      setCorrecting(product)
     } else if (chosen === 'delete' || product.active) {
-      setConfirming({ product, kind: chosen })
+      setConfirming({ product, kind: chosen as 'status' | 'delete' })
     } else {
       void setActive(product, true)
     }
@@ -269,6 +359,9 @@ export default function Products({ onToast }: { onToast: Toast }) {
     setSelected(index)
     setAction('edit')
   }
+
+  const tick = (id: string) =>
+    setTicked((now) => (now.includes(id) ? now.filter((other) => other !== id) : [...now, id]))
 
   const onListKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (dialogOpen || sortOpen || !current) {
@@ -284,6 +377,18 @@ export default function Products({ onToast }: { onToast: Toast }) {
     } else if (event.key === 'Home' || event.key === 'End') {
       event.preventDefault()
       choose(event.key === 'Home' ? 0 : shown.length - 1)
+    } else if (event.key === ' ') {
+      // Ticks it for an order with others. Billing's Space takes the bill; nothing on this screen
+      // competes for it, and the search box is a text field, where it types a space.
+      event.preventDefault()
+      tick(current.id)
+    } else if (event.key === 'Escape' && ticked.length > 0) {
+      // Clears the ticks and nothing else: it must not count toward Esc Esc back to billing while
+      // there is something in hand to put down.
+      event.preventDefault()
+      event.stopPropagation()
+      event.nativeEvent.stopImmediatePropagation()
+      setTicked([])
     } else if (event.key === 'Enter') {
       event.preventDefault()
       if (!event.repeat) {
@@ -305,11 +410,13 @@ export default function Products({ onToast }: { onToast: Toast }) {
 
   return (
     <Panel
-      title="Products"
+      title="Items"
       actions={
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <span className="whitespace-nowrap text-xs text-slate-500">
-            {products.length} items
+            {products.length} {products.length === 1 ? 'item' : 'items'} ·{' '}
+            <span className="num">{rupees(totalValue)}</span>
+            {outOfStock > 0 && <span className="ml-2 text-rose-600">{outOfStock} out of stock</span>}
             {stopped > 0 && <span className="ml-2 text-amber-700">{stopped} stopped</span>}
           </span>
           {/* Relative, so the sort popover hangs off this button rather than the page. */}
@@ -322,6 +429,8 @@ export default function Products({ onToast }: { onToast: Toast }) {
             {sortOpen && (
               <SortMenu
                 sort={sort}
+                fields={SORT_FIELDS}
+                labels={SORT_LABELS}
                 onChange={chooseSort}
                 onClose={() => {
                   setSortOpen(false)
@@ -332,15 +441,25 @@ export default function Products({ onToast }: { onToast: Toast }) {
           </div>
           <Button className="whitespace-nowrap px-2 py-1" hint={HISTORY_KEY}
                   onClick={() => setHistoryOpen(true)}
-                  title="Where this item's count came from: everything that has moved it">
+                  title="Where this count came from: everything that has moved this item">
             History
+          </Button>
+          <Button className="whitespace-nowrap px-2 py-1" hint={PRICES_KEY}
+                  onClick={() => setPricesOn(current ?? null)}
+                  title="What the shop has paid for this, every delivery of it">
+            Prices
+          </Button>
+          <Button tone="primary" className="whitespace-nowrap px-2 py-1" hint={ORDER_KEY}
+                  onClick={() => setOrdering(forOrder())}
+                  title="Write a purchase order. Tick several with Space to put them on one order.">
+            {ticked.length > 0 ? `Purchase ${ticked.length}` : 'Purchase'}
           </Button>
           <KeyBox hint={SEARCH_KEY}>
             <input
               ref={searchBox}
               className={`${smallInputClass} w-64 pr-8`}
               placeholder="Name, code, barcode or HSN"
-              aria-label="Search products"
+              aria-label="Search items"
               value={search}
               onChange={(event) => {
                 setSearch(event.target.value)
@@ -363,29 +482,53 @@ export default function Products({ onToast }: { onToast: Toast }) {
             }}
           />
           <Button className="whitespace-nowrap px-2 py-1" onClick={() => fileBox.current?.click()}
-                  title="Add or reprice items from a sheet. Start from one Extract products made.">
+                  title="Add or reprice items from a sheet. Start from one Extract items made.">
             Load from file
           </Button>
           <Button className="whitespace-nowrap px-2 py-1" onClick={() => void extract()}
                   title="Save the whole catalogue as a sheet you can edit in Excel">
-            Extract products
+            Extract items
           </Button>
           <Button className="whitespace-nowrap px-2 py-1" onClick={() => void printList()} disabled={printing}
                   title="Print every item in code order - code, name and rate - on this till's printer">
-            {printing ? 'Printing…' : 'Print products'}
+            {printing ? 'Printing…' : 'Print'}
           </Button>
           <Button tone="primary" className="whitespace-nowrap px-2 py-1" hint={ADD_KEY}
                   onClick={() => openEditor(null, EMPTY)}>
-            Add product
+            Add item
           </Button>
         </div>
       }
     >
+      {belowEmpty && belowEmpty.items > 0 && (
+        <div className="mb-2">
+          <Banner tone="warn">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span>
+                <span className="num font-medium">{belowEmpty.items}</span>
+                {belowEmpty.items === 1 ? ' item has' : ' items have'} a count below zero, adding up
+                to <span className="num font-medium">{quantity(belowEmpty.quantityMilli)}</span>. That
+                cannot happen any more, but the figures already recorded stay wrong until somebody
+                says what the shelf really holds.
+              </span>
+              <Button className="whitespace-nowrap px-2 py-1" disabled={zeroing}
+                      onClick={() => void bringUpToZero()}>
+                {zeroing ? 'Correcting…' : 'Bring them to zero'}
+              </Button>
+            </div>
+          </Banner>
+        </div>
+      )}
+
       <p className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
         <span><kbd>↑</kbd> <kbd>↓</kbd> choose an item</span>
-        <span><kbd>←</kbd> <kbd>→</kbd> Edit, Stop or Delete</span>
+        <span><kbd>←</kbd> <kbd>→</kbd> what to do</span>
         <span><kbd>Enter</kbd> do it</span>
-        <span><kbd>{SEARCH_KEY}</kbd> search · <kbd>{SORT_KEY}</kbd> sort · <kbd>{HISTORY_KEY}</kbd> history · <kbd>{ADD_KEY}</kbd> add, then <kbd>Enter</kbd> or <kbd>Esc</kbd> back to the list</span>
+        <span><kbd>Space</kbd> tick for one order</span>
+        <span>
+          <kbd>{SEARCH_KEY}</kbd> search · <kbd>{SORT_KEY}</kbd> sort · <kbd>{HISTORY_KEY}</kbd> history
+          {' · '}<kbd>{ORDER_KEY}</kbd> purchase · <kbd>{PRICES_KEY}</kbd> prices · <kbd>{ADD_KEY}</kbd> add
+        </span>
         <span><kbd>F9</kbd> menu · <kbd>Esc</kbd> <kbd>Esc</kbd> billing</span>
       </p>
 
@@ -393,7 +536,7 @@ export default function Products({ onToast }: { onToast: Toast }) {
         ref={list}
         tabIndex={0}
         role="grid"
-        aria-label="Products"
+        aria-label="Items"
         onKeyDown={onListKeyDown}
         onFocus={() => setListFocused(true)}
         onBlur={() => setListFocused(false)}
@@ -402,8 +545,8 @@ export default function Products({ onToast }: { onToast: Toast }) {
         {shown.length === 0 ? (
           <Empty>
             {search
-              ? `No product matches "${search}"`
-              : 'No products yet. Add the first one to start billing.'}
+              ? `No item matches "${search}"`
+              : 'No items yet. Add the first one to start billing.'}
           </Empty>
         ) : (
           /*
@@ -411,33 +554,39 @@ export default function Products({ onToast }: { onToast: Toast }) {
            * table-fixed and Item carries no width, so Item takes whatever the fixed columns leave
            * and a 150-character name is truncated instead of pushing the columns off screen.
            */
-          <table className="w-full min-w-[60rem] table-fixed text-sm">
+          <table className="w-full min-w-[74rem] table-fixed text-sm">
             <colgroup>
+              <col className="w-8" />
               <col className="w-28" />
               <col />
               <col className="w-20" />
+              <col className="w-16" />
+              <col className="w-24" />
               <col className="w-20" />
               <col className="w-28" />
               <col className="w-24" />
-              <col className="w-28" />
-              {/* Three buttons: Edit, Stop or Start, Delete. */}
-              <col className="w-44" />
+              {/* Six actions: Edit, History, Purchase, Correct, Stop or Start, Delete. */}
+              <col className="w-[23rem]" />
             </colgroup>
             <thead className="text-xs uppercase tracking-wide text-slate-400">
               <tr>
-                <th className="py-1 pl-2 text-left">Code</th>
+                <th className="py-1 pl-2"></th>
+                <th className="py-1 text-left">Code</th>
                 <th className="py-1 text-left">Item</th>
                 <th className="py-1 text-left">HSN</th>
                 <th className="py-1 text-right">GST</th>
                 <th className="py-1 text-right">Price</th>
                 <th className="py-1 text-right">MRP</th>
-                <th className="py-1 text-right">Stock</th>
+                <th className="py-1 text-right">On hand</th>
+                <th className="py-1 text-right">Value</th>
                 <th className="py-1"></th>
               </tr>
             </thead>
             <tbody>
               {shown.map((product, index) => {
                 const isSelected = index === at
+                const isTicked = ticked.includes(product.id)
+                const value = Math.round(product.stockMilli * product.sellingPricePaise / 1000)
                 return (
                   <tr
                     key={product.id}
@@ -454,9 +603,25 @@ export default function Products({ onToast }: { onToast: Toast }) {
                     className={`cursor-pointer border-t border-slate-100 ${
                       isSelected
                         ? 'bg-sky-50 shadow-[inset_3px_0_0_0_var(--color-sky-500)]'
-                        : product.active ? 'hover:bg-slate-50' : 'bg-slate-50/80 hover:bg-slate-100'}`}
+                        : isTicked ? 'bg-sky-50/40'
+                          : product.active ? 'hover:bg-slate-50' : 'bg-slate-50/80 hover:bg-slate-100'}`}
                   >
-                    <td className="py-2 pl-2 pr-3">
+                    <td className="py-2 pl-2">
+                      <input
+                        type="checkbox"
+                        tabIndex={-1}
+                        aria-label={`Put ${product.name} on an order`}
+                        checked={isTicked}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          choose(index)
+                          tick(product.id)
+                        }}
+                        onChange={() => {}}
+                      />
+                    </td>
+                    <td className="py-2 pr-3">
                       {/* The barcode sits under the code: it is the other code that bills the item. */}
                       <div className={`num truncate font-medium ${product.active ? 'text-slate-800' : 'text-slate-400'}`}
                            title={product.sku}>
@@ -506,6 +671,7 @@ export default function Products({ onToast }: { onToast: Toast }) {
                         </div>
                       )}
                     </td>
+                    <td className="num py-2 text-right text-slate-500">{rupees(value)}</td>
                     <td className="whitespace-nowrap py-1.5 pr-2 text-right">
                       <div className="inline-flex gap-1">
                         {ACTIONS.map((name) => {
@@ -524,7 +690,7 @@ export default function Products({ onToast }: { onToast: Toast }) {
                                 setAction(name)
                                 run(product, name)
                               }}
-                              className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                              className={`rounded-md px-2 py-1 text-xs font-medium transition ${
                                 focused
                                   ? `bg-sky-600 text-on-primary ${listFocused ? 'ring-2 ring-sky-300' : ''}`
                                   : warns ? 'text-rose-600 hover:bg-rose-50' : 'text-slate-600 hover:bg-slate-100'}`}
@@ -553,8 +719,47 @@ export default function Products({ onToast }: { onToast: Toast }) {
         />
       )}
 
+      {pricesOn && (
+        <PriceHistory
+          of={{ itemId: pricesOn.id, itemCode: pricesOn.sku, name: pricesOn.name, fromTheStore: false }}
+          onClose={() => {
+            setPricesOn(null)
+            requestAnimationFrame(() => list.current?.focus())
+          }}
+        />
+      )}
+
+      {correcting && (
+        <CorrectionDialog
+          of={{
+            itemId: correcting.id,
+            itemCode: correcting.sku,
+            name: correcting.name,
+            unit: correcting.unit,
+            haveMilli: correcting.stockMilli,
+          }}
+          source="stock"
+          by={by}
+          onToast={onToast}
+          onClose={() => closeDialog()}
+          onDone={() => closeDialog(true)}
+        />
+      )}
+
+      {ordering && (
+        <OrderDialog
+          start={ordering}
+          onToast={onToast}
+          onClose={() => closeDialog()}
+          onDone={() => {
+            setTicked([])
+            closeDialog(true)
+          }}
+        />
+      )}
+
       {editing && (
-        <ProductDialog
+        <ItemDialog
           id={editing.id}
           draft={editing.draft}
           errors={saveErrors}
@@ -566,9 +771,9 @@ export default function Products({ onToast }: { onToast: Toast }) {
       {confirming?.kind === 'status' && (
         <Modal title={`Stop selling ${confirming.product.name}?`} onClose={() => closeDialog()}>
           <p className="text-sm text-slate-600">
-            It disappears from billing. It stays on this screen and in Stock, marked inactive, so its
-            count is still there and it can be started again. Bills already taken keep it, and
-            nothing is deleted.
+            It disappears from billing. It stays on this screen, marked inactive, so its count is
+            still there and it can be started again. Bills already taken keep it, and nothing is
+            deleted.
           </p>
           <div className="mt-4 flex justify-end gap-2">
             <Button onClick={() => closeDialog()} hint="Esc">Keep selling it</Button>
@@ -578,11 +783,11 @@ export default function Products({ onToast }: { onToast: Toast }) {
       )}
 
       {confirming?.kind === 'delete' && (
-        <Modal title="Are you sure you want to delete this product?" onClose={() => closeDialog()}>
+        <Modal title="Are you sure you want to delete this item?" onClose={() => closeDialog()}>
           <p className="text-sm font-medium text-slate-800">This action cannot be undone.</p>
           <p className="mt-2 text-sm text-slate-600">
-            {confirming.product.name} goes from the Products and Stock screens for good. Bills already
-            taken keep it and still read it, and the code{' '}
+            {confirming.product.name} goes from this screen for good. Bills already taken keep it and
+            still read it, and the code{' '}
             <span className="num font-medium text-slate-800">{confirming.product.sku}</span> becomes
             free to use again.
           </p>
@@ -619,7 +824,7 @@ function ConfirmButton({ children, onClick }: { children: string; onClick: () =>
   )
 }
 
-function ProductDialog({ id, draft, errors, onClose, onSave }: {
+function ItemDialog({ id, draft, errors, onClose, onSave }: {
   id: string | null
   draft: Draft
   errors: { message: string; fields: Record<string, string> } | null
@@ -631,7 +836,7 @@ function ProductDialog({ id, draft, errors, onClose, onSave }: {
   const err = (field: string) => errorFor(errors?.fields ?? {}, field)
 
   return (
-    <Modal title={id ? 'Edit product' : 'New product'} onClose={onClose} wide>
+    <Modal title={id ? 'Edit item' : 'New item'} onClose={onClose} wide>
       <form
         className="grid grid-cols-2 gap-3"
         onSubmit={(event) => {

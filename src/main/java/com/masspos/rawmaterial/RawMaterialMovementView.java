@@ -16,7 +16,8 @@ import java.util.UUID;
 public record RawMaterialMovementView(UUID id, Instant occurredAt, RawMaterialMovement type,
                                       long quantityDeltaMilli, Long balanceAfterMilli, UUID itemId,
                                       String itemCode, String name, UnitOfMeasure unit, String counterCode,
-                                      String by, String note, long buyingPricePaise, String vendorName) {
+                                      String by, String note, long buyingPricePaise, String vendorName,
+                                      String orderNumber) {
 
     static RawMaterialMovementView of(RawMaterialLedgerEvent event, Long balanceAfterMilli) {
         RawMaterial material = event.getRawMaterial();
@@ -24,6 +25,6 @@ public record RawMaterialMovementView(UUID id, Instant occurredAt, RawMaterialMo
                 event.getQuantityDeltaMilli(), balanceAfterMilli, material.getId(), material.getCode(),
                 material.getName(), material.getUnit(), event.getTerminalCode(),
                 event.getRecordedBy() == null ? "" : event.getRecordedBy().getDisplayName(),
-                event.getNote(), event.getBuyingPricePaise(), event.getVendorName());
+                event.getNote(), event.getBuyingPricePaise(), event.getVendorName(), event.getOrderNumber());
     }
 }

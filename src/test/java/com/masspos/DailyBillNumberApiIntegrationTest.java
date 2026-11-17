@@ -157,8 +157,10 @@ class DailyBillNumberApiIntegrationTest {
                 {"sku":"%s","name":"%s","hsnCode":"","unit":"NOS","sellingPricePaise":10000,"mrpPaise":0,
                  "taxInclusive":true,"gstRateBp":0,"cessRateBp":0,"billWithoutStock":true}
                 """.formatted(sku, name), status().isCreated()).get("id").asText();
-        call(post("/api/stock/receipts"), managerToken, """
-                {"productId":"%s","quantityMilli":50000,"note":"opening"}
+        // Opening stock, which is how goods a shop already had reach the shelf: a correction
+        // with its reason. Buying something is a purchase order, and nothing else is.
+        call(post("/api/stock/corrections"), managerToken, """
+                {"productId":"%s","deltaMilli":50000,"reason":"OPENING_STOCK","notes":"On the shelf already"}
                 """.formatted(id), status().isCreated());
         return id;
     }

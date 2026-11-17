@@ -110,6 +110,17 @@ class PurchaseOrderApiIntegrationTest {
         assertThat(movement.get("buyingPricePaise").asLong()).isEqualTo(2_000);
         assertThat(movement.get("vendorName").asText()).isEqualTo("Selvam Traders");
         assertThat(movement.get("note").asText()).contains("PO-");
+        assertThat(movement.get("orderNumber").asText())
+                .as("the order is on the movement itself, not read back out of the note")
+                .isEqualTo(order.get("number").asText());
+
+        // And the store's end of the same order reads the same way, out of its own ledger.
+        JsonNode intoTheStore = call(get("/api/raw-materials/history?materialId=" + materialId), managerToken,
+                null, status().isOk()).get(0);
+        assertThat(intoTheStore.get("type").asText()).isEqualTo("PURCHASE");
+        assertThat(intoTheStore.get("buyingPricePaise").asLong()).isEqualTo(3_200);
+        assertThat(intoTheStore.get("vendorName").asText()).isEqualTo("Selvam Traders");
+        assertThat(intoTheStore.get("orderNumber").asText()).isEqualTo(order.get("number").asText());
 
         // The vendor is owed what actually arrived.
         assertThat(call(get("/api/vendors/" + vendorId), managerToken, null, status().isOk())
@@ -162,6 +173,52 @@ class PurchaseOrderApiIntegrationTest {
                 status().isConflict()).get("detail").asText()).contains("rejected");
         assertThat(call(post("/api/purchase-orders/" + orderId + "/approve"), adminToken, null,
                 status().isConflict()).get("detail").asText()).contains("already been decided");
+    }
+
+    /**
+     * What the shop has paid for one thing, every delivery of it.
+     *
+     * <p>The item carries one buying price - whatever the last lorry charged - and that answers
+     * none of the questions worth asking. Whether onions have got dearer, whether this man is
+     * cheaper than that one, who agreed to a price nobody should have: all of them are questions
+     * about the deliveries, so they are answered from the deliveries.
+     */
+    @Test
+    void saysWhatOneThingHasCostEveryTimeItWasBought() throws Exception {
+        String vendorId = newVendor("PV-5", "Oil mill");
+        String productId = newProduct("PP-5", "Oil 1L");
+
+        delivered(vendorId, productId, 10_000, 14_000);
+        delivered(vendorId, productId, 10_000, 16_500);
+
+        JsonNode prices = call(get("/api/purchase-orders/prices?productId=" + productId), managerToken, null,
+                status().isOk());
+
+        assertThat(prices).hasSize(2);
+        assertThat(prices.get(0).get("unitCostPaise").asLong()).as("newest first").isEqualTo(16_500);
+        assertThat(prices.get(0).get("valuePaise").asLong()).isEqualTo(165_000);
+        assertThat(prices.get(0).get("vendorName").asText()).isEqualTo("Oil mill");
+        assertThat(prices.get(0).get("orderNumber").asText()).startsWith("PO-");
+        assertThat(prices.get(0).get("approvedBy").asText())
+                .as("who agreed to the money, from the order the delivery came in against").isNotEmpty();
+        assertThat(prices.get(1).get("unitCostPaise").asLong()).isEqualTo(14_000);
+
+        // Asked of a raw material the same way, because it is the same question.
+        String materialId = newMaterial("PM-5", "Chilli");
+        assertThat(call(get("/api/purchase-orders/prices?rawMaterialId=" + materialId), managerToken, null,
+                status().isOk())).as("nothing bought yet").isEmpty();
+    }
+
+    /** One order, written, approved and received in full, for the tests that only need that. */
+    private void delivered(String vendorId, String productId, long quantityMilli, long unitCostPaise)
+            throws Exception {
+        String orderId = call(post("/api/purchase-orders"), managerToken, """
+                {"vendorId":"%s","expectedOn":null,"note":"","lines":[
+                  {"productId":"%s","rawMaterialId":null,"quantityMilli":%d,"unitCostPaise":%d}]}"""
+                .formatted(vendorId, productId, quantityMilli, unitCostPaise), status().isCreated())
+                .get("id").asText();
+        call(post("/api/purchase-orders/" + orderId + "/approve"), adminToken, null, status().isOk());
+        call(post("/api/purchase-orders/" + orderId + "/receive"), managerToken, "{}", status().isOk());
     }
 
     /** What an administrator has waiting, which is the queue they work through. */

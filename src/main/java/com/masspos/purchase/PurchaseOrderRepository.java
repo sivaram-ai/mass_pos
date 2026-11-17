@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -29,6 +30,10 @@ public interface PurchaseOrderRepository extends JpaRepository<PurchaseOrder, UU
 
     @Query("select o from PurchaseOrder o where o.number = :number")
     Optional<PurchaseOrder> findByNumber(@Param("number") String number);
+
+    /** The orders a list of deliveries names, in one query rather than one apiece. */
+    @Query("select o from PurchaseOrder o where o.number in :numbers")
+    List<PurchaseOrder> byNumbers(@Param("numbers") Collection<String> numbers);
 
     /** What is waiting on an administrator, oldest first: the queue to work through. */
     @Query("""

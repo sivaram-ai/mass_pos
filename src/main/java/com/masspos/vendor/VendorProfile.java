@@ -27,8 +27,14 @@ public record VendorProfile(VendorView vendor, List<Purchase> purchases, List<Pa
                            String note, String by) {
     }
 
-    /** One payment, and whether anybody has agreed to it. */
+    /**
+     * One payment, and whether anybody has agreed to it.
+     *
+     * @param purchaseOrderId the order it was against, or null where it was against the running
+     *                        account rather than one delivery
+     */
     public record Payment(UUID id, LocalDate paidOn, long amountPaise, VendorPaymentMode mode, String reference,
-                          String note, String by, boolean approved, String approvedBy, Instant approvedAt) {
+                          String note, String by, boolean approved, String approvedBy, Instant approvedAt,
+                          UUID purchaseOrderId) {
     }
 }

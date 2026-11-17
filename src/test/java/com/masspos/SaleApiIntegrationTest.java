@@ -396,8 +396,9 @@ class SaleApiIntegrationTest {
                  "sellingPricePaise":10000,"mrpPaise":10000,"taxInclusive":true,"gstRateBp":1800,"cessRateBp":0}
                 """.formatted(sku, sku), status().isCreated());
         String productId = product.get("id").asText();
-        postJson("/api/stock/receipts", managerToken,
-                "{\"productId\":\"%s\",\"quantityMilli\":%d,\"note\":\"Opening\"}".formatted(productId, quantityMilli),
+        postJson("/api/stock/corrections", managerToken,
+                ("{\"productId\":\"%s\",\"deltaMilli\":%d,\"reason\":\"OPENING_STOCK\","
+                 + "\"notes\":\"On the shelf already\"}").formatted(productId, quantityMilli),
                 status().isCreated());
         return productId;
     }

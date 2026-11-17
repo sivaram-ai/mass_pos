@@ -1,19 +1,20 @@
 /**
- * How the Products and Stock lists are ordered. One definition for both screens: the fields, the
- * comparator and where the choice is remembered, so the two cannot drift apart.
+ * How the Items list is ordered: the fields, the comparator and where the choice is remembered.
+ * One definition, so what the Items screen and the non-billable store offer cannot drift apart.
  */
 
-export type SortField = 'sku' | 'name' | 'stock' | 'price' | 'mrp' | 'status'
+export type SortField = 'sku' | 'name' | 'stock' | 'value' | 'price' | 'mrp' | 'status'
 export type SortDir = 'asc' | 'desc'
 export type Sort = { field: SortField; dir: SortDir }
 
 /** The order the arrows walk, so Code is where the cursor starts. */
-export const SORT_FIELDS: SortField[] = ['sku', 'name', 'stock', 'price', 'mrp', 'status']
+export const SORT_FIELDS: SortField[] = ['sku', 'name', 'stock', 'value', 'price', 'mrp', 'status']
 
 export const SORT_LABELS: Record<SortField, string> = {
   sku: 'Code',
   name: 'Name',
   stock: 'Stock availability',
+  value: 'Stock value',
   price: 'Selling price',
   mrp: 'MRP',
   status: 'Status',
@@ -25,9 +26,11 @@ export const SORT_LABELS: Record<SortField, string> = {
  */
 export const DEFAULT_SORT: Sort = { field: 'sku', dir: 'asc' }
 
-/** Per machine, beside masspos.shortcuts and masspos.screen. */
-export const PRODUCT_SORT_KEY = 'masspos.productSort'
-export const STOCK_SORT_KEY = 'masspos.stockSort'
+/**
+ * Per machine, beside masspos.shortcuts and masspos.screen. One key now that the catalogue and
+ * the stock list are one screen; the two old ones are left where they are and simply ignored.
+ */
+export const ITEM_SORT_KEY = 'masspos.itemSort'
 
 /** What a row has to offer to be sortable, which both the catalogue and the stock list satisfy. */
 export type Sortable = {
@@ -53,6 +56,11 @@ function compareBy(field: SortField, left: Sortable, right: Sortable): number {
       return collator.compare(left.name, right.name)
     case 'stock':
       return left.stockMilli - right.stockMilli
+    case 'value':
+      // Divided after the multiply, as money always is here: milli-units times paise is a
+      // thousand times the money, and dividing first would throw away part of every row.
+      return (left.stockMilli * left.sellingPricePaise) / 1000
+        - (right.stockMilli * right.sellingPricePaise) / 1000
     case 'price':
       return left.sellingPricePaise - right.sellingPricePaise
     case 'mrp':

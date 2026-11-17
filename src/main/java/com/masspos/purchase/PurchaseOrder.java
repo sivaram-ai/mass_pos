@@ -159,6 +159,14 @@ public class PurchaseOrder extends BaseEntity {
         return lines.stream().mapToLong(PurchaseOrderLine::getValuePaise).sum();
     }
 
+    /**
+     * What actually arrived came to. The figure a payment is measured against once an order has
+     * been received: a lorry that brought eight of the twelve is owed for eight.
+     */
+    public long getReceivedValuePaise() {
+        return lines.stream().mapToLong(PurchaseOrderLine::getReceivedValuePaise).sum();
+    }
+
     public String getNumber() {
         return number;
     }

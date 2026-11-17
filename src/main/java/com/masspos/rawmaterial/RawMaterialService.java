@@ -3,6 +3,7 @@ package com.masspos.rawmaterial;
 import com.masspos.auth.AuthContext;
 import com.masspos.catalog.UnitOfMeasure;
 import com.masspos.client.CurrentCounter;
+import com.masspos.inventory.CorrectionReason;
 import com.masspos.user.User;
 import com.masspos.user.UserRepository;
 import com.masspos.web.FieldRejectedException;
@@ -78,12 +79,19 @@ public class RawMaterialService {
         onTheList(id).delete();
     }
 
-    /** Bought in, which is the only movement anybody is asked a price or a vendor for. */
+    /**
+     * Bought in, against an order somebody agreed to - the only way anything reaches the store
+     * now, and the only movement anybody is asked a price or a vendor for.
+     *
+     * <p>Called by the purchase-order service when the goods actually turn up. There is no screen
+     * behind it any more: a manager typing a delivery straight in was how the store filled up
+     * with purchases nobody had approved.
+     */
     @Transactional
     public RawMaterialView purchase(UUID id, long quantityMilli, String note, long buyingPricePaise,
-                                    String vendorName, UUID vendorId) {
+                                    String vendorName, UUID vendorId, String orderNumber) {
         return after(record(id, RawMaterialMovement.PURCHASE, Math.abs(quantityMilli), note,
-                buyingPricePaise, vendorName, vendorId), id);
+                buyingPricePaise, vendorName, vendorId, orderNumber), id);
     }
 
     /** Taken into the kitchen. */
@@ -92,33 +100,39 @@ public class RawMaterialService {
         return takeOut(id, RawMaterialMovement.CONSUMED, quantityMilli, note);
     }
 
-    /** Spoiled, spilt or thrown out. */
+    /**
+     * A count put right by hand: how much it moves, why, and whatever was typed beside it.
+     *
+     * <p>The reason chooses the movement, so what used to be three buttons - Wasted, Sent back,
+     * Correct - is one dialog asking the question somebody at a counter would actually be asked:
+     * why is this figure wrong. Capped at empty, as everything else here is.
+     */
     @Transactional
-    public RawMaterialView waste(UUID id, long quantityMilli, String note) {
-        return takeOut(id, RawMaterialMovement.WASTAGE, quantityMilli, note);
-    }
-
-    /** Sent back to whoever it came from. */
-    @Transactional
-    public RawMaterialView returnToVendor(UUID id, long quantityMilli, String note) {
-        return takeOut(id, RawMaterialMovement.RETURNED_TO_VENDOR, quantityMilli, note);
-    }
-
-    /** What a count of the store actually found, either direction. */
-    @Transactional
-    public RawMaterialView adjust(UUID id, long deltaMilli, String note) {
-        if (deltaMilli == 0) {
+    public RawMaterialView correct(UUID id, long deltaMilli, CorrectionReason reason, String notes) {
+        long wanted = reason.applyTo(deltaMilli);
+        if (wanted == 0) {
             throw new FieldRejectedException("deltaMilli", "cannot be nothing: say how far out the count was");
         }
         long inStore = Math.max(0, ledger.inStore(id));
-        // A correction that would leave the store owing stock is capped at empty, the same as
-        // everything else here. The shop is telling the till what is on the floor, and what is on
-        // the floor is never less than nothing.
-        long delta = deltaMilli < 0 ? -Math.min(inStore, -deltaMilli) : deltaMilli;
+        long delta = wanted < 0 ? -Math.min(inStore, -wanted) : wanted;
         if (delta == 0) {
             return after(null, id);
         }
-        return after(record(id, RawMaterialMovement.ADJUSTMENT, delta, note, 0, "", null), id);
+        return after(record(id, inTheStore(reason), delta, reason.wording(notes), 0, "", null, ""), id);
+    }
+
+    /**
+     * Which of the store's own movements a reason writes. The store has its own enum and its own
+     * table - adding the shelf's values to it, or the other way round, would mean altering a CHECK
+     * constraint on a till already in a shop, which SQLite will not do.
+     */
+    private static RawMaterialMovement inTheStore(CorrectionReason reason) {
+        return switch (reason) {
+            case OPENING_STOCK -> RawMaterialMovement.OPENING_STOCK;
+            case DAMAGED, EXPIRED, WASTED, TAKEN -> RawMaterialMovement.WASTAGE;
+            case SENT_BACK -> RawMaterialMovement.RETURNED_TO_VENDOR;
+            case STOCK_TAKE, ENTERED_WRONGLY -> RawMaterialMovement.ADJUSTMENT;
+        };
     }
 
     /**
@@ -145,10 +159,6 @@ public class RawMaterialService {
                 .toList();
     }
 
-    @Transactional(readOnly = true)
-    public List<String> vendorsSoFar() {
-        return ledger.vendorsSoFar();
-    }
 
     /**
      * Takes something out of the store, and never past empty - the same floor the shelf has. What
@@ -164,13 +174,14 @@ public class RawMaterialService {
             return after(null, id);
         }
         String said = take < wanted ? trim(note) + " - the store ran out, so only part of it came off" : note;
-        return after(record(id, type, -take, said, 0, "", null), id);
+        return after(record(id, type, -take, said, 0, "", null, ""), id);
     }
 
     private RawMaterialLedgerEvent record(UUID id, RawMaterialMovement type, long deltaMilli, String note,
-                                          long buyingPricePaise, String vendorName, UUID vendorId) {
+                                          long buyingPricePaise, String vendorName, UUID vendorId,
+                                          String orderNumber) {
         return ledger.save(new RawMaterialLedgerEvent(onTheList(id), type, deltaMilli, counter.code(),
-                Instant.now(), currentUser(), note, buyingPricePaise, vendorName, vendorId));
+                Instant.now(), currentUser(), note, buyingPricePaise, vendorName, vendorId, orderNumber));
     }
 
     private RawMaterialView after(RawMaterialLedgerEvent ignored, UUID id) {

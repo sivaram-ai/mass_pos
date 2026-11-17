@@ -76,13 +76,19 @@ public interface InventoryLedgerRepository extends JpaRepository<InventoryLedger
             """)
     List<Object[]> boughtPerVendorName();
 
-    /** Everyone this shop has already had goods from, so the box can suggest rather than ask. */
+
+    /**
+     * Every delivery of one item, newest first: what it cost each time and who it came from. The
+     * answer to "are we paying more for these than we were", which is a question about the
+     * deliveries and not about the item, whose price is only what it is today.
+     */
     @Query("""
-            select distinct e.vendorName from InventoryLedgerEvent e
-            where e.vendorName <> ''
-            order by e.vendorName
+            select e from InventoryLedgerEvent e
+            where e.product.id = :productId
+              and e.type = com.masspos.inventory.LedgerEventType.PURCHASE_RECEIPT
+            order by e.occurredAt desc
             """)
-    List<String> vendorsSoFar();
+    List<InventoryLedgerEvent> deliveriesOf(@Param("productId") UUID productId);
 
     List<InventoryLedgerEvent> findByProductIdOrderByOccurredAtDesc(UUID productId);
 

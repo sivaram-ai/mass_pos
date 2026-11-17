@@ -114,4 +114,9 @@ public class PurchaseOrderLine extends BaseEntity {
     public long getValuePaise() {
         return Math.round(quantityMilli * unitCostPaise / 1000.0);
     }
+
+    /** What actually arrived came to, which is what the vendor can ask to be paid for. */
+    public long getReceivedValuePaise() {
+        return Math.round(receivedMilli * unitCostPaise / 1000.0);
+    }
 }
