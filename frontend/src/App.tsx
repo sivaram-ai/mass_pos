@@ -13,6 +13,7 @@ import Products from './screens/Products'
 import Stock from './screens/Stock'
 import RawMaterials from './screens/RawMaterials'
 import Vendors from './screens/Vendors'
+import Purchases from './screens/Purchases'
 import Invoices from './screens/Invoices'
 import Reports from './screens/Reports'
 import Settings from './screens/Settings'
@@ -23,8 +24,8 @@ import License, { LicenseBanner } from './screens/License'
 import { Banner, isModalOpen } from './components/ui'
 import { MENU_KEY, useScreenKeys } from './shortcuts'
 
-type Screen = 'billing' | 'products' | 'stock' | 'raw' | 'vendors' | 'invoices' | 'reports' | 'users'
-  | 'theme' | 'settings' | 'license'
+type Screen = 'billing' | 'products' | 'stock' | 'raw' | 'vendors' | 'purchases' | 'invoices'
+  | 'reports' | 'users' | 'theme' | 'settings' | 'license'
 
 const SCREEN_KEY = 'masspos.screen'
 
@@ -72,6 +73,8 @@ const SCREENS: { id: Screen; label: string; roles: Role[] }[] = [
   // Who the shop buys from and what it owes them. Approving a payment is an administrator's job,
   // which the screen enforces and so does the server.
   { id: 'vendors', label: 'Vendors', roles: ['MANAGER', 'AUDITOR'] },
+  // Ordering goods. A manager writes and receives; only an administrator agrees to the money.
+  { id: 'purchases', label: 'Purchase orders', roles: ['MANAGER', 'AUDITOR'] },
   { id: 'reports', label: 'Reports', roles: ['MANAGER', 'AUDITOR'] },
   { id: 'users', label: 'Staff', roles: ['MANAGER', 'AUDITOR'] },
   // Everyone may look at the shop's theme; only an administrator may change it (the screen enforces
@@ -533,6 +536,7 @@ export default function App() {
         {current === 'stock' && <Stock onToast={setToast} />}
         {current === 'raw' && <RawMaterials onToast={setToast} />}
         {current === 'vendors' && <Vendors role={user.role} onToast={setToast} />}
+        {current === 'purchases' && <Purchases role={user.role} onToast={setToast} />}
         {current === 'reports' && <Reports onToast={setToast} />}
         {current === 'users' && <Users role={user.role} onToast={setToast} />}
         {current === 'theme' && (

@@ -3,6 +3,11 @@ package com.masspos;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.masspos.auth.AuthService;
+import com.masspos.catalog.Product;
+import com.masspos.catalog.ProductRepository;
+import com.masspos.inventory.InventoryLedgerEvent;
+import com.masspos.inventory.InventoryLedgerRepository;
+import com.masspos.inventory.LedgerEventType;
 import com.masspos.user.UserRole;
 import com.masspos.web.LocalApiGuard;
 import org.junit.jupiter.api.BeforeEach;
@@ -57,6 +62,10 @@ class StockGuardApiIntegrationTest {
     AuthService auth;
     @Autowired
     ObjectMapper json;
+    @Autowired
+    InventoryLedgerRepository ledger;
+    @Autowired
+    ProductRepository products;
 
     @BeforeEach
     void staffOnShift() {
@@ -208,6 +217,53 @@ class StockGuardApiIntegrationTest {
         assertThat(arrived.get("buyingPricePaise").asLong()).isZero();
         assertThat(arrived.get("vendorName").asText()).isEmpty();
         assertThat(arrived.get("quantityDeltaMilli").asLong()).isEqualTo(4_000);
+    }
+
+    /**
+     * Counts that went below zero on an older build are brought up to zero, one correction each.
+     *
+     * <p>The legacy movement is written straight to the ledger here because nothing in the app can
+     * produce one any more - which is the point. A till upgraded from a build that let the shelf
+     * go negative still has the figures it recorded then, and they stay wrong until somebody says
+     * what the shelf really holds.
+     */
+    @Test
+    void bringsCountsThatWentBelowZeroBackUpToIt() throws Exception {
+        String productId = newProduct("GUARD-10", "Biriyani", true);
+        Product item = products.findById(java.util.UUID.fromString(productId)).orElseThrow();
+        ledger.save(new InventoryLedgerEvent(item, LedgerEventType.SALE, -7_000, null, "T1",
+                java.time.Instant.now(), null, "Sold on an older build"));
+        assertThat(stockOf(productId)).isEqualTo(-7_000);
+
+        JsonNode found = call(get("/api/stock/below-empty"), managerToken, null, status().isOk());
+        assertThat(found.get("items").asLong()).isPositive();
+        assertThat(found.get("quantityMilli").asLong()).isNegative();
+
+        JsonNode corrected = call(post("/api/stock/below-empty/correct"), managerToken, null, status().isOk());
+
+        assertThat(corrected.get("items").asLong()).isPositive();
+        assertThat(stockOf(productId)).isZero();
+        JsonNode putRight = call(get("/api/stock/history?productId=" + productId), managerToken, null,
+                status().isOk()).get(0);
+        assertThat(putRight.get("type").asText()).isEqualTo("ADJUSTMENT");
+        assertThat(putRight.get("quantityDeltaMilli").asLong()).isEqualTo(7_000);
+        assertThat(putRight.get("note").asText()).contains("below empty");
+        // And nothing is left to correct.
+        assertThat(call(get("/api/stock/below-empty"), managerToken, null, status().isOk())
+                .get("items").asLong()).isZero();
+    }
+
+    /** A correction cannot take a count below zero either: that is not a count of anything. */
+    @Test
+    void refusesACorrectionThatWouldGoBelowEmpty() throws Exception {
+        String productId = newProduct("GUARD-11", "Payasam", true);
+        receive(productId, 2_000);
+
+        call(post("/api/stock/adjustments"), managerToken, """
+                {"productId":"%s","deltaMilli":-5000,"note":"Counted the shelf"}""".formatted(productId),
+                status().isCreated());
+
+        assertThat(stockOf(productId)).isZero();
     }
 
     private void receive(String productId, long quantityMilli) throws Exception {

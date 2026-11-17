@@ -114,6 +114,44 @@ export interface StockMovement {
   vendorName: string
 }
 
+export type PurchaseOrderStatus =
+  'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'RECEIVED' | 'CANCELLED'
+
+export interface PurchaseOrderLine {
+  id: string
+  /** True when it is a raw material rather than something off the shelf. */
+  fromTheStore: boolean
+  itemId: string
+  itemCode: string
+  name: string
+  unit: Unit
+  quantityMilli: number
+  unitCostPaise: number
+  valuePaise: number
+  /** What actually turned up. Nothing until the order is received. */
+  receivedMilli: number
+}
+
+export interface PurchaseOrder {
+  id: string
+  number: string
+  status: PurchaseOrderStatus
+  vendorId: string
+  vendorName: string
+  orderedOn: string
+  expectedOn: string | null
+  note: string
+  valuePaise: number
+  createdBy: string
+  decidedBy: string
+  decidedAt: string | null
+  /** Why it was turned down or called off. */
+  decision: string
+  receivedBy: string
+  receivedAt: string | null
+  lines: PurchaseOrderLine[]
+}
+
 /** Somebody the shop buys from. Not a Supplier: that word means the steward on a hotel bill. */
 export interface Vendor {
   id: string

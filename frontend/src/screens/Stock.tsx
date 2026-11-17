@@ -49,6 +49,9 @@ export default function Stock({ onToast }: { onToast: Toast }) {
   const [listFocused, setListFocused] = useState(false)
   const [movement, setMovement] = useState<Movement | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
+  /** How far below zero this shop's counts have gone, and whether to offer to put it right. */
+  const [belowEmpty, setBelowEmpty] = useState<{ items: number; quantityMilli: number } | null>(null)
+  const [correcting, setCorrecting] = useState(false)
   const list = useRef<HTMLDivElement>(null)
   const searchBox = useRef<HTMLInputElement>(null)
   const lines = useRef(new Map<string, HTMLTableRowElement>())
@@ -57,6 +60,11 @@ export default function Stock({ onToast }: { onToast: Toast }) {
     api.get<StockRow[]>('/api/stock')
       .then(setRows)
       .catch((failure) => onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not load the stock') }))
+    // Counts that went below zero on an older build. Asked for separately so the offer to put
+    // them right can say what it would be correcting before anybody agrees to it.
+    api.get<{ items: number; quantityMilli: number }>('/api/stock/below-empty')
+      .then(setBelowEmpty)
+      .catch(() => setBelowEmpty(null))
   }, [onToast])
 
   useEffect(load, [load])
@@ -94,6 +102,26 @@ export default function Stock({ onToast }: { onToast: Toast }) {
   const choose = (index: number) => {
     setSelected(index)
     setAction('receipts')
+  }
+
+  /**
+   * One correction per item, each with its reason. Nothing is rewritten: the ledger is
+   * append-only, and what it says happened is what happened.
+   */
+  const bringUpToZero = async () => {
+    setCorrecting(true)
+    try {
+      const done = await api.post<{ items: number; quantityMilli: number }>('/api/stock/below-empty/correct')
+      onToast({
+        tone: 'good',
+        text: `${done.items} ${done.items === 1 ? 'count' : 'counts'} brought up to zero`,
+      })
+      load()
+    } catch (failure) {
+      onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not correct those counts') })
+    } finally {
+      setCorrecting(false)
+    }
   }
 
   const chooseSort = (next: Sort) => {
@@ -194,6 +222,26 @@ export default function Stock({ onToast }: { onToast: Toast }) {
         </div>
       }
     >
+      {belowEmpty && belowEmpty.items > 0 && (
+        <div className="mb-2">
+          <Banner tone="warn">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span>
+                <span className="num font-medium">{belowEmpty.items}</span>
+                {belowEmpty.items === 1 ? ' item has' : ' items have'} a count below zero, adding up
+                to <span className="num font-medium">{quantity(belowEmpty.quantityMilli)}</span>. That
+                cannot happen any more, but the figures already recorded stay wrong until somebody
+                says what the shelf really holds.
+              </span>
+              <Button className="whitespace-nowrap px-2 py-1" disabled={correcting}
+                      onClick={() => void bringUpToZero()}>
+                {correcting ? 'Correcting…' : 'Bring them to zero'}
+              </Button>
+            </div>
+          </Banner>
+        </div>
+      )}
+
       <p className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
         <span><kbd>↑</kbd> <kbd>↓</kbd> choose an item</span>
         <span><kbd>←</kbd> <kbd>→</kbd> Received, Correct or Damage</span>

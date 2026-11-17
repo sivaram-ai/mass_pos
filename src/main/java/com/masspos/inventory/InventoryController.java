@@ -109,6 +109,23 @@ public class InventoryController {
         return inventory.historySince(Instant.now().minus(Duration.ofDays(Math.max(1, Math.min(days, 370)))));
     }
 
+    /** How far below zero this shop's counts have gone, for the screen to offer to put right. */
+    @GetMapping("/below-empty")
+    @RequiresRole({UserRole.MANAGER, UserRole.AUDITOR})
+    public InventoryService.BelowEmpty belowEmpty() {
+        return inventory.belowEmpty();
+    }
+
+    /**
+     * Brings every count that is below zero up to zero. One correction each, with its reason, so
+     * the history reads as the stock-take it is.
+     */
+    @PostMapping("/below-empty/correct")
+    @RequiresRole({UserRole.MANAGER})
+    public InventoryService.BelowEmpty bringUpToZero() {
+        return inventory.bringUpToZero();
+    }
+
     @PostMapping("/receipts")
     @RequiresRole({UserRole.MANAGER})
     @ResponseStatus(HttpStatus.CREATED)

@@ -153,6 +153,22 @@ services and anything else whose stock is never counted. It only matters when *R
 the stock says you do not have* is ticked in Settings: items with this box ticked are the exception
 to that rule, and the list shows them as "not counted".
 
+### Purchase orders
+
+**Purchase orders** put a gap between asking for goods and buying them. A manager writes down what
+the shop needs and from whom; it sits as **Waiting** until an **administrator approves it** — only
+they can agree to the money. When the lorry arrives, **Take the goods in** moves the counts, and
+not before.
+
+The receiving screen opens on what was ordered, so a delivery that came in full needs one key. If
+the lorry brought eight of the twelve, change the figure and that is what is recorded — the order
+keeps what was asked for beside what came. Each delivery lands in that item's history looking like
+any other, with the vendor, the price and the order number on it, and the vendor's balance picks it
+up.
+
+An order can hold things off the shelf and out of the store together, because a vendor who sells
+you bottled water and onions sends one lorry.
+
 ### Vendors
 
 **Vendors** are the people the shop buys from. The list shows what has been bought from each of
@@ -209,7 +225,13 @@ own line with the reason typed against it.
 **The stock count never goes below zero.** A sale takes off what the shelf has and no more, so an
 item that has run out stays at 0 however many of it you sell. The bill is unaffected — it carries
 the full quantity, and so do the takings, the GST and the customer's copy. Cancelling a bill puts
-back exactly what it took off the shelf, not what it sold.
+back exactly what it took off the shelf, not what it sold. A stock-take correction cannot take a
+count under either.
+
+**If your counts already went below zero** on an older version, the Stock screen says how many and
+by how much, and offers to **bring them to zero**. Each one gets its own correction with the reason
+written on it, so the history reads as the stock-take it is — nothing is rewritten, because the
+ledger never is.
 
 ### Changing a bill after it was taken
 

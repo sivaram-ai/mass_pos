@@ -29,6 +29,8 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3Q | Signing in where that account is already open on another till stops and says where - counter, number, floor and when - and offers Go back or sign that one out and carry on here, chosen with the arrow keys and Enter | Done: 368 tests green, driven in the browser |
 | 3R | Nothing from inside the program reaches a counter's screen: every refusal is a sentence written for a shop, and the exception, its stack, the SQL, the paths and the ids go to the log. `ApiExceptionHandler.forTheScreen` is the gate; `api.ts` guards the browser end | Done: 377 tests green, refusals driven against a running till |
 | 3S | A counter's settings are reachable while nobody is signed in: the sign-in screen opens, from its corner, the very page the counter serves itself at first start, so the connection mode, the server's address and which of the shop's counters this machine is can all be changed without closing the program. A counter that is already billing is given a way back that changes nothing | Done: 385 tests green, driven in the browser |
+| 4B | Counts that went below zero on an older build are brought up to it, one correction each with its reason; and a stock-take correction can no longer go under either, which was the last way in | Done: 413 tests green, driven against a till carrying a -357 |
+| 4A | Purchase orders: a manager writes what the shop needs, an administrator approves or turns it down, and the counts move only when the goods are taken in - with what actually arrived, which is not always what was ordered. One order can hold things off the shelf and out of the store | Done: 413 tests green, driven in the browser |
 | 3Z | Vendors: who the shop buys from, what it has had from them across both the shelf and the store, what it has paid and what it still owes. The vendor is chosen from a dropdown when goods arrive, deliveries taken before the list existed are found by name, and a payment waits for an administrator before it moves the balance | Done: 407 tests green, driven in the browser |
 | 3Y | Raw materials: the store behind the kitchen in a module of its own - butter, onions, oil, carrier bags - bought, used, wasted and corrected on a screen worked exactly like Stock, with its own table, its own ledger and its own History (F6). Never in the billing search, by construction | Done: 402 tests green, driven in the browser |
 | 3X | Goods received asks what a delivery cost and who it came from, both optional, both kept on the movement for good and shown in the history; the vendor box suggests from whoever the shop has had deliveries from before | Done: 396 tests green, driven in the browser against an upgraded database |
@@ -539,6 +541,29 @@ folder and everything under it, so that is the only copy that survives one.
   - A new immutable table, or a new fiscal or seller column on `Invoice`, must also be added to
     `AuditTrailGuard.FROZEN_INVOICE_COLUMNS`.
 - **Stock** is `SUM(quantity_delta_milli)` from the ledger. Never add a stock column.
+- **A purchase order is the gap between asking and buying** (`com.masspos.purchase`). A manager
+  writes down what is needed, an administrator agrees to the money, and the counts move only when
+  the lorry arrives. Before this, a delivery was the first anybody heard of a purchase.
+  - **Receiving writes no stock movements of its own.** It calls `InventoryService.receive` and
+    `RawMaterialService.purchase` - the same two the Stock and Raw materials screens call - so a
+    delivery against an order lands in the history looking exactly like one typed in by hand, with
+    the vendor, the price and the order number on it. **Never add a second way for stock to move.**
+  - **What arrived is not what was ordered.** Receiving takes a quantity and a cost per line and
+    records what actually came; a line left out came in full at the cost on the order, which is the
+    common case and should not need typing. `receivedMilli` is the only thing on a line that is not
+    `updatable = false`.
+  - **A line points at a product or a raw material**, two nullable keys with a constructor that
+    refuses both or neither. Not a loose id with a kind beside it: the shelf and the store are
+    different tables and the database should still refuse a line pointing at nothing.
+  - **Approving and rejecting are `@RequiresRole({})`** - administrators only, which is the whole
+    reason the order exists apart from the delivery. Writing one and taking goods in are a
+    manager's job.
+  - **`PurchaseOrderStatus` is five words a shopkeeper would use**, on a new table with its own
+    CHECK constraint. Nothing finer: an order is asked for, decided, and either turns up or does
+    not.
+  - **Numbered `PO-2627-0001` from a per-year sequence**, advanced in the transaction that writes
+    the order, exactly as invoice numbers are. It carries no legal weight - it is a handle for
+    chasing a delivery down a telephone - but gapless still matters for that.
 - **The people the shop buys from are `Vendor`s, never `Supplier`s** (`com.masspos.vendor`). That
   word is taken and means the opposite end of the shop: the steward who carried the order to the
   table, printed on hotel bills, with `supplier_id` frozen on every invoice. Freeing it would mean
@@ -643,6 +668,16 @@ folder and everything under it, so that is the only copy that survives one.
   - **A return is not a cancellation and is deliberately left alone.** Goods coming back are
     physically in somebody's hand, so SALE_RETURN adds them whether or not the sale ever took them
     off - the shop really does have them now.
+  - **A correction cannot go below empty either** (`InventoryService.adjust`, and the same in
+    `RawMaterialService.adjust`). A stock-take is the shop telling the till what is on the floor,
+    and what is on the floor is never less than nothing: a correction big enough to take it under
+    is somebody saying "there are minus five", which is not a count of anything. This was the one
+    way left in.
+  - **Counts recorded by an older build are put right, not rewritten** (`bringUpToZero`, offered on
+    the Stock screen when there is something to correct, `GET /api/stock/below-empty` to ask what).
+    One ADJUSTMENT per item, each carrying its reason, so the history reads as the stock-take it is
+    rather than as a number that changed itself. The ledger is append-only; nothing else would be
+    honest.
 - **The item code (`sku`) is editable** (`Product.changeCode`, checked for clashes by
   `ProductController.checkCode`, which excludes the item being saved). Invoice and credit note lines
   copy the code at issue, so an old bill keeps the code it was sold under.

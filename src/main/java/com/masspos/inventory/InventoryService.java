@@ -56,6 +56,60 @@ public class InventoryService {
     }
 
     /**
+     * What a count below zero adds up to, and how many items are in that state.
+     *
+     * <p>Asked before offering to put them right, so the shop is told what it is agreeing to
+     * rather than finding out afterwards.
+     */
+    @Transactional(readOnly = true)
+    public BelowEmpty belowEmpty() {
+        long items = 0;
+        long shortBy = 0;
+        for (long onHand : onHandForAll().values()) {
+            if (onHand < 0) {
+                items++;
+                shortBy += onHand;
+            }
+        }
+        return new BelowEmpty(items, shortBy);
+    }
+
+    /**
+     * Brings every count that is below zero up to zero, one correction each.
+     *
+     * <p>Counts went below zero on tills built before the shelf stopped at empty: an item billed
+     * without stock subtracted on every sale, and a restaurant's screen ended up reading -357 of a
+     * biriyani it cooks to order. Nothing new can get there now, but the figures already recorded
+     * stay wrong until somebody says what the shelf really holds.
+     *
+     * <p>Done as ADJUSTMENT movements, not by rewriting anything: the ledger is append-only, and
+     * what it says happened is what happened. Each correction carries its reason, so a year from
+     * now the history reads as the stock-take it is rather than as a number that changed itself.
+     *
+     * @return how many items were corrected, and by how much in total
+     */
+    @Transactional
+    public BelowEmpty bringUpToZero() {
+        long items = 0;
+        long broughtUp = 0;
+        for (Map.Entry<UUID, Long> counted : onHandForAll().entrySet()) {
+            long onHand = counted.getValue();
+            if (onHand >= 0) {
+                continue;
+            }
+            record(counted.getKey(), LedgerEventType.ADJUSTMENT, -onHand, null,
+                    "Brought up to zero: the count had gone below empty before that was prevented");
+            items++;
+            broughtUp += -onHand;
+        }
+        return new BelowEmpty(items, broughtUp);
+    }
+
+    /** @param quantityMilli negative when it is what the counts are short by, positive when put right */
+    public record BelowEmpty(long items, long quantityMilli) {
+    }
+
+    /**
      * Everything that has ever moved one item, newest first, each row carrying what the shelf held
      * once it had been applied.
      *
@@ -112,7 +166,18 @@ public class InventoryService {
      */
     @Transactional
     public InventoryLedgerEvent adjust(UUID productId, long deltaMilli, String note) {
-        return record(productId, LedgerEventType.ADJUSTMENT, deltaMilli, null, note);
+        // Capped at empty, as every other way out of the shelf is. A correction is the shop
+        // telling the till what is on the floor, and what is on the floor is never less than
+        // nothing: a correction big enough to go below zero is somebody saying "there are minus
+        // five", which is not a count of anything.
+        long onShelf = Math.max(0, onHand(productId));
+        long delta = deltaMilli < 0 ? -Math.min(onShelf, -deltaMilli) : deltaMilli;
+        if (delta == 0) {
+            throw new IllegalArgumentException(deltaMilli == 0
+                    ? "Say how far out the count was."
+                    : "There is nothing on the shelf to take off.");
+        }
+        return record(productId, LedgerEventType.ADJUSTMENT, delta, null, note);
     }
 
     @Transactional
