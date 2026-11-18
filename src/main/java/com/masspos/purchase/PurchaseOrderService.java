@@ -15,6 +15,7 @@ import com.masspos.vendor.Vendor;
 import com.masspos.vendor.VendorPayment;
 import com.masspos.vendor.VendorPaymentMode;
 import com.masspos.vendor.VendorPaymentRepository;
+import com.masspos.vendor.VendorProfile;
 import com.masspos.vendor.VendorRepository;
 import com.masspos.vendor.VendorService;
 import com.masspos.web.FieldRejectedException;
@@ -211,16 +212,35 @@ public class PurchaseOrderService {
         PurchaseOrder written = orders.save(order);
         for (PaidNow handed : paidNow == null ? List.<PaidNow>of() : paidNow) {
             if (handed.amountPaise() > 0) {
-                if (vendor == null) {
-                    throw new FieldRejectedException("payments",
-                            "cannot be recorded against a vendor who is not on the list. Add them on the "
-                                    + "Vendors screen, or write the order and pay later.");
-                }
-                vendorPayments.pay(vendor.getId(), handed.amountPaise(), today, handed.mode(),
-                        handed.reference(), "With order " + written.getNumber(), written.getId());
+                // Money handed over is recorded whether or not the man it went to is on the list.
+                // Refusing it never stopped the payment, only the record of it.
+                vendorPayments.pay(vendor == null ? null : vendor.getId(), written.getVendorName(),
+                        handed.amountPaise(), today, handed.mode(), handed.reference(),
+                        "With order " + written.getNumber(), written.getId());
             }
         }
         return written;
+    }
+
+    /**
+     * Money paid for one order, which is where somebody standing in front of a delivery is
+     * looking. It is the same payment the vendor's own page records - one row, one balance,
+     * whichever screen it was recorded on - and it carries the order's vendor, or the order's
+     * typed name where there is no vendor.
+     */
+    @Transactional
+    public VendorProfile.Payment pay(UUID id, long amountPaise, LocalDate paidOn, VendorPaymentMode mode,
+                                     String reference, String note) {
+        PurchaseOrder order = order(id);
+        return vendorPayments.pay(order.getVendor() == null ? null : order.getVendor().getId(),
+                order.getVendorName(), amountPaise, paidOn, mode, reference,
+                note == null || note.isBlank() ? "Against order " + order.getNumber() : note, id);
+    }
+
+    /** What has been paid against one order, agreed to or not. */
+    @Transactional(readOnly = true)
+    public List<VendorProfile.Payment> payments(UUID id) {
+        return vendorPayments.againstOrder(order(id).getId());
     }
 
     /**

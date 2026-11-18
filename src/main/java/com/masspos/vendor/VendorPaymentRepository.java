@@ -31,7 +31,7 @@ public interface VendorPaymentRepository extends JpaRepository<VendorPayment, UU
     @Query("""
             select p.vendor.id, coalesce(sum(p.amountPaise), 0)
             from VendorPayment p
-            where p.approved = true
+            where p.approved = true and p.vendor is not null
             group by p.vendor.id
             """)
     List<Object[]> approvedPerVendor();
@@ -39,7 +39,7 @@ public interface VendorPaymentRepository extends JpaRepository<VendorPayment, UU
     @Query("""
             select p.vendor.id, coalesce(sum(p.amountPaise), 0)
             from VendorPayment p
-            where p.approved = false
+            where p.approved = false and p.vendor is not null
             group by p.vendor.id
             """)
     List<Object[]> waitingPerVendor();
@@ -62,7 +62,14 @@ public interface VendorPaymentRepository extends JpaRepository<VendorPayment, UU
             """)
     long approvedForOrder(@Param("orderId") UUID orderId);
 
-    /** Everything paid against one order, agreed to or not: what follows it when it is edited. */
-    @Query("select p from VendorPayment p where p.purchaseOrderId = :orderId")
+    /**
+     * Everything paid against one order, agreed to or not, oldest first: what the order's own page
+     * shows, and what follows the order when it is edited into a new one.
+     */
+    @Query("""
+            select p from VendorPayment p
+            where p.purchaseOrderId = :orderId
+            order by p.recordedAt asc
+            """)
     List<VendorPayment> allocatedTo(@Param("orderId") UUID orderId);
 }

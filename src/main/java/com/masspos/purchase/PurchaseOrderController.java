@@ -4,8 +4,10 @@ import com.masspos.auth.RequiresRole;
 import com.masspos.common.IndiaTime;
 import com.masspos.user.UserRole;
 import com.masspos.vendor.VendorPaymentMode;
+import com.masspos.vendor.VendorProfile;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
@@ -150,6 +152,36 @@ public class PurchaseOrderController {
     @RequiresRole({UserRole.MANAGER, UserRole.AUDITOR})
     public PurchaseOrderService.Story history(@PathVariable UUID id) {
         return purchases.history(id);
+    }
+
+    /** Money paid for an order after it was written, from the order's own page. */
+    public record PayRequest(@Positive long amountPaise,
+                             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate paidOn,
+                             @NotNull VendorPaymentMode mode,
+                             @Size(max = 60) String reference,
+                             @Size(max = 200) String note) {
+    }
+
+    /**
+     * What has been paid against this order, agreed to or not.
+     *
+     * <p>It is on the order and not only on the vendor's page because a payment to somebody who is
+     * not on that list has no page of their own - this is where the shop sees it, and where an
+     * administrator agrees to it.
+     */
+    @GetMapping("/{id}/payments")
+    @RequiresRole({UserRole.MANAGER, UserRole.AUDITOR})
+    public List<VendorProfile.Payment> payments(@PathVariable UUID id) {
+        return purchases.payments(id);
+    }
+
+    /** Recording money paid for this order. The same payment the vendor's own page records. */
+    @PostMapping("/{id}/payments")
+    @RequiresRole({UserRole.MANAGER})
+    @ResponseStatus(HttpStatus.CREATED)
+    public VendorProfile.Payment pay(@PathVariable UUID id, @Valid @RequestBody PayRequest request) {
+        return purchases.pay(id, request.amountPaise(), request.paidOn(), request.mode(),
+                request.reference(), request.note());
     }
 
     private static List<PurchaseOrderService.Wanted> wanted(OrderRequest request) {

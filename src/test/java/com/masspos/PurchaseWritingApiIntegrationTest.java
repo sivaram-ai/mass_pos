@@ -265,6 +265,90 @@ class PurchaseWritingApiIntegrationTest {
     }
 
     /**
+     * Money paid to somebody who is not on the vendors list.
+     *
+     * <p>The shop paid him, so the shop writes it down. Refusing the payment until he had been
+     * added to the list never stopped the money leaving the till, it only stopped the record of
+     * it. He has no page of his own, so the order is where it shows - and the only place an
+     * administrator can agree to it.
+     */
+    @Test
+    void paysSomebodyWhoIsNotOnTheVendorsList() throws Exception {
+        String productId = newProduct("WP-10", "Bananas");
+        JsonNode order = call(post("/api/purchase-orders"), managerToken, """
+                {"vendorId":null,"vendorName":"The lorry man","expectedOn":null,"note":"","lines":[
+                  {"productId":"%s","rawMaterialId":null,"quantityMilli":20000,"unitCostPaise":2000}],
+                 "payments":[{"mode":"CASH","amountPaise":10000,"reference":""}]}"""
+                .formatted(productId), status().isCreated());
+        String orderId = order.get("id").asText();
+
+        // And the rest of it later, from the order's own page.
+        JsonNode later = call(post("/api/purchase-orders/" + orderId + "/payments"), managerToken, """
+                {"amountPaise":30000,"paidOn":null,"mode":"UPI","reference":"UPI-9004","note":""}""",
+                status().isCreated());
+        assertThat(later.get("vendorId").isNull()).as("nobody on the list was paid").isTrue();
+        assertThat(later.get("vendorName").asText()).isEqualTo("The lorry man");
+
+        JsonNode payments = call(get("/api/purchase-orders/" + orderId + "/payments"), managerToken, null,
+                status().isOk());
+        assertThat(payments).hasSize(2);
+        assertThat(payments.get(0).get("amountPaise").asLong()).isEqualTo(10_000);
+        assertThat(payments.get(0).get("approved").asBoolean())
+                .as("money waits for an administrator, vendor or no vendor").isFalse();
+        assertThat(payments.get(1).get("note").asText()).contains(order.get("number").asText());
+
+        for (JsonNode payment : payments) {
+            call(post("/api/vendors/payments/" + payment.get("id").asText() + "/approve"), adminToken, null,
+                    status().isNoContent());
+        }
+        call(post("/api/purchase-orders/" + orderId + "/approve"), adminToken, null, status().isOk());
+        JsonNode received = call(post("/api/purchase-orders/" + orderId + "/receive"), managerToken, "{}",
+                status().isOk());
+
+        assertThat(received.get("owedPaise").asLong()).isEqualTo(40_000);
+        assertThat(received.get("paidPaise").asLong()).isEqualTo(40_000);
+        assertThat(received.get("settled").asText()).isEqualTo("PAID");
+        assertThat(call(get("/api/vendors"), managerToken, null, status().isOk()).toString())
+                .as("and he is still not on the list").doesNotContain("The lorry man");
+    }
+
+    /**
+     * Paying from the order is the payment the vendor's own page records: one row, one balance,
+     * whichever screen it was recorded on. There is deliberately no second kind of payment.
+     */
+    @Test
+    void payingFromTheOrderIsThePaymentTheVendorsPageRecords() throws Exception {
+        String vendorId = newVendor("WV-11", "Oil mill");
+        String productId = newProduct("WP-11", "Oil 5l");
+        String orderId = call(post("/api/purchase-orders"), managerToken, """
+                {"vendorId":"%s","expectedOn":null,"note":"","lines":[
+                  {"productId":"%s","rawMaterialId":null,"quantityMilli":2000,"unitCostPaise":60000}]}"""
+                .formatted(vendorId, productId), status().isCreated()).get("id").asText();
+        call(post("/api/purchase-orders/" + orderId + "/approve"), adminToken, null, status().isOk());
+        call(post("/api/purchase-orders/" + orderId + "/receive"), managerToken, "{}", status().isOk());
+
+        call(post("/api/purchase-orders/" + orderId + "/payments"), managerToken, """
+                {"amountPaise":120000,"paidOn":null,"mode":"BANK_TRANSFER","reference":"NEFT-22","note":""}""",
+                status().isCreated());
+
+        JsonNode vendor = call(get("/api/vendors/" + vendorId), managerToken, null, status().isOk());
+        assertThat(vendor.at("/payments/0/purchaseOrderId").asText())
+                .as("the vendor's page shows the very same payment").isEqualTo(orderId);
+        assertThat(vendor.at("/payments/0/vendorName").asText()).isEqualTo("Oil mill");
+        assertThat(vendor.at("/vendor/waitingPaise").asLong()).isEqualTo(120_000);
+        assertThat(vendor.at("/vendor/outstandingPaise").asLong())
+                .as("and it moves nothing until somebody agrees to it").isEqualTo(120_000);
+
+        call(post("/api/vendors/payments/" + vendor.at("/payments/0/id").asText() + "/approve"), adminToken,
+                null, status().isNoContent());
+
+        assertThat(call(get("/api/vendors/" + vendorId), managerToken, null, status().isOk())
+                .at("/vendor/outstandingPaise").asLong()).isZero();
+        assertThat(call(get("/api/purchase-orders/" + orderId), managerToken, null, status().isOk())
+                .get("settled").asText()).isEqualTo("PAID");
+    }
+
+    /**
      * Changing an order is writing a new one, the way changing a bill reissues it: the old one is
      * cancelled with the new number on it, the new one carries the old number, both are in the
      * history, and what has been paid follows the order it was paid for.

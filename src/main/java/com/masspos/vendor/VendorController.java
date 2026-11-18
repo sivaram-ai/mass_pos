@@ -101,8 +101,9 @@ public class VendorController {
     @RequiresRole({UserRole.MANAGER})
     @ResponseStatus(HttpStatus.CREATED)
     public VendorProfile.Payment pay(@PathVariable UUID id, @Valid @RequestBody PaymentRequest request) {
-        return vendors.pay(id, request.amountPaise(), request.paidOn(), request.mode(), request.reference(),
-                request.note(), request.purchaseOrderId());
+        // The name comes off the vendor row here; it is only typed where there is no row.
+        return vendors.pay(id, null, request.amountPaise(), request.paidOn(), request.mode(),
+                request.reference(), request.note(), request.purchaseOrderId());
     }
 
     /** Everything waiting on an administrator, oldest first. */

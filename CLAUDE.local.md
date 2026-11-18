@@ -29,6 +29,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3Q | Signing in where that account is already open on another till stops and says where - counter, number, floor and when - and offers Go back or sign that one out and carry on here, chosen with the arrow keys and Enter | Done: 368 tests green, driven in the browser |
 | 3R | Nothing from inside the program reaches a counter's screen: every refusal is a sentence written for a shop, and the exception, its stack, the SQL, the paths and the ids go to the log. `ApiExceptionHandler.forTheScreen` is the gate; `api.ts` guards the browser end | Done: 377 tests green, refusals driven against a running till |
 | 3S | A counter's settings are reachable while nobody is signed in: the sign-in screen opens, from its corner, the very page the counter serves itself at first start, so the connection mode, the server's address and which of the shop's counters this machine is can all be changed without closing the program. A counter that is already billing is given a way back that changes nothing | Done: 385 tests green, driven in the browser |
+| 4F | Money paid to somebody the shop does not keep on its vendor list is written down like anybody else's, on the order it was paid for, where an administrator agrees to it; and an order opens on its whole story - every version with its own lines, what it replaces and what replaced it, the goods that went back off it, and the one that was clicked ringed and named | Done: 427 tests green, driven in the browser |
 | 4E | A vendor is optional on an order, which a shop buys from a man off a lorry as often as from its list; an order is changed the way a bill is, by cancelling it and writing a new one that carries the old number, with what was paid following it; every version shows on the order when it is opened; and an order can be paid from the order itself, which is the same payment the vendor's page records | Done: 425 tests green, driven in the browser |
 | 4D | A purchase order is written on the billing screen's own grid - full screen from Purchase orders, the same component in a dialog from Items - with the vendor where the steward goes, money out where the payment screen goes, orders held like bills, things the shop does not keep going on as one-offs, and goods going back to a vendor the way a customer's goods come back | Done: 422 tests green, driven in the browser |
 | 4C | One **Items** screen where Products and Stock were two; stock reaches a count only through a purchase order somebody approved, and **Correct** moves one by hand with a reason that decides the movement; **Space** ticks several items onto one order; the order dialog searches both lists as you type; the orders list searches and sorts like Items and says whether each one has been paid for; **F8** shows what an item has cost on every delivery; raw materials are **Non billable items** | Done: 416 tests green, driven in the browser |
@@ -695,9 +696,13 @@ folder and everything under it, so that is the only copy that survives one.
   - **The delivery carries the name with no link**, which the stock ledger has handled since
     vendors existed: `vendor_id` null, `vendor_name` filled in. Nothing is added to the vendor
     list by writing an order.
-  - **Money cannot be paid to somebody who is not on the list.** A payment belongs to a vendor
-    row, so the money screen refuses it with a sentence saying to add them first. The order is
-    still written; only the payment waits.
+  - **Money paid to somebody who is not on the list is recorded all the same**
+    (`VendorPayment.vendor` nullable, `vendor_name varchar(120) default ''` beside it). It used to
+    be refused with "add them to the list first", which never stopped the money leaving the till -
+    it only stopped the record of it, which is the one thing a till is for. The name is frozen on
+    the payment the way the vendor's own name is, there is no running balance for it to move
+    because there is no page to move, and the **order it was paid for is where it shows** and the
+    only place an administrator can agree to it.
   - **On SQLite a column does not become nullable by itself.** `ddl-auto=update` will not alter
     the old NOT NULL, so a development database written before this release has to be deleted (or
     the till is a fresh install, which is every till in the field - `purchase_order` has never
@@ -723,10 +728,35 @@ folder and everything under it, so that is the only copy that survives one.
   says why rather than doing nothing. Leaving the search box puts the choice back to Open, because
   arriving at a row and pressing Enter should open it rather than run whatever was last chosen.
   `←` `→` belong to the actions now, so the state chips move with **F8**.
-- **An order can be paid from the order** (`PayOrderDialog`), which is where somebody standing in
-  front of a delivery is looking. It posts the same payment the vendor's page posts, against the
-  same vendor, allocated to the order: one row, one balance, whichever screen it was recorded on.
-  There is deliberately no second kind of payment.
+- **An order can be paid from the order** (`PayOrderDialog` → `POST /api/purchase-orders/{id}/payments`
+  → `PurchaseOrderService.pay` → `VendorService.pay`), which is where somebody standing in front of
+  a delivery is looking. One `VendorPayment` row, one balance, whichever screen recorded it; there
+  is deliberately no second kind of payment.
+  - **It posts to the order, not to a vendor**, because an order may not have one. The order knows
+    who it was with - the vendor where there is one, the typed name where there is not - so the
+    screen never has to, and a vendorless order can be paid for like any other.
+  - **`GET /api/purchase-orders/{id}/payments` is what the order's page shows**, agreed to or not,
+    with **Approve** beside each one for an administrator. The vendor's page cannot serve for this:
+    a payment to somebody off the list has no vendor page to appear on, so without this the money
+    would be recorded and then be invisible and unapprovable for ever.
+  - **Pay is refused only for an order that was turned down or called off, or one already paid
+    for** (`actionsFor`). Not for "nothing is owed yet": paying ahead is ordinary with a vendor who
+    wants his money before he loads the lorry, and the dialog says that is what it is.
+- **An order's page is the bill's Story** (`OrderPage`, `OrderHead`, `OrderLines`, `OrderPayments`,
+  `ReturnDetails`). Every version it went through is a section of its own, oldest first, with its
+  own lines and what was decided about it; the one that was opened is named `(Opened)`, ringed, and
+  scrolled to. A version says what it **replaces** and what **replaced** it - the latter worked out
+  from the story rather than stored, since the next version already carries `replacesOrderNumber` -
+  and the list row says "replaces PO-…" underneath the number, as the bills list does.
+  - **Only the opened version is live.** The receive boxes, the approve and reject buttons, Change,
+    Pay and Send back are drawn inside that one section; the others are read-only, because a
+    cancelled version has nothing left that can be done to it and its payments followed the order
+    that replaced it.
+  - **Returns are sections too**, rose, drawn by the same `ReturnDetails` the return's own dialog
+    uses, so the two cannot drift.
+  - **The decision banner does not repeat the number** it already carries: "Edited, replaced by
+    PO-2627-0002" is the whole sentence, and the "took its place" clause is added only where the
+    reason does not name it.
 - **An order line may point at nothing and carry its own name** (`PurchaseOrderLine`, `item_name`
   and `item_code`, both `default ''`). A shop buys things it does not keep a count of, and the
   alternative was a manager inventing a catalogue item to get an order written. Three consequences

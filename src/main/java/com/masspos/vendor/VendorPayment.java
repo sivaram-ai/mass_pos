@@ -34,9 +34,29 @@ import java.util.UUID;
 @Table(name = "vendor_payment", indexes = @Index(name = "ix_vendor_payment_vendor", columnList = "vendor_id"))
 public class VendorPayment extends BaseEntity {
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "vendor_id", nullable = false, updatable = false)
+    /**
+     * Who the money went to, where that is somebody on the shop's list.
+     *
+     * <p>Nullable, for the same reason an order's vendor is: a shop pays the man off the lorry, the
+     * hardware shop on the corner, somebody it will never buy from again. Money genuinely changed
+     * hands and the shop has to be able to write it down - refusing to record it until a vendor had
+     * been added to the list did not stop the payment, it only stopped the shop keeping a record
+     * of it. What there is no vendor row for simply has no running balance to move: the order it
+     * was paid for is where it shows.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "vendor_id", updatable = false)
     private Vendor vendor;
+
+    /**
+     * What the shop called whoever was paid, frozen here as the seller on an invoice is: the
+     * vendor's own name where there is a vendor, so renaming him next year does not rewrite this
+     * year's payments, and whatever was typed on the order where there is not.
+     */
+    @Size(max = 120)
+    @Column(name = "vendor_name", length = 120, nullable = false, updatable = false,
+            columnDefinition = "varchar(120) default ''")
+    private String vendorName = "";
 
     @Column(nullable = false, updatable = false)
     private long amountPaise;
@@ -88,11 +108,12 @@ public class VendorPayment extends BaseEntity {
     protected VendorPayment() {
     }
 
-    public VendorPayment(Vendor vendor, long amountPaise, LocalDate paidOn, VendorPaymentMode mode,
-                         String reference, String note, User recordedBy, Instant recordedAt,
-                         UUID purchaseOrderId) {
+    public VendorPayment(Vendor vendor, String vendorName, long amountPaise, LocalDate paidOn,
+                         VendorPaymentMode mode, String reference, String note, User recordedBy,
+                         Instant recordedAt, UUID purchaseOrderId) {
         this.purchaseOrderId = purchaseOrderId;
         this.vendor = vendor;
+        this.vendorName = vendor != null ? vendor.getName() : vendorName == null ? "" : vendorName.trim();
         this.amountPaise = amountPaise;
         this.paidOn = paidOn;
         this.mode = mode;
@@ -118,8 +139,14 @@ public class VendorPayment extends BaseEntity {
         this.approvedAt = when;
     }
 
+    /** Null where the money went to somebody who is not on the shop's list. */
     public Vendor getVendor() {
         return vendor;
+    }
+
+    /** Who was paid, whether or not they are on the list. Never null, sometimes empty. */
+    public String getVendorName() {
+        return vendor != null ? vendor.getName() : vendorName == null ? "" : vendorName;
     }
 
     public long getAmountPaise() {

@@ -236,15 +236,26 @@ you bottled water and onions sends one lorry.
 **An order can be changed** (`Edit`), the way today's bill can: the old order is cancelled and a
 new one is written in its place carrying the old number, so what was agreed to and what was
 ordered can never quietly differ. It goes back to waiting, because the money changed and somebody
-has to agree to it again, and whatever has been paid against it follows it. Opening any version
-shows the whole line of them, oldest first, with the one you are looking at marked **Opened** and
-anything that went back listed beneath. Once the goods are in, an order cannot be changed — what
-should not have come goes back on a lorry instead.
+has to agree to it again, and whatever has been paid against it follows it. Once the goods are in,
+an order cannot be changed — what should not have come goes back on a lorry instead.
+
+**Opening an order shows its whole story**, the way a bill does: every version it went through,
+oldest first, each with its own lines and what was decided about it, saying what it replaces and
+what replaced it, with the goods that went back listed beneath — and the one you clicked named
+**(Opened)** and ringed, because with three documents stacked up the first question is which of
+them you are looking at. The list says "replaces PO-…" under the number of an order that was
+changed.
 
 **Pay** records money against an order from the order itself, which is where somebody standing in
 front of a delivery is looking. It is the same payment the vendor's page records — one row, one
 balance — allocated to that order, waiting for an administrator, and showing on both screens at
-once.
+once. An order with nothing owed on it yet can be paid too: paying ahead is ordinary with a vendor
+who wants his money before he loads the lorry.
+
+**Somebody who is not on the vendor list gets paid like anybody else.** The shop paid him, so the
+shop writes it down: the payment carries the name off the order and nothing else. He has no page
+of his own, so **the order is where the money shows** — every payment against it, with who
+recorded it and when, and **Approve** beside each one for an administrator.
 
 **The list is worked like Items and like Bills**, and it holds the returns as well as the orders: `F2` searches
 everything — the number, the vendor, the people who wrote, approved and received it, and the
@@ -499,7 +510,7 @@ is not a loopback name are refused. Together these stop a web page open on the t
 | Catalogue | `GET /api/products?q=`, `POST /api/products`, `PUT /api/products/{id}`, `POST /api/products/{id}/deactivate` |
 | Catalogue as a sheet | `GET /api/products/export` (CSV out), `POST /api/products/import` (CSV in, all rows or none) |
 | Stock | `GET /api/stock`, `/history`, `/correction-reasons`, `POST /api/stock/corrections` |
-| Buying | `GET/POST /api/purchase-orders`, `/{id}/approve`, `/reject`, `/receive`, `/replace`, `/history`, `/holds`, `/prices`; `GET/POST /api/purchase-returns`, `/can-go-back` |
+| Buying | `GET/POST /api/purchase-orders`, `/{id}/approve`, `/reject`, `/receive`, `/replace`, `/history`, `/payments`, `/holds`, `/prices`; `GET/POST /api/purchase-returns`, `/can-go-back` |
 | Billing | `POST /api/sales`, `POST /api/sales/quote`, `GET /api/invoices`, `GET /api/invoices/last`, `GET /api/invoices/lookup?number=`, `GET /api/invoices/{id}`, `GET /api/invoices/{id}/history`, `POST /api/invoices/{id}/cancel`, `POST /api/invoices/{id}/replace` (edit), `POST /api/invoices/{id}/receipt` |
 | Returns | `GET /api/invoices/{id}/returnable`, `POST /api/returns/quote`, `POST /api/returns`, `GET /api/returns`, `GET /api/returns/lookup?number=`, `GET /api/returns/{id}`, `POST /api/returns/{id}/receipt` |
 | Held bills | `GET/POST /api/holds`, `DELETE /api/holds/{id}` |

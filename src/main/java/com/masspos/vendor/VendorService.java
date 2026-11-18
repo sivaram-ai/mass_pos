@@ -98,10 +98,7 @@ public class VendorService {
         bought.sort(Comparator.comparing(VendorProfile.Purchase::occurredAt).reversed());
 
         List<VendorProfile.Payment> paid = payments.paidTo(id).stream()
-                .map(payment -> new VendorProfile.Payment(payment.getId(), payment.getPaidOn(),
-                        payment.getAmountPaise(), payment.getMode(), payment.getReference(), payment.getNote(),
-                        who(payment.getRecordedBy()), payment.isApproved(), who(payment.getApprovedBy()),
-                        payment.getApprovedAt(), payment.getPurchaseOrderId()))
+                .map(VendorProfile.Payment::of)
                 .toList();
 
         long boughtPaise = bought.stream().mapToLong(VendorProfile.Purchase::valuePaise).sum();
@@ -140,20 +137,37 @@ public class VendorService {
     /**
      * Records money handed over. It waits for an administrator before it counts against what the
      * shop owes - the person who paid is rarely the person who decides what gets paid.
+     *
+     * <p>The vendor is optional, as it is on an order. A shop that pays the man off the lorry has
+     * paid him, and the one thing a till must not do is lose that: the payment is written with his
+     * name on it and nothing else. There is no running balance for it to move - he has no page -
+     * so where it shows is the order it was paid for.
+     *
+     * @param vendorName who was paid, used only where there is no vendor row to take the name from
      */
     @Transactional
-    public VendorProfile.Payment pay(UUID vendorId, long amountPaise, LocalDate paidOn, VendorPaymentMode mode,
-                                     String reference, String note, UUID purchaseOrderId) {
+    public VendorProfile.Payment pay(UUID vendorId, String vendorName, long amountPaise, LocalDate paidOn,
+                                     VendorPaymentMode mode, String reference, String note,
+                                     UUID purchaseOrderId) {
         if (amountPaise <= 0) {
             throw new FieldRejectedException("amountPaise", "must be more than nothing");
         }
-        Vendor vendor = onTheList(vendorId);
-        VendorPayment payment = payments.save(new VendorPayment(vendor, amountPaise,
+        Vendor vendor = vendorId == null ? null : onTheList(vendorId);
+        VendorPayment payment = payments.save(new VendorPayment(vendor, vendorName, amountPaise,
                 paidOn == null ? LocalDate.now(IndiaTime.ZONE) : paidOn, mode, reference, note,
                 currentUser(), Instant.now(), purchaseOrderId));
-        return new VendorProfile.Payment(payment.getId(), payment.getPaidOn(), payment.getAmountPaise(),
-                payment.getMode(), payment.getReference(), payment.getNote(), who(payment.getRecordedBy()),
-                false, "", null, payment.getPurchaseOrderId());
+        return VendorProfile.Payment.of(payment);
+    }
+
+    /**
+     * Everything paid against one order, agreed to or not, oldest first.
+     *
+     * <p>The order's own page shows these, which is the only place a payment to somebody off the
+     * list can be seen - and therefore the only place an administrator can agree to one.
+     */
+    @Transactional(readOnly = true)
+    public List<VendorProfile.Payment> againstOrder(UUID purchaseOrderId) {
+        return payments.allocatedTo(purchaseOrderId).stream().map(VendorProfile.Payment::of).toList();
     }
 
     /** Only an administrator, and only once: agreeing twice to the same money is not a thing. */
@@ -170,12 +184,7 @@ public class VendorService {
     /** What an administrator has waiting, oldest first. */
     @Transactional(readOnly = true)
     public List<VendorProfile.Payment> waitingForApproval() {
-        return payments.waitingForApproval().stream()
-                .map(payment -> new VendorProfile.Payment(payment.getId(), payment.getPaidOn(),
-                        payment.getAmountPaise(), payment.getMode(), payment.getReference(),
-                        payment.getVendor().getName(), who(payment.getRecordedBy()), false, "", null,
-                        payment.getPurchaseOrderId()))
-                .toList();
+        return payments.waitingForApproval().stream().map(VendorProfile.Payment::of).toList();
     }
 
     private void refuseATakenCode(String code, UUID exceptId) {

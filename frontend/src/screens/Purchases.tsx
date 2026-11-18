@@ -5,6 +5,7 @@ import {
 } from '../api'
 import type {
   OrderStory, PurchaseOrder, PurchaseOrderStatus, PurchaseReturn, Role, Settled, VendorPaymentMode,
+  VendorPaymentRow,
 } from '../types'
 import {
   Banner, Button, Empty, errorFor, Field, inputClass, KeyBox, Modal, Panel, smallInputClass,
@@ -364,12 +365,14 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
     const gone = order.status === 'RECEIVED' ? 'The goods have already come in' : null
     const decided = order.status === 'REJECTED' ? 'This order was turned down'
       : order.status === 'CANCELLED' ? 'This order was called off' : null
-    const noVendor = order.vendorId ? null : 'Add this vendor to the list before paying them'
-    const owes = order.owedPaise > order.paidPaise ? null : 'Nothing is owed on this order'
+    // Money is recorded for anybody the shop paid, on the list or not: refusing it never stopped
+    // the payment, only the record of it. What a paid-up order refuses is paying it twice.
+    const owes = order.owedPaise > 0 && order.paidPaise >= order.owedPaise
+      ? 'It has been paid for' : null
     return [
       ['open', null],
       ['edit', manager ?? gone ?? decided],
-      ['pay', manager ?? noVendor ?? owes],
+      ['pay', manager ?? decided ?? owes],
       ['receive', manager ?? (order.status === 'APPROVED' ? null : 'It has not been approved yet')],
       ['back', manager ?? (order.status === 'RECEIVED' ? null : 'Nothing has come in on it yet')],
     ]
@@ -703,7 +706,15 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
                         ? 'bg-sky-50 shadow-[inset_3px_0_0_0_var(--color-sky-500)]'
                         : 'hover:bg-slate-50'}`}
                   >
-                    <td className="num py-1.5 pl-2 font-medium text-slate-700">{row.number}</td>
+                    <td className="num py-1.5 pl-2 font-medium text-slate-700">
+                      {row.number}
+                      {/* An order that was changed says so on the list, as an edited bill does. */}
+                      {row.order?.replacesOrderNumber && (
+                        <div className="text-xs font-normal text-amber-700">
+                          replaces {row.order.replacesOrderNumber}
+                        </div>
+                      )}
+                    </td>
                     <td className="num py-1.5 text-slate-500">{billDate(new Date(row.on))}</td>
                     <td className="truncate py-1.5 pr-2" title={row.vendorName}>{row.vendorName}</td>
                     <td className="truncate py-1.5 pr-2" title={row.firstItem}>
@@ -821,11 +832,15 @@ function OrderPage({ orderId, role, onToast, onChanged, onPrices, onSendBack, on
   const [order, setOrder] = useState<PurchaseOrder | null>(null)
   /** Every version this order went through, and what went back against any of them. */
   const [story, setStory] = useState<OrderStory | null>(null)
+  /** What has been paid against it, agreed to or not. */
+  const [payments, setPayments] = useState<VendorPaymentRow[]>([])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [why, setWhy] = useState('')
   const [receiving, setReceiving] = useState<Record<string, string>>({})
   const canDecide = role === 'ADMIN'
+  const openedSection = useRef<HTMLElement>(null)
+  const body = useRef<HTMLDivElement>(null)
 
   const load = useCallback(() => {
     api.get<PurchaseOrder>(`/api/purchase-orders/${orderId}`)
@@ -841,9 +856,21 @@ function OrderPage({ orderId, role, onToast, onChanged, onPrices, onSendBack, on
     api.get<OrderStory>(`/api/purchase-orders/${orderId}/history`)
       .then(setStory)
       .catch(() => setStory(null))
+    // Money against this order, which is the only place a payment to somebody off the vendors
+    // list can be seen at all - and therefore the only place one can be approved.
+    api.get<VendorPaymentRow[]>(`/api/purchase-orders/${orderId}/payments`)
+      .then(setPayments)
+      .catch(() => setPayments([]))
   }, [orderId])
 
   useEffect(load, [load])
+
+  // Take the focus off the list behind, and show the document that was opened. Three versions of
+  // an order stack up taller than the dialog, and the one that was clicked may be the last of them.
+  useEffect(() => {
+    body.current?.focus()
+    openedSection.current?.scrollIntoView({ block: 'nearest' })
+  }, [story])
 
   const act = async (what: string, body?: unknown) => {
     setBusy(true)
@@ -868,219 +895,176 @@ function OrderPage({ orderId, role, onToast, onChanged, onPrices, onSendBack, on
     })),
   })
 
+  /**
+   * Every version it went through and everything that went back off it, oldest first, with the
+   * one that was opened named and ringed. The same story a bill tells, for the same reason: with
+   * three documents stacked in one dialog the first question is always which one was clicked.
+   *
+   * <p>When the story cannot be had the dialog still opens on the order the list handed it,
+   * because a manager who clicked an order should see the order rather than an empty box.
+   */
+  const versions = story?.versions ?? (order ? [order] : [])
+  const returns = story?.returns ?? []
+  const several = versions.length + returns.length > 1
+  /** Which order replaced which, so a cancelled version can say where the order went. */
+  const replacedBy = new Map<string, string>()
+  for (const version of versions) {
+    if (version.replacesOrderNumber) {
+      replacedBy.set(version.replacesOrderNumber, version.number)
+    }
+  }
+
   return (
-    <Modal title={order ? `${order.number} · ${order.vendorName}` : 'Order'} size="5xl" onClose={onClose}>
+    <Modal title={order ? `${order.number} · ${order.vendorName || 'No vendor'}` : 'Order'} size="5xl"
+           onClose={onClose}>
       {error && <div className="mb-3"><Banner tone="bad" onDismiss={() => setError(null)}>{error}</Banner></div>}
       {!order ? (
         <Empty>Opening…</Empty>
       ) : (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-3 text-sm">
-            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS[order.status].tone}`}>
-              {STATUS[order.status].label}
-            </span>
-            <span className="text-slate-500">
-              Ordered {billDate(new Date(order.orderedOn))} by {order.createdBy}
-              {order.expectedOn && ` · expected ${billDate(new Date(order.expectedOn))}`}
-            </span>
-            <span className="num ml-auto text-base font-semibold">{rupees(order.valuePaise)}</span>
-          </div>
-
-          {order.note && <p className="text-sm text-slate-600">{order.note}</p>}
-
-          {order.decision && (
-            <Banner tone={order.status === 'REJECTED' ? 'bad' : 'warn'}>
-              {STATUS[order.status].label} by {order.decidedBy}: {order.decision}
-            </Banner>
+        <div ref={body} tabIndex={-1} className="max-h-[72vh] space-y-4 overflow-auto outline-none">
+          {versions.length > 1 && (
+            <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              This order was changed, so all {versions.length} versions are shown, oldest first. Each change
+              called the one before it off and wrote a new order carrying its number.
+            </p>
           )}
-
-          {/* Every version of it, oldest first, with the one being looked at named and ringed -
-              the same story a bill tells when it has been edited. With three documents stacked in
-              one dialog, the first question is always which one was clicked. */}
-          {story && (story.versions.length > 1 || story.returns.length > 0) && (
-            <section className="rounded-md border border-slate-200 bg-slate-50 p-2">
-              <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                This order's history
-              </h3>
-              <ul className="space-y-1 text-sm">
-                {story.versions.map((version) => (
-                  <li key={version.id}
-                      className={`flex flex-wrap items-center gap-2 rounded px-2 py-1 ${
-                        version.id === order.id ? 'bg-surface ring-1 ring-sky-400' : ''}`}>
-                    <span className="num font-medium">{version.number}</span>
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS[version.status].tone}`}>
-                      {STATUS[version.status].label}
-                    </span>
-                    <span className="num text-slate-500">{rupees(version.valuePaise)}</span>
-                    <span className="text-xs text-slate-400">
-                      {billDate(new Date(version.orderedOn))} · {version.createdBy}
-                      {version.replacesOrderNumber && ` · replaced ${version.replacesOrderNumber}`}
-                    </span>
-                    {version.id === order.id && (
-                      <span className="ml-auto text-xs font-medium text-sky-700">Opened</span>
-                    )}
-                  </li>
-                ))}
-                {story.returns.map((sentBack) => (
-                  <li key={sentBack.id} className="flex flex-wrap items-center gap-2 px-2 py-1">
-                    <span className="num font-medium text-rose-700">{sentBack.number}</span>
-                    <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">
-                      Sent back
-                    </span>
-                    <span className="num text-rose-700">−{rupees(sentBack.valuePaise)}</span>
-                    <span className="text-xs text-slate-400">
-                      {billDate(new Date(sentBack.returnedOn))} · {sentBack.by}
-                      {sentBack.reason && ` · ${sentBack.reason}`}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          <div className="overflow-auto rounded-md border border-slate-100">
-            <table className="w-full table-fixed text-sm">
-              <colgroup>
-                <col className="w-28" />
-                <col />
-                <col className="w-28" />
-                <col className="w-28" />
-                <col className="w-28" />
-                <col className="w-28" />
-                <col className="w-24" />
-              </colgroup>
-              <thead className="text-xs uppercase tracking-wide text-slate-400">
-                <tr>
-                  <th className="py-1 pl-2 text-left">Code</th>
-                  <th className="py-1 text-left">Item</th>
-                  <th className="py-1 text-right">Ordered</th>
-                  <th className="py-1 text-right">Each</th>
-                  <th className="py-1 text-right">Value</th>
-                  <th className="py-1 text-right">
-                    {order.status === 'APPROVED' ? 'Arrived' : 'Received'}
-                  </th>
-                  <th className="py-1 pr-2"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {order.lines.map((line) => (
-                  <tr key={line.id} className="border-t border-slate-100">
-                    <td className="num py-1.5 pl-2 text-slate-500">{line.itemCode || '—'}</td>
-                    <td className="truncate py-1.5" title={line.name}>
-                      {line.name}
-                      <span className="ml-2 text-xs text-slate-400">
-                        {line.oneOff ? 'one-off' : line.fromTheStore ? 'non billable' : 'sold'}
-                      </span>
-                    </td>
-                    <td className="num py-1.5 text-right">{quantity(line.quantityMilli)} {line.unit}</td>
-                    <td className="num py-1.5 text-right text-slate-500">{rupees(line.unitCostPaise)}</td>
-                    <td className="num py-1.5 text-right">{rupees(line.valuePaise)}</td>
-                    <td className="py-1 text-right">
-                      {order.status === 'APPROVED' ? (
-                        <input
-                          className={`${smallInputClass} num w-20 text-right`}
-                          inputMode="decimal"
-                          aria-label={`How much of ${line.name} arrived`}
-                          value={receiving[line.id] ?? ''}
-                          onChange={(event) =>
-                            setReceiving((now) => ({ ...now, [line.id]: event.target.value }))}
-                        />
-                      ) : (
-                        <span className="num text-slate-500">
-                          {order.status === 'RECEIVED' ? quantity(line.receivedMilli) : '—'}
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-1 pr-2 text-right">
-                      {/* What this one thing has cost before, reached from the line it is on. */}
-                      {!line.oneOff && line.itemId && (
-                        <button
-                          type="button"
-                          className="rounded-md px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100"
-                          title="What the shop has paid for this before"
-                          onClick={() => onPrices({
-                            itemId: line.itemId as string,
-                            itemCode: line.itemCode,
-                            name: line.name,
-                            fromTheStore: line.fromTheStore,
-                          })}
-                        >
-                          Prices
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* What the money has done, which is a different question from what the goods have done. */}
-          {order.owedPaise > 0 && (
-            <p className="text-sm text-slate-500">
-              <span className={`font-medium ${PAID[order.settled].tone}`}>{PAID[order.settled].label}</span>
-              {' · '}
-              <span className="num">{rupees(order.paidPaise)}</span> of{' '}
-              <span className="num">{rupees(order.owedPaise)}</span>
-              {order.settled !== 'PAID' && ' · what is paid is recorded on the vendor’s page'}
+          {returns.length > 0 && (
+            <p className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-900">
+              {returns.length === 1 ? 'Goods went' : `Goods went back ${returns.length} times`} back against this
+              order, so the order and everything that went back off it are shown together.
             </p>
           )}
 
-          {/* What can be done to it, wherever it has got to. Changing one writes a new order in
-              its place; paying one records money against it on the vendor's account. */}
-          <div className="flex flex-wrap items-center gap-2">
-            {order.status !== 'RECEIVED' && order.status !== 'REJECTED' && order.status !== 'CANCELLED' && (
-              <Button onClick={() => onEdit(order)}>Change this order</Button>
-            )}
-            {order.vendorId && order.owedPaise > order.paidPaise && (
-              <Button onClick={() => onPay(order)}>
-                Pay {rupees(order.owedPaise - order.paidPaise)}
-              </Button>
-            )}
-          </div>
+          {versions.map((version) => {
+            const isOpened = version.id === order.id
+            // The opened one is the copy this dialog loaded and keeps fresh; the others are the
+            // story's, which is all they need to be - nothing can be done to them.
+            const shown = isOpened ? order : version
+            const wentTo = replacedBy.get(shown.number)
+            return (
+              <section
+                key={shown.id}
+                ref={isOpened ? openedSection : undefined}
+                className={`rounded-lg border p-3 ${
+                  isOpened ? 'border-sky-500 ring-2 ring-sky-100' : 'border-slate-200'}`}
+              >
+                {several && (
+                  <h3 className="mb-2 flex flex-wrap items-baseline gap-2 font-semibold text-slate-800">
+                    Order {shown.number}
+                    {isOpened && <span className="text-sky-700">(Opened)</span>}
+                    {shown.replacesOrderNumber && (
+                      <span className="text-xs font-normal text-amber-700">
+                        replaces {shown.replacesOrderNumber}
+                      </span>
+                    )}
+                    {wentTo && (
+                      <span className="text-xs font-normal text-amber-700">replaced by {wentTo}</span>
+                    )}
+                  </h3>
+                )}
+                <OrderHead order={shown} replacedByNumber={wentTo} />
+                <OrderLines
+                  order={shown}
+                  receiving={isOpened && shown.status === 'APPROVED' ? receiving : null}
+                  onReceiving={(lineId, value) => setReceiving((now) => ({ ...now, [lineId]: value }))}
+                  onPrices={onPrices}
+                />
 
-          {order.status === 'PENDING_APPROVAL' && (
-            canDecide ? (
-              <div className="flex flex-wrap items-end gap-2">
-                <div className="min-w-[16rem] flex-1">
-                  <Field label="If you are turning it down, why?">
-                    <input className={inputClass} value={why} onChange={(event) => setWhy(event.target.value)} />
-                  </Field>
-                </div>
-                <Button disabled={busy} onClick={() => void act('reject', { decision: why })}>Turn it down</Button>
-                <Button tone="primary" disabled={busy} onClick={() => void act('approve')}>Approve</Button>
-              </div>
-            ) : (
-              <Banner tone="warn">
-                Waiting for an administrator. Only they can agree to the money.
-              </Banner>
+                {isOpened && (
+                  <>
+                    {/* What the money has done, which is a different question from what the goods
+                        have done. Shown on the opened version only: what was paid against a version
+                        that has been changed follows the order that replaced it. */}
+                    <OrderPayments order={shown} role={role} payments={payments} onToast={onToast}
+                                   onApproved={load} />
+
+                    {/* What can be done to it, wherever it has got to. Changing one writes a new
+                        order in its place; paying one records money against it. */}
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {shown.status !== 'RECEIVED' && shown.status !== 'REJECTED'
+                        && shown.status !== 'CANCELLED' && (
+                        <Button onClick={() => onEdit(shown)}>Change this order</Button>
+                      )}
+                      {shown.status !== 'REJECTED' && shown.status !== 'CANCELLED'
+                        && !(shown.owedPaise > 0 && shown.paidPaise >= shown.owedPaise) && (
+                        <Button onClick={() => onPay(shown)}>
+                          {shown.owedPaise > shown.paidPaise
+                            ? `Pay ${rupees(shown.owedPaise - shown.paidPaise)}`
+                            : 'Pay for this order'}
+                        </Button>
+                      )}
+                    </div>
+
+                    {shown.status === 'PENDING_APPROVAL' && (
+                      canDecide ? (
+                        <div className="mt-3 flex flex-wrap items-end gap-2">
+                          <div className="min-w-[16rem] flex-1">
+                            <Field label="If you are turning it down, why?">
+                              <input className={inputClass} value={why}
+                                     onChange={(event) => setWhy(event.target.value)} />
+                            </Field>
+                          </div>
+                          <Button disabled={busy} onClick={() => void act('reject', { decision: why })}>
+                            Turn it down
+                          </Button>
+                          <Button tone="primary" disabled={busy} onClick={() => void act('approve')}>
+                            Approve
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="mt-3">
+                          <Banner tone="warn">
+                            Waiting for an administrator. Only they can agree to the money.
+                          </Banner>
+                        </div>
+                      )
+                    )}
+
+                    {shown.status === 'APPROVED' && (
+                      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                        <span className="mr-auto text-xs text-slate-400">
+                          Change the figures above if the lorry brought something different. The counts move
+                          when you take it in.
+                        </span>
+                        <Button disabled={busy} onClick={() => void act('cancel', { decision: 'Called off' })}>
+                          Call it off
+                        </Button>
+                        <Button tone="primary" disabled={busy} onClick={() => void receive()}>
+                          Take the goods in
+                        </Button>
+                      </div>
+                    )}
+
+                    {shown.status === 'RECEIVED' && (
+                      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                        <span className="mr-auto text-xs text-slate-400">
+                          Taken in by {shown.receivedBy}. The counts moved then, and each item's history shows
+                          this order against the delivery.
+                        </span>
+                        <Button onClick={() => onSendBack(shown)}>Send goods back</Button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </section>
             )
-          )}
+          })}
 
-          {order.status === 'APPROVED' && (
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <span className="mr-auto text-xs text-slate-400">
-                Change the figures above if the lorry brought something different. The counts move
-                when you take it in.
-              </span>
-              <Button disabled={busy} onClick={() => void act('cancel', { decision: 'Called off' })}>
-                Call it off
-              </Button>
-              <Button tone="primary" disabled={busy} onClick={() => void receive()}>
-                Take the goods in
-              </Button>
-            </div>
-          )}
-
-          {order.status === 'RECEIVED' && (
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <span className="mr-auto text-xs text-slate-400">
-                Taken in by {order.receivedBy}. The counts moved then, and each item's history shows
-                this order against the delivery.
-              </span>
-              <Button onClick={() => onSendBack(order)}>Send goods back</Button>
-            </div>
-          )}
+          {returns.map((sentBack) => (
+            <section key={sentBack.id} className="rounded-lg border border-rose-200 bg-rose-50/40 p-3">
+              {several && (
+                <h3 className="mb-2 flex flex-wrap items-baseline gap-2 font-semibold text-rose-900">
+                  Sent back {sentBack.number}
+                  {sentBack.againstOrderNumber && (
+                    <span className="text-xs font-normal text-rose-700">
+                      off order {sentBack.againstOrderNumber}
+                    </span>
+                  )}
+                </h3>
+              )}
+              <ReturnDetails sentBack={sentBack} />
+            </section>
+          ))}
         </div>
       )}
     </Modal>
@@ -1088,9 +1072,218 @@ function OrderPage({ orderId, role, onToast, onChanged, onPrices, onSendBack, on
 }
 
 /**
+ * Where one version of an order has got to: who wrote it, when it was expected, what it comes to,
+ * and whatever was decided about it. The head of every section of the story.
+ */
+function OrderHead({ order, replacedByNumber }: { order: PurchaseOrder; replacedByNumber?: string }) {
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS[order.status].tone}`}>
+          {STATUS[order.status].label}
+        </span>
+        <span className="text-slate-500">
+          Ordered {billDate(new Date(order.orderedOn))} by {order.createdBy}
+          {order.expectedOn && ` · expected ${billDate(new Date(order.expectedOn))}`}
+        </span>
+        <span className="text-slate-500">{order.vendorName || 'No vendor'}</span>
+        <span className="num ml-auto text-base font-semibold">{rupees(order.valuePaise)}</span>
+      </div>
+
+      {order.note && <p className="mt-2 text-sm text-slate-600">{order.note}</p>}
+
+      {order.decision && (
+        <div className="mt-2">
+          <Banner tone={order.status === 'REJECTED' ? 'bad' : 'warn'}>
+            {STATUS[order.status].label} by {order.decidedBy}: {order.decision}
+            {/* Only where the reason does not already name it: "Edited, replaced by PO-…" does. */}
+            {replacedByNumber && !order.decision.includes(replacedByNumber)
+              && ` Order ${replacedByNumber} took its place.`}
+          </Banner>
+        </div>
+      )}
+    </>
+  )
+}
+
+/**
+ * What was asked for, line by line.
+ *
+ * @param receiving what the lorry brought, per line, while that is being typed. Null on anything
+ *                  that cannot be received - an old version, or an order that has not been
+ *                  approved - which is what makes this one table serve the whole story.
+ */
+function OrderLines({ order, receiving, onReceiving, onPrices }: {
+  order: PurchaseOrder
+  receiving: Record<string, string> | null
+  onReceiving: (lineId: string, value: string) => void
+  onPrices: (of: PricesOf) => void
+}) {
+  return (
+    <div className="mt-3 overflow-auto rounded-md border border-slate-100">
+      <table className="w-full table-fixed text-sm">
+        <colgroup>
+          <col className="w-28" />
+          <col />
+          <col className="w-28" />
+          <col className="w-28" />
+          <col className="w-28" />
+          <col className="w-28" />
+          <col className="w-24" />
+        </colgroup>
+        <thead className="text-xs uppercase tracking-wide text-slate-400">
+          <tr>
+            <th className="py-1 pl-2 text-left">Code</th>
+            <th className="py-1 text-left">Item</th>
+            <th className="py-1 text-right">Ordered</th>
+            <th className="py-1 text-right">Each</th>
+            <th className="py-1 text-right">Value</th>
+            <th className="py-1 text-right">{receiving ? 'Arrived' : 'Received'}</th>
+            <th className="py-1 pr-2"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {order.lines.map((line) => (
+            <tr key={line.id} className="border-t border-slate-100">
+              <td className="num py-1.5 pl-2 text-slate-500">{line.itemCode || '—'}</td>
+              <td className="truncate py-1.5" title={line.name}>
+                {line.name}
+                <span className="ml-2 text-xs text-slate-400">
+                  {line.oneOff ? 'one-off' : line.fromTheStore ? 'non billable' : 'sold'}
+                </span>
+              </td>
+              <td className="num py-1.5 text-right">{quantity(line.quantityMilli)} {line.unit}</td>
+              <td className="num py-1.5 text-right text-slate-500">{rupees(line.unitCostPaise)}</td>
+              <td className="num py-1.5 text-right">{rupees(line.valuePaise)}</td>
+              <td className="py-1 text-right">
+                {receiving ? (
+                  <input
+                    className={`${smallInputClass} num w-20 text-right`}
+                    inputMode="decimal"
+                    aria-label={`How much of ${line.name} arrived`}
+                    value={receiving[line.id] ?? ''}
+                    onChange={(event) => onReceiving(line.id, event.target.value)}
+                  />
+                ) : (
+                  <span className="num text-slate-500">
+                    {order.status === 'RECEIVED' ? quantity(line.receivedMilli) : '—'}
+                  </span>
+                )}
+              </td>
+              <td className="py-1 pr-2 text-right">
+                {/* What this one thing has cost before, reached from the line it is on. */}
+                {!line.oneOff && line.itemId && (
+                  <button
+                    type="button"
+                    className="rounded-md px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100"
+                    title="What the shop has paid for this before"
+                    onClick={() => onPrices({
+                      itemId: line.itemId as string,
+                      itemCode: line.itemCode,
+                      name: line.name,
+                      fromTheStore: line.fromTheStore,
+                    })}
+                  >
+                    Prices
+                  </button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+/**
+ * What has been paid for this order, and whether anybody has agreed to it.
+ *
+ * <p>It is here and not only on the vendor's page because a payment to somebody who is not on that
+ * list has no page of their own: this is where the shop sees it, and the only place an
+ * administrator can agree to one.
+ */
+function OrderPayments({ order, role, payments, onToast, onApproved }: {
+  order: PurchaseOrder
+  role: Role
+  payments: VendorPaymentRow[]
+  onToast: Toast
+  onApproved: () => void
+}) {
+  const canApprove = role === 'ADMIN'
+  const waiting = payments.filter((payment) => !payment.approved)
+    .reduce((sum, payment) => sum + payment.amountPaise, 0)
+
+  const approve = async (paymentId: string) => {
+    try {
+      await api.post(`/api/vendors/payments/${paymentId}/approve`)
+      onToast({ tone: 'good', text: 'Payment approved' })
+      onApproved()
+    } catch (failure) {
+      onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not approve that payment') })
+    }
+  }
+
+  if (order.owedPaise <= 0 && payments.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="mt-3 space-y-1">
+      {order.owedPaise > 0 && (
+        <p className="text-sm text-slate-500">
+          <span className={`font-medium ${PAID[order.settled].tone}`}>{PAID[order.settled].label}</span>
+          {' · '}
+          <span className="num">{rupees(order.paidPaise)}</span> of{' '}
+          <span className="num">{rupees(order.owedPaise)}</span>
+          {order.vendorId
+            ? ' · what is paid shows on the vendor’s page too'
+            : ' · not on the vendors list, so this order is where the money shows'}
+        </p>
+      )}
+      {payments.map((payment) => (
+        <div key={payment.id} className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="num font-medium text-slate-700">{rupees(payment.amountPaise)}</span>
+          <span className="text-slate-500">
+            {MODES.find((one) => one.key === payment.mode)?.label ?? payment.mode}
+            {payment.reference && ` · ${payment.reference}`}
+          </span>
+          <span className="text-xs text-slate-400">
+            {billDate(new Date(payment.paidOn))} · {payment.by}
+          </span>
+          {payment.approved ? (
+            <span className="text-xs text-emerald-700">
+              approved{payment.approvedBy && ` by ${payment.approvedBy}`}
+            </span>
+          ) : canApprove ? (
+            <button type="button" onClick={() => void approve(payment.id)}
+                    className="rounded-md px-2 py-0.5 text-xs font-medium text-sky-700 hover:bg-sky-50">
+              Approve
+            </button>
+          ) : (
+            <span className="text-xs text-amber-700">waiting</span>
+          )}
+        </div>
+      ))}
+      {waiting > 0 && (
+        <p className="text-xs text-amber-700">
+          <span className="num">{rupees(waiting)}</span> recorded as paid and waiting for an administrator.
+          It is not counted against what the shop owes until somebody approves it.
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
  * Money paid against one order, recorded on the vendor's account and waiting for an
  * administrator - the same payment the vendor's own page records, reached from the order it is
  * for so nobody has to go and find the vendor to pay for a delivery in front of them.
+ *
+ * <p>It is posted to the order rather than to a vendor because an order may not have one. A shop
+ * that paid the man off the lorry has paid him, and a till that would not write that down is
+ * simply a till with a hole in its records; what there is no vendor row for has no running
+ * balance to move, so the order is where it shows and where it is approved.
  */
 function PayOrderDialog({ order, onToast, onClose, onPaid }: {
   order: PurchaseOrder
@@ -1119,13 +1312,12 @@ function PayOrderDialog({ order, onToast, onClose, onPaid }: {
     }
     setSaving(true)
     try {
-      await api.post(`/api/vendors/${order.vendorId}/payments`, {
+      await api.post(`/api/purchase-orders/${order.id}/payments`, {
         amountPaise: paise,
         paidOn: new Date().toISOString().slice(0, 10),
         mode,
         reference: reference.trim(),
         note: note.trim() || `Against order ${order.number}`,
-        purchaseOrderId: order.id,
       })
       onToast({ tone: 'good', text: `Recorded against ${order.number}. It waits for an administrator.` })
       onPaid()
@@ -1141,10 +1333,14 @@ function PayOrderDialog({ order, onToast, onClose, onPaid }: {
       <form onSubmit={submit} className="space-y-3">
         {errors && <Banner tone="bad" onDismiss={() => setErrors(null)}>{errors.message}</Banner>}
         <p className="text-sm text-slate-500">
-          {order.vendorName} · owed <span className="num font-medium text-slate-700">{rupees(left)}</span>
+          {order.vendorName || 'No vendor'}
+          {left > 0
+            ? <> · owed <span className="num font-medium text-slate-700">{rupees(left)}</span></>
+            : ' · nothing owed on it yet, so this is paying ahead'}
           {order.paidPaise > 0 && (
             <> · already paid <span className="num">{rupees(order.paidPaise)}</span></>
           )}
+          {!order.vendorId && ' · not on the vendors list'}
         </p>
         <Field label="Amount" error={errorFor(errors?.fields ?? {}, 'amountPaise')}>
           <input className={`${inputClass} num text-lg`} inputMode="decimal" autoFocus value={amount}
@@ -1168,8 +1364,11 @@ function PayOrderDialog({ order, onToast, onClose, onPaid }: {
           <input className={inputClass} value={note} onChange={(event) => setNote(event.target.value)} />
         </Field>
         <p className="text-xs text-slate-400">
-          It shows on the vendor's page at once, marked as waiting, and counts against what the shop
-          owes once an administrator approves it.
+          It shows on this order at once, marked as waiting, and counts against what the shop owes
+          once an administrator approves it.
+          {order.vendorId
+            ? ' It is on the vendor’s page as well: one payment, whichever screen records it.'
+            : ' Nobody on the vendors list was paid, so the order is the only place it shows.'}
         </p>
         <div className="flex justify-end gap-2">
           <Button onClick={onClose} hint="Esc">Cancel</Button>
@@ -1194,7 +1393,18 @@ const MODES: { key: VendorPaymentMode; label: string }[] = [
 /** Goods that went back: what went, what it was worth, and why. Nothing can be done to it. */
 function ReturnPage({ sentBack, onClose }: { sentBack: PurchaseReturn; onClose: () => void }) {
   return (
-    <Modal title={`${sentBack.number} · ${sentBack.vendorName}`} size="5xl" onClose={onClose}>
+    <Modal title={`${sentBack.number} · ${sentBack.vendorName || 'No vendor'}`} size="5xl" onClose={onClose}>
+      <ReturnDetails sentBack={sentBack} />
+    </Modal>
+  )
+}
+
+/**
+ * One return, as its own dialog shows it and as an order's story shows it underneath the order.
+ * One component for both, so the two cannot drift - the same reasoning the bills screen follows.
+ */
+function ReturnDetails({ sentBack }: { sentBack: PurchaseReturn }) {
+  return (
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">Sent back</span>
@@ -1248,9 +1458,9 @@ function ReturnPage({ sentBack, onClose }: { sentBack: PurchaseReturn; onClose: 
 
         <p className="text-xs text-slate-400">
           The stock came off when this was written, and {rupees(sentBack.valuePaise)} came off what the
-          shop owes {sentBack.vendorName}. Nothing here can be changed: goods that went back went back.
+          shop owes {sentBack.vendorName || 'whoever it came from'}. Nothing here can be changed: goods
+          that went back went back.
         </p>
       </div>
-    </Modal>
   )
 }

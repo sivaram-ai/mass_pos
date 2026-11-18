@@ -330,6 +330,10 @@ export interface VendorPaymentRow {
   approvedAt: string | null
   /** The order it was against, or null where it was against the running account. */
   purchaseOrderId: string | null
+  /** Null where the money went to somebody who is not on the shop's list. */
+  vendorId: string | null
+  /** Who was paid, whether or not they are on the list. */
+  vendorName: string
 }
 
 export interface VendorProfile {

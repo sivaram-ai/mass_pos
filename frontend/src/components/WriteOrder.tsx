@@ -1918,7 +1918,8 @@ function MoneyOutDialog({ due, vendorName, editing = false, saving, onClose, onC
           {mode === null ? (
             <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-600">
               Nothing is handed over now. The order is written, and what the shop owes moves when the
-              goods actually arrive — pay it from the vendor's page whenever it is paid.
+              goods actually arrive — pay it from the order itself, or from the vendor's page, whenever
+              it is paid.
             </p>
           ) : (
             <>

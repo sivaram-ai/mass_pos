@@ -32,9 +32,26 @@ public record VendorProfile(VendorView vendor, List<Purchase> purchases, List<Pa
      *
      * @param purchaseOrderId the order it was against, or null where it was against the running
      *                        account rather than one delivery
+     * @param vendorId        null where the money went to somebody not on the shop's list
+     * @param vendorName      who was paid either way, which is the whole of what a payment to
+     *                        somebody off the list can be known by
      */
     public record Payment(UUID id, LocalDate paidOn, long amountPaise, VendorPaymentMode mode, String reference,
                           String note, String by, boolean approved, String approvedBy, Instant approvedAt,
-                          UUID purchaseOrderId) {
+                          UUID purchaseOrderId, UUID vendorId, String vendorName) {
+
+        /** One way of reading a payment, wherever it is being read - a vendor's page or an order's. */
+        public static Payment of(VendorPayment payment) {
+            return new Payment(payment.getId(), payment.getPaidOn(), payment.getAmountPaise(),
+                    payment.getMode(), payment.getReference(), payment.getNote(),
+                    who(payment.getRecordedBy()), payment.isApproved(), who(payment.getApprovedBy()),
+                    payment.getApprovedAt(), payment.getPurchaseOrderId(),
+                    payment.getVendor() == null ? null : payment.getVendor().getId(),
+                    payment.getVendorName());
+        }
+
+        private static String who(com.masspos.user.User user) {
+            return user == null ? "" : user.getDisplayName();
+        }
     }
 }
