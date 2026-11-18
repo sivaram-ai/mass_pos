@@ -87,6 +87,14 @@ public class AuditTrailGuard {
                 forbid(table, "DELETE");
             }
 
+            // Goods that went back to a vendor went back: the lorry has gone, the stock is off the
+            // count, and the vendor's balance has moved. A mistake is put right by taking the
+            // goods in again, not by editing the paper.
+            for (String table : List.of("purchase_return", "purchase_return_line")) {
+                forbid(table, "UPDATE");
+                forbid(table, "DELETE");
+            }
+
             // Gapless numbering: a sequence may only move forward.
             for (String sequence : List.of("invoice_sequence", "credit_note_sequence")) {
                 forbid(sequence, "DELETE");

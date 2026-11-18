@@ -29,6 +29,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3Q | Signing in where that account is already open on another till stops and says where - counter, number, floor and when - and offers Go back or sign that one out and carry on here, chosen with the arrow keys and Enter | Done: 368 tests green, driven in the browser |
 | 3R | Nothing from inside the program reaches a counter's screen: every refusal is a sentence written for a shop, and the exception, its stack, the SQL, the paths and the ids go to the log. `ApiExceptionHandler.forTheScreen` is the gate; `api.ts` guards the browser end | Done: 377 tests green, refusals driven against a running till |
 | 3S | A counter's settings are reachable while nobody is signed in: the sign-in screen opens, from its corner, the very page the counter serves itself at first start, so the connection mode, the server's address and which of the shop's counters this machine is can all be changed without closing the program. A counter that is already billing is given a way back that changes nothing | Done: 385 tests green, driven in the browser |
+| 4D | A purchase order is written on the billing screen's own grid - full screen from Purchase orders, the same component in a dialog from Items - with the vendor where the steward goes, money out where the payment screen goes, orders held like bills, things the shop does not keep going on as one-offs, and goods going back to a vendor the way a customer's goods come back | Done: 422 tests green, driven in the browser |
 | 4C | One **Items** screen where Products and Stock were two; stock reaches a count only through a purchase order somebody approved, and **Correct** moves one by hand with a reason that decides the movement; **Space** ticks several items onto one order; the order dialog searches both lists as you type; the orders list searches and sorts like Items and says whether each one has been paid for; **F8** shows what an item has cost on every delivery; raw materials are **Non billable items** | Done: 416 tests green, driven in the browser |
 | 4B | Counts that went below zero on an older build are brought up to it, one correction each with its reason; and a stock-take correction can no longer go under either, which was the last way in | Done: 413 tests green, driven against a till carrying a -357 |
 | 4A | Purchase orders: a manager writes what the shop needs, an administrator approves or turns it down, and the counts move only when the goods are taken in - with what actually arrived, which is not always what was ordered. One order can hold things off the shelf and out of the store | Done: 413 tests green, driven in the browser |
@@ -288,6 +289,73 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
   state go to the server; the word somebody typed, the money chips and the sort are applied here,
   over the window that came back - the same reasoning as the Items list, and the search covers the
   things on an order's lines so it can be found by the onions on it.
+- **An order is written on the billing screen's grid** (`components/WriteOrder.tsx`), not in a form.
+  It is the same hand doing the same job in the other direction, and a manager who can take a bill
+  should not have to learn a second way to type a list of things: the cursor starts where the
+  order starts, every row's code and name cells look an item up as it is typed, the rate and
+  quantity cells take numbers, the arrows move between cells, Enter moves on and the take-bill key
+  writes it. The keys come from the same per-machine map the billing screen uses
+  (`loadShortcuts`), so a till that has remapped them has remapped them here too.
+  - **One component, two places.** The whole screen on Purchase orders (F3), and a dialog from
+    Items and Non billable items with whatever was ticked already on it. `framed` is the only
+    difference, and all it changes is that the component brings its own `Modal` and scrolls the
+    grid in a box - so there is no second screen to keep in step.
+  - **The dialog brings its own frame on purpose.** Esc, the backdrop and the cross all have to
+    mean "ask before throwing this away", and a parent `Modal` cannot know whether there is an
+    order half written inside. `askToClose` does nothing at all while the component's own dialog
+    is open: that Esc belongs to the confirmation, the money screen or the held list.
+  - **Tab is trapped inside the dialog** (`trapTab`). An order half written must not be left
+    behind by a cursor that walked out of the box it is in.
+  - **What a bill asks at the top, an order asks differently**: the date it is expected, the
+    vendor and a note, where a bill asks for the table and the steward. The vendor box is the
+    steward box - type a code or part of a name, ↑ ↓ walk the matches, Enter takes one - because
+    the two are the same question asked of a different list.
+  - **The vendor must survive arriving before the list does.** Sending goods back carries the
+    order's own vendor, which is set before `/api/vendors` has answered, so there is nothing to
+    show for it yet; an effect fills the box in when the list lands, and the box's blur does not
+    resolve at all while it is read-only, or an empty box would throw the vendor away.
+- **A line can be something the shop does not keep.** Typing a name that matches nothing and
+  pressing Enter puts it on the order as a one-off, marked on the row. Shops buy gas regulators
+  and hours of a plumber's time; refusing those would mean inventing a catalogue item to get an
+  order written, which is how catalogues fill up with rubbish. Nothing counts a one-off when it
+  arrives - there is nothing to count - and the vendor is still owed for it, which is the part
+  that would be quietly wrong if the line were simply refused (`OneOffPurchases`).
+- **A rate opens on what the shop paid last time** (`fillInWhatItCostLastTime`,
+  `GET /api/purchase-orders/prices`). It is the number a manager is about to type. Asked per item
+  as it is picked rather than carried on the catalogue, because a price is a fact about a delivery.
+- **Money out is the billing payment screen with the modes changed** (`MoneyOutDialog`): cash, UPI,
+  card, bank account - and **Pay later**, which a bill has no need of and most orders use. UPI,
+  card and bank transfers will not go through without the transaction details, because a payment
+  the shop cannot find again is not a record of anything. Whatever is handed over is recorded as a
+  payment against that order and waits for an administrator, exactly as every other payment to a
+  vendor does.
+  - **The cursor never rests on a mode button.** Enter on a focused button presses that button, so
+    a cursor parked on "Pay later" pressed Pay later instead of writing the order. With nothing
+    being handed over the cursor goes to the button that writes it; otherwise to the amount box.
+- **Held orders are held bills** (`/api/purchase-orders/holds`, `HeldOrdersDialog`): F6 holds one
+  with a name, F7 lists them, ↑ ↓ choose, Enter resumes, Delete throws away. An order already on
+  screen is held first when another is resumed, never thrown away. Its own table, because SQLite
+  takes a new table on an upgrade and the two have nothing to say to each other.
+- **The order on screen outlives the screen** (`orderDraft.ts`): written back on every change and
+  read when the writing screen opens, so a reload, a walk to another screen, a restart of the
+  server or a cable pulled out of a switch all come back to it. Kept by the print agent on a
+  counter and in `localStorage` on the server's own browser, for the reasons `billDraft.ts` sets
+  out at length. Two differences from a bill: it is not stamped with a day, because an order
+  written on Friday for the Monday lorry is still that order on Monday, and the Purchase orders
+  screen opens straight onto it rather than onto the list.
+- **F5 deletes a row while a grid is in front** (`gridInFront` / `useGridKeys` in `shortcuts.ts`).
+  The shell reloads on F5 on every screen but billing, because that is the key everybody reaches
+  for; on a screen that is being typed into, a reload takes away the row the cursor is on and
+  everything above it. The flag is read inside the shell's handler rather than captured in its
+  effect, so it is always the truth at the moment the key is pressed.
+- **Sending goods back is the billing return** (F12): it asks for the order number, fills the
+  lines in from what actually arrived less what has already gone back, lets only the amounts
+  change, and confirms with what it comes to before anything moves. A return with no order behind
+  it is written from scratch, exactly as a return without a bill is.
+- **Orders and returns are one list** (`screens/Purchases.tsx`). A shopkeeper asking what has
+  happened with a vendor this month is asking one question; two screens would make them ask it
+  twice and add the answers up themselves. A return reads as a negative total and the state
+  "Sent back", and the search, the chips, the dates and the sort cover both.
 - **Bills screen is keyboard-first** (`Invoices.tsx`): the list `div` holds focus (`role=grid`) and
   handles arrows/Enter; row actions come from `actionsFor`, which gives each action its blocked
   reason, and ←/→ skip blocked ones. F2 (window listener, off while a dialog is open) focuses the
@@ -615,6 +683,50 @@ folder and everything under it, so that is the only copy that survives one.
   - **Numbered `PO-2627-0001` from a per-year sequence**, advanced in the transaction that writes
     the order, exactly as invoice numbers are. It carries no legal weight - it is a handle for
     chasing a delivery down a telephone - but gapless still matters for that.
+- **An order line may point at nothing and carry its own name** (`PurchaseOrderLine`, `item_name`
+  and `item_code`, both `default ''`). A shop buys things it does not keep a count of, and the
+  alternative was a manager inventing a catalogue item to get an order written. Three consequences
+  follow, and the third is the one that would have been quietly wrong:
+  - **Receiving skips it.** There is no item on either list to move, which is what made it a
+    one-off; the order still records what came and at what price.
+  - **It is counted in pieces.** No item carries a unit for it, and a column holding one would be
+    a second place for the same fact to be wrong.
+  - **The vendor is still owed for it** (`OneOffPurchases`, behind the `AlsoBought` interface). A
+    vendor's balance is summed from the two stock ledgers, which never see a one-off, so something
+    has to tell it. An interface rather than the vendor package reading the purchase package:
+    purchases already read vendors, and two packages reading each other is a knot easily tied and
+    hard to undo.
+- **Money handed over as an order is written is a payment to that vendor like any other**
+  (`PurchaseOrderService.create` → `VendorService.pay`). It is recorded at once, allocated to the
+  order, and counts against the balance only when an administrator agrees to it. Writing an order
+  and paying for it in the same breath does not make the shop's one rule about money optional.
+- **Goods going back are a document, not a correction** (`PurchaseReturn`, `PurchaseReturnLine`,
+  numbered `PR-2627-0001` from a sequence of their own). A shop that only took the stock off its
+  own count would have no paper for the argument about who owes whom.
+  - **The stock comes off when the return is written**, not later: the goods are going out of the
+    shop, and a count that still carries them is wrong from that moment. Capped at what is there,
+    as everything that takes stock off is, and what actually went is what the return records.
+  - **The vendor's balance moves by arithmetic, not by a second sum.** `InventoryService.sendBack`
+    and `RawMaterialService.sendBack` write a PURCHASE_RETURN / RETURNED_TO_VENDOR movement
+    carrying the vendor, the price and the return's number - a delivery in reverse - and the
+    vendor queries take both types. A return's quantity is negative, so quantity times price
+    subtracts without anybody working anything out.
+  - **An order nets off what went back against it** (`PurchaseOrderView.of`), or the order's page
+    and the vendor's page would argue about the same money.
+  - **No money changes hands on a return.** A vendor settles against the next delivery far more
+    often than he hands cash back; a shop that is genuinely given the money records it as a
+    payment, where an administrator can see it.
+  - **Append-only, in `AuditTrailGuard`.** Goods that went back went back; a mistake is put right
+    by taking them in again, not by editing the paper.
+  - **A manager may send goods back without an administrator**, deliberately. Agreeing to spend
+    money is a decision worth making twice; putting a bad sack on the lorry that brought it is
+    not, and a shop that has to wait for an approval to do it stops recording returns at all.
+- **Held purchase orders are their own table** (`held_purchase_order`), not a kind on `held_bill`:
+  SQLite takes a new table on an upgrade and will not alter a CHECK constraint on an old one, and
+  the two have nothing in common beyond being a screen somebody walked away from.
+- **The print agent keeps two drafts, by file name** (`/bill-draft`, `/order-draft`). One handler
+  takes the file it writes, so a counter's bill and its half-written order cannot overwrite each
+  other, and both are written through a temporary file and moved into place.
 - **The people the shop buys from are `Vendor`s, never `Supplier`s** (`com.masspos.vendor`). That
   word is taken and means the opposite end of the shop: the steward who carried the order to the
   table, printed on hotel bills, with `supplier_id` frozen on every invoice. Freeing it would mean

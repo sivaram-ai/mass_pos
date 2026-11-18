@@ -44,10 +44,15 @@ public interface InventoryLedgerRepository extends JpaRepository<InventoryLedger
             """)
     List<Object[]> movedBy(@Param("referenceId") UUID referenceId, @Param("type") LedgerEventType type);
 
-    /** Everything bought from one vendor, newest first, for that vendor's own page. */
+    /**
+     * Everything had from one vendor, newest first, for that vendor's own page - what came in and
+     * what went back, because a page that showed only the deliveries would overstate every vendor
+     * the shop has ever sent anything back to.
+     */
     @Query("""
             select e from InventoryLedgerEvent e
-            where e.type = com.masspos.inventory.LedgerEventType.PURCHASE_RECEIPT
+            where e.type in (com.masspos.inventory.LedgerEventType.PURCHASE_RECEIPT,
+                             com.masspos.inventory.LedgerEventType.PURCHASE_RETURN)
               and (e.vendorId = :vendorId or (e.vendorId is null and e.vendorName = :name))
             order by e.occurredAt desc
             """)
@@ -57,11 +62,16 @@ public interface InventoryLedgerRepository extends JpaRepository<InventoryLedger
      * What every vendor on the list has been bought from, in quantity x unit price. Divided by
      * 1000 by the caller, after the sum: milli-units times paise is a thousand times the money,
      * and dividing each row first would throw away a fraction of every delivery.
+     *
+     * <p>Goods sent back are in the same sum and need no arithmetic of their own: a return's
+     * quantity is negative, so multiplying it by what it cost takes the money straight off.
      */
     @Query("""
             select e.vendorId, coalesce(sum(e.quantityDeltaMilli * e.buyingPricePaise), 0)
             from InventoryLedgerEvent e
-            where e.type = com.masspos.inventory.LedgerEventType.PURCHASE_RECEIPT and e.vendorId is not null
+            where e.type in (com.masspos.inventory.LedgerEventType.PURCHASE_RECEIPT,
+                             com.masspos.inventory.LedgerEventType.PURCHASE_RETURN)
+              and e.vendorId is not null
             group by e.vendorId
             """)
     List<Object[]> boughtPerVendorId();
@@ -70,7 +80,8 @@ public interface InventoryLedgerRepository extends JpaRepository<InventoryLedger
     @Query("""
             select e.vendorName, coalesce(sum(e.quantityDeltaMilli * e.buyingPricePaise), 0)
             from InventoryLedgerEvent e
-            where e.type = com.masspos.inventory.LedgerEventType.PURCHASE_RECEIPT
+            where e.type in (com.masspos.inventory.LedgerEventType.PURCHASE_RECEIPT,
+                             com.masspos.inventory.LedgerEventType.PURCHASE_RETURN)
               and e.vendorId is null and e.vendorName <> ''
             group by e.vendorName
             """)

@@ -144,6 +144,24 @@ export async function forgetBillHere(): Promise<void> {
   await agentRequest('DELETE', '/bill-draft')
 }
 
+/**
+ * The purchase order on screen, kept by the agent on this machine for the same reason the bill is:
+ * a manager halfway through a long order must not lose it to a reload, and `localStorage` belongs
+ * to the address the page came from rather than to the machine it is running on.
+ */
+export async function orderHere<T>(): Promise<T | null> {
+  const saved = await agentRequest<T>('GET', '/order-draft')
+  return saved && Object.keys(saved).length > 0 ? saved : null
+}
+
+export async function keepOrderHere(order: unknown): Promise<void> {
+  await agentRequest('PUT', '/order-draft', order)
+}
+
+export async function forgetOrderHere(): Promise<void> {
+  await agentRequest('DELETE', '/order-draft')
+}
+
 /** A bill the server laid out, in the two shapes a printer might want it. */
 export interface PrintJob {
   escpos: string

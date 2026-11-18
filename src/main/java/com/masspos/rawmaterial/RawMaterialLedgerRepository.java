@@ -25,10 +25,11 @@ public interface RawMaterialLedgerRepository extends JpaRepository<RawMaterialLe
             """)
     List<Object[]> inStoreForAll();
 
-    /** Everything bought from one vendor, newest first, for that vendor's own page. */
+    /** Everything had from one vendor, newest first - what came in and what went back. */
     @Query("""
             select e from RawMaterialLedgerEvent e
-            where e.type = com.masspos.rawmaterial.RawMaterialMovement.PURCHASE
+            where e.type in (com.masspos.rawmaterial.RawMaterialMovement.PURCHASE,
+                             com.masspos.rawmaterial.RawMaterialMovement.RETURNED_TO_VENDOR)
               and (e.vendorId = :vendorId or (e.vendorId is null and e.vendorName = :name))
             order by e.occurredAt desc
             """)
@@ -38,7 +39,9 @@ public interface RawMaterialLedgerRepository extends JpaRepository<RawMaterialLe
     @Query("""
             select e.vendorId, coalesce(sum(e.quantityDeltaMilli * e.buyingPricePaise), 0)
             from RawMaterialLedgerEvent e
-            where e.type = com.masspos.rawmaterial.RawMaterialMovement.PURCHASE and e.vendorId is not null
+            where e.type in (com.masspos.rawmaterial.RawMaterialMovement.PURCHASE,
+                             com.masspos.rawmaterial.RawMaterialMovement.RETURNED_TO_VENDOR)
+              and e.vendorId is not null
             group by e.vendorId
             """)
     List<Object[]> boughtPerVendorId();
@@ -46,7 +49,8 @@ public interface RawMaterialLedgerRepository extends JpaRepository<RawMaterialLe
     @Query("""
             select e.vendorName, coalesce(sum(e.quantityDeltaMilli * e.buyingPricePaise), 0)
             from RawMaterialLedgerEvent e
-            where e.type = com.masspos.rawmaterial.RawMaterialMovement.PURCHASE
+            where e.type in (com.masspos.rawmaterial.RawMaterialMovement.PURCHASE,
+                             com.masspos.rawmaterial.RawMaterialMovement.RETURNED_TO_VENDOR)
               and e.vendorId is null and e.vendorName <> ''
             group by e.vendorName
             """)

@@ -47,13 +47,13 @@ public record PurchaseOrderView(UUID id, String number, PurchaseOrderStatus stat
     /**
      * @param receivedMilli what actually turned up, which may be less than what was asked for
      */
-    public record Line(UUID id, boolean fromTheStore, UUID itemId, String itemCode, String name,
-                       UnitOfMeasure unit, long quantityMilli, long unitCostPaise, long valuePaise,
-                       long receivedMilli) {
+    public record Line(UUID id, boolean fromTheStore, boolean oneOff, UUID itemId, String itemCode,
+                       String name, UnitOfMeasure unit, long quantityMilli, long unitCostPaise,
+                       long valuePaise, long receivedMilli) {
     }
 
-    static PurchaseOrderView of(PurchaseOrder order, long paidPaise) {
-        long owed = owedOn(order);
+    static PurchaseOrderView of(PurchaseOrder order, long paidPaise, long sentBackPaise) {
+        long owed = Math.max(0, owedOn(order) - sentBackPaise);
         return new PurchaseOrderView(order.getId(), order.getNumber(), order.getStatus(),
                 order.getVendor().getId(), order.getVendor().getName(), order.getOrderedOn(),
                 order.getExpectedOn(), order.getNote(), order.getValuePaise(),
@@ -64,7 +64,7 @@ public record PurchaseOrderView(UUID id, String number, PurchaseOrderStatus stat
     }
 
     /**
-     * Nothing is owed until the goods are in the shop.
+     * Nothing is owed until the goods are in the shop, and nothing is owed for what went back.
      *
      * <p>An order waiting for an administrator is a request, and one that has been approved is a
      * promise; neither is a debt, and a screen that called them "not paid" would have every shop
@@ -88,10 +88,17 @@ public record PurchaseOrderView(UUID id, String number, PurchaseOrderStatus stat
     }
 
     private static Line lineOf(PurchaseOrderLine line) {
-        return new Line(line.getId(), line.isFromTheStore(),
-                line.isFromTheStore() ? line.getRawMaterial().getId() : line.getProduct().getId(),
+        return new Line(line.getId(), line.isFromTheStore(), line.isOneOff(), itemOf(line),
                 line.getItemCode(), line.getItemName(), line.getUnit(), line.getQuantityMilli(),
                 line.getUnitCostPaise(), line.getValuePaise(), line.getReceivedMilli());
+    }
+
+    /** Null on a one-off: there is no item for the screen to open. */
+    private static UUID itemOf(PurchaseOrderLine line) {
+        if (line.isOneOff()) {
+            return null;
+        }
+        return line.isFromTheStore() ? line.getRawMaterial().getId() : line.getProduct().getId();
     }
 
     private static String who(com.masspos.user.User user) {

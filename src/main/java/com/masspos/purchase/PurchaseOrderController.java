@@ -3,6 +3,7 @@ package com.masspos.purchase;
 import com.masspos.auth.RequiresRole;
 import com.masspos.common.IndiaTime;
 import com.masspos.user.UserRole;
+import com.masspos.vendor.VendorPaymentMode;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -41,13 +42,24 @@ public class PurchaseOrderController {
         this.prices = prices;
     }
 
-    public record LineRequest(UUID productId, UUID rawMaterialId, long quantityMilli, long unitCostPaise) {
+    /**
+     * @param itemName where neither id is given: a one-off the shop does not keep a count of
+     */
+    public record LineRequest(UUID productId, UUID rawMaterialId,
+                              @Size(max = 200) String itemName, @Size(max = 40) String itemCode,
+                              long quantityMilli, long unitCostPaise) {
+    }
+
+    /** Money handed over as the order is written. */
+    public record PaymentRequest(@NotNull VendorPaymentMode mode, long amountPaise,
+                                 @Size(max = 60) String reference) {
     }
 
     public record OrderRequest(@NotNull UUID vendorId,
                                @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate expectedOn,
                                @Size(max = 200) String note,
-                               @NotNull List<LineRequest> lines) {
+                               @NotNull List<LineRequest> lines,
+                               List<PaymentRequest> payments) {
     }
 
     public record DecisionRequest(@Size(max = 200) String decision) {
@@ -114,7 +126,11 @@ public class PurchaseOrderController {
         return purchases.create(request.vendorId(), request.expectedOn(), request.note(),
                 request.lines().stream()
                         .map(line -> new PurchaseOrderService.Wanted(line.productId(), line.rawMaterialId(),
-                                line.quantityMilli(), line.unitCostPaise()))
+                                line.itemName(), line.itemCode(), line.quantityMilli(), line.unitCostPaise()))
+                        .toList(),
+                (request.payments() == null ? List.<PaymentRequest>of() : request.payments()).stream()
+                        .map(paid -> new PurchaseOrderService.PaidNow(paid.mode(), paid.amountPaise(),
+                                paid.reference()))
                         .toList());
     }
 

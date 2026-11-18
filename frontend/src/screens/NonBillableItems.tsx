@@ -10,8 +10,8 @@ import { useScreenKeys } from '../shortcuts'
 import { StockHistory } from '../components/StockHistory'
 import { PriceHistory } from '../components/PriceHistory'
 import { CorrectionDialog } from '../components/CorrectionDialog'
-import { OrderDialog } from '../components/OrderDialog'
-import type { Orderable } from '../components/OrderDialog'
+import { WriteOrder } from '../components/WriteOrder'
+import type { Orderable } from '../components/WriteOrder'
 import type { Toast } from '../App'
 
 const SEARCH_KEY = 'F2'
@@ -440,11 +440,12 @@ export default function NonBillableItems({ by, onToast }: { by: string; onToast:
       )}
 
       {ordering && (
-        <OrderDialog
+        <WriteOrder
           start={ordering}
+          framed
           onToast={onToast}
           onClose={() => backToList()}
-          onDone={() => {
+          onWritten={() => {
             setTicked([])
             backToList(true)
           }}

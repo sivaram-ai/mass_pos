@@ -1,29 +1,37 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { api, billDate, messageOfFailure, milliFromUnits, quantity, rupees } from '../api'
-import type { PurchaseOrder, PurchaseOrderStatus, Role, Settled } from '../types'
+import type {
+  PurchaseOrder, PurchaseOrderStatus, PurchaseReturn, Role, Settled,
+} from '../types'
 import {
   Banner, Button, Empty, Field, inputClass, KeyBox, Modal, Panel, smallInputClass,
 } from '../components/ui'
 import { useScreenKeys } from '../shortcuts'
 import { SortMenu } from '../components/SortMenu'
-import { OrderDialog } from '../components/OrderDialog'
+import { WriteOrder } from '../components/WriteOrder'
 import { PriceHistory } from '../components/PriceHistory'
 import type { PricesOf } from '../components/PriceHistory'
+import { savedOrderDraft } from '../orderDraft'
 import type { SortDir } from '../sorting'
 import type { Toast } from '../App'
 
 const SEARCH_KEY = 'F2'
 const ADD_KEY = 'F3'
 const SORT_KEY = 'F4'
+const RETURN_KEY = 'F12'
 
-/** The shop's own words for where an order has got to, and how each one reads on the list. */
-const STATUS: Record<PurchaseOrderStatus, { label: string; tone: string }> = {
+/** Where a line of this list has got to: the five an order has, and goods that went back. */
+type State = PurchaseOrderStatus | 'SENT_BACK'
+
+/** The shop's own words for each, and how it reads on the list. */
+const STATUS: Record<State, { label: string; tone: string }> = {
   PENDING_APPROVAL: { label: 'Waiting', tone: 'bg-amber-100 text-amber-800' },
   APPROVED: { label: 'Approved', tone: 'bg-sky-100 text-sky-800' },
   REJECTED: { label: 'Turned down', tone: 'bg-rose-100 text-rose-700' },
   RECEIVED: { label: 'Received', tone: 'bg-emerald-100 text-emerald-800' },
   CANCELLED: { label: 'Called off', tone: 'bg-slate-100 text-slate-500' },
+  SENT_BACK: { label: 'Sent back', tone: 'bg-rose-100 text-rose-700' },
 }
 
 /** And whether the money has followed the goods. */
@@ -34,12 +42,13 @@ const PAID: Record<Settled, { label: string; tone: string }> = {
   NOT_DUE: { label: '—', tone: 'text-slate-300' },
 }
 
-const FILTERS: { label: string; status: PurchaseOrderStatus | null }[] = [
-  { label: 'Everything', status: null },
-  { label: 'Waiting', status: 'PENDING_APPROVAL' },
-  { label: 'Approved', status: 'APPROVED' },
-  { label: 'Received', status: 'RECEIVED' },
-  { label: 'Turned down', status: 'REJECTED' },
+const FILTERS: { label: string; state: State | null }[] = [
+  { label: 'Everything', state: null },
+  { label: 'Waiting', state: 'PENDING_APPROVAL' },
+  { label: 'Approved', state: 'APPROVED' },
+  { label: 'Received', state: 'RECEIVED' },
+  { label: 'Turned down', state: 'REJECTED' },
+  { label: 'Sent back', state: 'SENT_BACK' },
 ]
 
 /** Which money question is being asked, chosen beside the state chips. */
@@ -88,58 +97,119 @@ function loadSort(): { field: SortBy; dir: SortDir } {
 
 const collator = new Intl.Collator('en-IN', { numeric: true, sensitivity: 'base' })
 
-/** How much is on an order, across every line of it, whichever list they came off. */
-function howMuch(order: PurchaseOrder): number {
-  return order.lines.reduce((sum, line) => sum + line.quantityMilli, 0)
+/**
+ * One line of the list, whether it is an order or goods that went back.
+ *
+ * <p>They are listed together on purpose: a shopkeeper asking what has happened with a vendor
+ * this month is asking one question, and two screens would make them ask it twice and add the
+ * answers up themselves.
+ */
+type Listed = {
+  id: string
+  kind: 'order' | 'return'
+  number: string
+  on: string
+  vendorName: string
+  firstItem: string
+  lines: number
+  quantityMilli: number
+  eachPaise: number
+  totalPaise: number
+  state: State
+  settled: Settled
+  words: string
+  order?: PurchaseOrder
+  sentBack?: PurchaseReturn
 }
 
-/** What one unit on it has averaged, which is the figure worth comparing between two orders. */
-function each(order: PurchaseOrder): number {
-  const much = howMuch(order)
-  return much > 0 ? Math.round(order.valuePaise * 1000 / much) : 0
+function firstOf(names: string[]): string {
+  return [...names].sort(collator.compare)[0] ?? ''
 }
 
-/** The item that reads first on the order, so sorting by item settles on something. */
-function firstItem(order: PurchaseOrder): string {
-  return [...order.lines].map((line) => line.name).sort(collator.compare)[0] ?? ''
+function listedOrder(order: PurchaseOrder): Listed {
+  const much = order.lines.reduce((sum, line) => sum + line.quantityMilli, 0)
+  return {
+    id: order.id,
+    kind: 'order',
+    number: order.number,
+    on: order.orderedOn,
+    vendorName: order.vendorName,
+    firstItem: firstOf(order.lines.map((line) => line.name)),
+    lines: order.lines.length,
+    quantityMilli: much,
+    eachPaise: much > 0 ? Math.round(order.valuePaise * 1000 / much) : 0,
+    totalPaise: order.valuePaise,
+    state: order.status,
+    settled: order.settled,
+    words: [
+      order.number, order.vendorName, order.note, order.createdBy, order.decidedBy, order.receivedBy,
+      STATUS[order.status].label, PAID[order.settled].label,
+      ...order.lines.map((line) => `${line.itemCode} ${line.name}`),
+    ].join(' ').toLowerCase(),
+    order,
+  }
 }
 
-function compareBy(field: SortBy, left: PurchaseOrder, right: PurchaseOrder): number {
+function listedReturn(sentBack: PurchaseReturn): Listed {
+  const much = sentBack.lines.reduce((sum, line) => sum + line.quantityMilli, 0)
+  return {
+    id: sentBack.id,
+    kind: 'return',
+    number: sentBack.number,
+    on: sentBack.returnedOn,
+    vendorName: sentBack.vendorName,
+    firstItem: firstOf(sentBack.lines.map((line) => line.name)),
+    lines: sentBack.lines.length,
+    quantityMilli: much,
+    eachPaise: much > 0 ? Math.round(sentBack.valuePaise * 1000 / much) : 0,
+    totalPaise: sentBack.valuePaise,
+    state: 'SENT_BACK',
+    settled: 'NOT_DUE',
+    words: [
+      sentBack.number, sentBack.vendorName, sentBack.reason, sentBack.by, sentBack.againstOrderNumber,
+      'sent back',
+      ...sentBack.lines.map((line) => `${line.itemCode} ${line.name}`),
+    ].join(' ').toLowerCase(),
+    sentBack,
+  }
+}
+
+function compareBy(field: SortBy, left: Listed, right: Listed): number {
   switch (field) {
     case 'date':
-      return left.orderedOn.localeCompare(right.orderedOn)
+      return left.on.localeCompare(right.on)
     case 'vendor':
       return collator.compare(left.vendorName, right.vendorName)
     case 'item':
-      return collator.compare(firstItem(left), firstItem(right))
+      return collator.compare(left.firstItem, right.firstItem)
     case 'quantity':
-      return howMuch(left) - howMuch(right)
+      return left.quantityMilli - right.quantityMilli
     case 'each':
-      return each(left) - each(right)
+      return left.eachPaise - right.eachPaise
     case 'total':
-      return left.valuePaise - right.valuePaise
+      return left.totalPaise - right.totalPaise
     case 'approval':
-      return Object.keys(STATUS).indexOf(left.status) - Object.keys(STATUS).indexOf(right.status)
+      return Object.keys(STATUS).indexOf(left.state) - Object.keys(STATUS).indexOf(right.state)
     case 'payment':
       return Object.keys(PAID).indexOf(left.settled) - Object.keys(PAID).indexOf(right.settled)
   }
 }
 
 /**
- * Every order the shop has written: what it asked for, who agreed to it, what arrived and whether
- * it has been paid for.
+ * Everything the shop has ordered and everything it has sent back: what was asked for, who agreed
+ * to it, what arrived, whether it has been paid for, and what went back on the lorry.
  *
  * <p>Worked like the Items list, because it is the same job - a long list somebody needs to find
- * one row in. The cursor starts in the list, ↑ ↓ choose, Enter opens an order, ← → pick which
- * states to show, F2 searches every word on an order including the things on its lines, F3 writes
- * one and F4 sorts.
+ * one row in. The cursor starts in the list, ↑ ↓ choose, Enter opens, ← → pick which states to
+ * show, F2 searches every word including the things on the lines, F3 writes an order, F4 sorts
+ * and F12 sends goods back.
  *
- * <p>The dates are the one thing the server is asked about. Everything else is sifted here, over
- * the window that came back, exactly as the Items list sifts the catalogue: a server asked again
- * on every keystroke would be slower and would sort the wrong rows the moment it capped an answer.
+ * <p>Writing an order takes the whole screen, the way billing does, rather than opening a dialog
+ * over a list nobody is reading: it is the same grid, the same keys and the same habits.
  */
 export default function Purchases({ role, onToast }: { role: Role; onToast: Toast }) {
-  const [rows, setRows] = useState<PurchaseOrder[]>([])
+  const [orders, setOrders] = useState<PurchaseOrder[]>([])
+  const [returns, setReturns] = useState<PurchaseReturn[]>([])
   const [filter, setFilter] = useState('')
   const [kind, setKind] = useState(0)
   const [money, setMoney] = useState(0)
@@ -148,19 +218,21 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
   const [sort, setSort] = useState(loadSort)
   const [sortOpen, setSortOpen] = useState(false)
   const [selected, setSelected] = useState(0)
-  const [writing, setWriting] = useState(false)
+  /** Writing one takes the screen. `startReturn` opens it straight into sending goods back. */
+  const [writing, setWriting] = useState<{ startReturn: PurchaseOrder | null } | null>(null)
   const [openOn, setOpenOn] = useState<string | null>(null)
+  const [openReturn, setOpenReturn] = useState<PurchaseReturn | null>(null)
   const [pricesOn, setPricesOn] = useState<PricesOf | null>(null)
   const list = useRef<HTMLDivElement>(null)
   const searchBox = useRef<HTMLInputElement>(null)
   const lines = useRef(new Map<string, HTMLTableRowElement>())
-  const dialogOpen = writing || openOn !== null || pricesOn !== null
+  const dialogOpen = openOn !== null || openReturn !== null || pricesOn !== null
 
   const load = useCallback(() => {
     const asking = new URLSearchParams()
-    const status = FILTERS[kind].status
-    if (status) {
-      asking.set('status', status)
+    const state = FILTERS[kind].state
+    if (state && state !== 'SENT_BACK') {
+      asking.set('status', state)
     }
     if (from) {
       asking.set('from', from)
@@ -169,14 +241,45 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
       asking.set('to', to)
     }
     api.get<PurchaseOrder[]>(`/api/purchase-orders?${asking.toString()}`)
-      .then(setRows)
+      .then(setOrders)
       .catch((failure) => onToast({ tone: 'bad', text: messageOfFailure(failure, 'Could not load the orders') }))
+    const forReturns = new URLSearchParams()
+    if (from) {
+      forReturns.set('from', from)
+    }
+    if (to) {
+      forReturns.set('to', to)
+    }
+    api.get<PurchaseReturn[]>(`/api/purchase-returns?${forReturns.toString()}`)
+      .then(setReturns)
+      .catch(() => setReturns([]))
   }, [onToast, kind, from, to])
 
   useEffect(load, [load])
 
   useEffect(() => {
-    list.current?.focus()
+    if (!writing) {
+      list.current?.focus()
+    }
+  }, [writing])
+
+  /**
+   * An order half written when somebody walked off to another screen is still half written. The
+   * lines themselves are kept by this machine either way; opening straight back onto them is what
+   * makes that worth anything, instead of a list and a manager wondering where their order went.
+   */
+  useEffect(() => {
+    let gone = false
+    savedOrderDraft()
+      .then((draft) => {
+        if (!gone && draft && draft.lines.length > 0) {
+          setWriting({ startReturn: null })
+        }
+      })
+      .catch(() => undefined)
+    return () => {
+      gone = true
+    }
   }, [])
 
   const chooseSort = (next: { field: SortBy; dir: SortDir }) => {
@@ -190,23 +293,18 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
   }
 
   const shown = useMemo(() => {
+    const state = FILTERS[kind].state
+    const everything: Listed[] = [
+      ...(state && state !== 'SENT_BACK' ? orders : state === 'SENT_BACK' ? [] : orders).map(listedOrder),
+      ...(state && state !== 'SENT_BACK' ? [] : returns).map(listedReturn),
+    ]
     const looking = filter.trim().toLowerCase()
     const wanted = MONEY[money].of
-    const matching = rows.filter((row) => {
+    const matching = everything.filter((row) => {
       if (wanted && row.settled !== wanted) {
         return false
       }
-      if (!looking) {
-        return true
-      }
-      // Everything on the order, the things on its lines included: somebody looking for an order
-      // remembers the onions, not the number.
-      const words = [
-        row.number, row.vendorName, row.note, row.createdBy, row.decidedBy, row.receivedBy,
-        STATUS[row.status].label, PAID[row.settled].label,
-        ...row.lines.map((line) => `${line.itemCode} ${line.name}`),
-      ].join(' ').toLowerCase()
-      return words.includes(looking)
+      return !looking || row.words.includes(looking)
     })
     const sign = sort.dir === 'asc' ? 1 : -1
     return [...matching].sort((left, right) => {
@@ -214,10 +312,10 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
       // Ties fall back to the number, which is unique and carries the day it was written.
       return by !== 0 ? by : collator.compare(right.number, left.number)
     })
-  }, [rows, filter, money, sort])
+  }, [orders, returns, filter, kind, money, sort])
 
-  const waiting = rows.filter((row) => row.status === 'PENDING_APPROVAL').length
-  const owed = rows.filter((row) => row.settled === 'UNPAID' || row.settled === 'PART_PAID')
+  const waiting = orders.filter((row) => row.status === 'PENDING_APPROVAL').length
+  const owed = orders.filter((row) => row.settled === 'UNPAID' || row.settled === 'PART_PAID')
     .reduce((sum, row) => sum + Math.max(0, row.owedPaise - row.paidPaise), 0)
 
   const at = Math.min(selected, Math.max(shown.length - 1, 0))
@@ -229,23 +327,39 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
     }
   }, [current])
 
+  /** Goods go back on an order that has actually arrived; anything else needs no order at all. */
+  const sendGoodsBack = () => {
+    const on = current?.kind === 'order' && current.order?.status === 'RECEIVED' ? current.order : null
+    setWriting({ startReturn: on })
+  }
+
   useScreenKeys({
     [SEARCH_KEY]: () => {
       searchBox.current?.focus()
       searchBox.current?.select()
     },
-    [ADD_KEY]: () => setWriting(true),
+    [ADD_KEY]: () => setWriting({ startReturn: null }),
     [SORT_KEY]: () => setSortOpen(true),
-  }, !dialogOpen && !sortOpen)
+    [RETURN_KEY]: sendGoodsBack,
+  }, !dialogOpen && !sortOpen && !writing)
 
   const backToList = (reload = false) => {
-    setWriting(false)
+    setWriting(null)
     setOpenOn(null)
+    setOpenReturn(null)
     setPricesOn(null)
     if (reload) {
       load()
     }
     requestAnimationFrame(() => list.current?.focus())
+  }
+
+  const open = (row: Listed) => {
+    if (row.kind === 'return') {
+      setOpenReturn(row.sentBack ?? null)
+    } else {
+      setOpenOn(row.id)
+    }
   }
 
   const onListKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -264,7 +378,7 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
       setSelected(event.key === 'Home' ? 0 : shown.length - 1)
     } else if (event.key === 'Enter' && current && !event.repeat) {
       event.preventDefault()
-      setOpenOn(current.id)
+      open(current)
     }
   }
 
@@ -279,13 +393,36 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
     }
   }
 
+  // Writing one takes the whole screen, as billing does. Everything above it is still mounted, so
+  // the list is exactly where it was when the order is written or put down.
+  if (writing) {
+    return (
+      <Panel
+        title={writing.startReturn ? `Send goods back on ${writing.startReturn.number}` : 'Write a purchase order'}
+        actions={
+          <Button className="whitespace-nowrap px-2 py-1" onClick={() => backToList()}>
+            Back to the list
+          </Button>
+        }
+      >
+        <WriteOrder
+          startReturn={writing.startReturn}
+          onToast={onToast}
+          onClose={() => backToList()}
+          onWritten={() => backToList(true)}
+        />
+      </Panel>
+    )
+  }
+
   return (
     <Panel
       title="Purchase orders"
       actions={
         <div className="flex flex-wrap items-center justify-end gap-2">
           <span className="whitespace-nowrap text-xs text-slate-500">
-            {rows.length} {rows.length === 1 ? 'order' : 'orders'}
+            {orders.length} {orders.length === 1 ? 'order' : 'orders'}
+            {returns.length > 0 && <span className="ml-2">{returns.length} sent back</span>}
             {waiting > 0 && <span className="ml-2 text-amber-700">{waiting} waiting to be approved</span>}
             {owed > 0 && (
               <span className="ml-2 text-rose-600"><span className="num">{rupees(owed)}</span> unpaid</span>
@@ -311,8 +448,12 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
               />
             )}
           </div>
+          <Button className="whitespace-nowrap px-2 py-1" hint={RETURN_KEY} onClick={sendGoodsBack}
+                  title="Send goods back to the vendor, on the order they came in on">
+            Send goods back
+          </Button>
           <Button tone="primary" className="whitespace-nowrap px-2 py-1" hint={ADD_KEY}
-                  onClick={() => setWriting(true)}>
+                  onClick={() => setWriting({ startReturn: null })}>
             Write an order
           </Button>
           <KeyBox hint={SEARCH_KEY}>
@@ -411,7 +552,10 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
         <span><kbd>↑</kbd> <kbd>↓</kbd> choose</span>
         <span><kbd>←</kbd> <kbd>→</kbd> which ones</span>
         <span><kbd>Enter</kbd> open</span>
-        <span><kbd>{SEARCH_KEY}</kbd> search · <kbd>{SORT_KEY}</kbd> sort · <kbd>{ADD_KEY}</kbd> write one</span>
+        <span>
+          <kbd>{SEARCH_KEY}</kbd> search · <kbd>{SORT_KEY}</kbd> sort · <kbd>{ADD_KEY}</kbd> write one
+          {' · '}<kbd>{RETURN_KEY}</kbd> send goods back
+        </span>
         <span><kbd>F9</kbd> menu · <kbd>Esc</kbd> <kbd>Esc</kbd> billing</span>
       </p>
 
@@ -444,7 +588,7 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
             <thead className="text-xs uppercase tracking-wide text-slate-400">
               <tr>
                 <th className="py-1 pl-2 text-left">Number</th>
-                <th className="py-1 text-left">Ordered</th>
+                <th className="py-1 text-left">Date</th>
                 <th className="py-1 text-left">Vendor</th>
                 <th className="py-1 text-left">What for</th>
                 <th className="py-1 text-right">How much</th>
@@ -456,7 +600,6 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
             <tbody>
               {shown.map((row, index) => {
                 const isSelected = index === at
-                const much = howMuch(row)
                 return (
                   <tr
                     key={row.id}
@@ -468,7 +611,7 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
                       }
                     }}
                     onMouseDown={() => setSelected(index)}
-                    onClick={() => setOpenOn(row.id)}
+                    onClick={() => open(row)}
                     aria-selected={isSelected}
                     className={`cursor-pointer border-t border-slate-100 ${
                       isSelected
@@ -476,31 +619,29 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
                         : 'hover:bg-slate-50'}`}
                   >
                     <td className="num py-1.5 pl-2 font-medium text-slate-700">{row.number}</td>
-                    <td className="num py-1.5 text-slate-500">{billDate(new Date(row.orderedOn))}</td>
+                    <td className="num py-1.5 text-slate-500">{billDate(new Date(row.on))}</td>
                     <td className="truncate py-1.5 pr-2" title={row.vendorName}>{row.vendorName}</td>
-                    <td className="truncate py-1.5 pr-2"
-                        title={row.lines.map((line) => `${line.itemCode} ${line.name}`).join(', ')}>
-                      {firstItem(row)}
-                      {row.lines.length > 1 && (
-                        <span className="ml-1 text-xs text-slate-400">and {row.lines.length - 1} more</span>
+                    <td className="truncate py-1.5 pr-2" title={row.firstItem}>
+                      {row.firstItem}
+                      {row.lines > 1 && (
+                        <span className="ml-1 text-xs text-slate-400">and {row.lines - 1} more</span>
                       )}
                     </td>
-                    <td className="num py-1.5 text-right text-slate-500">
-                      {quantity(much)}
-                      {row.lines.length === 1 && (
-                        <span className="ml-1 text-xs text-slate-400">{row.lines[0].unit}</span>
-                      )}
+                    <td className="num py-1.5 text-right text-slate-500">{quantity(row.quantityMilli)}</td>
+                    <td className={`num py-1.5 text-right ${row.kind === 'return' ? 'text-rose-600' : ''}`}>
+                      {row.kind === 'return' ? '−' : ''}{rupees(row.totalPaise)}
                     </td>
-                    <td className="num py-1.5 text-right">{rupees(row.valuePaise)}</td>
                     <td className="py-1.5 text-right">
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS[row.status].tone}`}>
-                        {STATUS[row.status].label}
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS[row.state].tone}`}>
+                        {STATUS[row.state].label}
                       </span>
                     </td>
                     <td className={`py-1.5 pr-2 text-right text-xs font-medium ${PAID[row.settled].tone}`}>
                       {PAID[row.settled].label}
-                      {row.settled === 'PART_PAID' && (
-                        <div className="num text-xs font-normal text-slate-400">{rupees(row.paidPaise)}</div>
+                      {row.settled === 'PART_PAID' && row.order && (
+                        <div className="num text-xs font-normal text-slate-400">
+                          {rupees(row.order.paidPaise)}
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -518,26 +659,29 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
           onToast={onToast}
           onChanged={load}
           onPrices={setPricesOn}
+          onSendBack={(order) => {
+            setOpenOn(null)
+            setWriting({ startReturn: order })
+          }}
           onClose={() => backToList()}
         />
       )}
 
-      {pricesOn && <PriceHistory of={pricesOn} onClose={() => setPricesOn(null)} />}
+      {openReturn && <ReturnPage sentBack={openReturn} onClose={() => backToList()} />}
 
-      {writing && (
-        <OrderDialog onToast={onToast} onClose={() => backToList()} onDone={() => backToList(true)} />
-      )}
+      {pricesOn && <PriceHistory of={pricesOn} onClose={() => setPricesOn(null)} />}
     </Panel>
   )
 }
 
 /** One order: what was asked for, who decided what, and whatever can be done to it next. */
-function OrderPage({ orderId, role, onToast, onChanged, onPrices, onClose }: {
+function OrderPage({ orderId, role, onToast, onChanged, onPrices, onSendBack, onClose }: {
   orderId: string
   role: Role
   onToast: Toast
   onChanged: () => void
   onPrices: (of: PricesOf) => void
+  onSendBack: (order: PurchaseOrder) => void
   onClose: () => void
 }) {
   const [order, setOrder] = useState<PurchaseOrder | null>(null)
@@ -636,11 +780,11 @@ function OrderPage({ orderId, role, onToast, onChanged, onPrices, onClose }: {
               <tbody>
                 {order.lines.map((line) => (
                   <tr key={line.id} className="border-t border-slate-100">
-                    <td className="num py-1.5 pl-2 text-slate-500">{line.itemCode}</td>
+                    <td className="num py-1.5 pl-2 text-slate-500">{line.itemCode || '—'}</td>
                     <td className="truncate py-1.5" title={line.name}>
                       {line.name}
                       <span className="ml-2 text-xs text-slate-400">
-                        {line.fromTheStore ? 'non billable' : 'sold'}
+                        {line.oneOff ? 'one-off' : line.fromTheStore ? 'non billable' : 'sold'}
                       </span>
                     </td>
                     <td className="num py-1.5 text-right">{quantity(line.quantityMilli)} {line.unit}</td>
@@ -664,19 +808,21 @@ function OrderPage({ orderId, role, onToast, onChanged, onPrices, onClose }: {
                     </td>
                     <td className="py-1 pr-2 text-right">
                       {/* What this one thing has cost before, reached from the line it is on. */}
-                      <button
-                        type="button"
-                        className="rounded-md px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100"
-                        title="What the shop has paid for this before"
-                        onClick={() => onPrices({
-                          itemId: line.itemId,
-                          itemCode: line.itemCode,
-                          name: line.name,
-                          fromTheStore: line.fromTheStore,
-                        })}
-                      >
-                        Prices
-                      </button>
+                      {!line.oneOff && line.itemId && (
+                        <button
+                          type="button"
+                          className="rounded-md px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100"
+                          title="What the shop has paid for this before"
+                          onClick={() => onPrices({
+                            itemId: line.itemId as string,
+                            itemCode: line.itemCode,
+                            name: line.name,
+                            fromTheStore: line.fromTheStore,
+                          })}
+                        >
+                          Prices
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -729,13 +875,80 @@ function OrderPage({ orderId, role, onToast, onChanged, onPrices, onClose }: {
           )}
 
           {order.status === 'RECEIVED' && (
-            <p className="text-xs text-slate-400">
-              Taken in by {order.receivedBy}. The counts moved then, and each item's history shows
-              this order against the delivery.
-            </p>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <span className="mr-auto text-xs text-slate-400">
+                Taken in by {order.receivedBy}. The counts moved then, and each item's history shows
+                this order against the delivery.
+              </span>
+              <Button onClick={() => onSendBack(order)}>Send goods back</Button>
+            </div>
           )}
         </div>
       )}
+    </Modal>
+  )
+}
+
+/** Goods that went back: what went, what it was worth, and why. Nothing can be done to it. */
+function ReturnPage({ sentBack, onClose }: { sentBack: PurchaseReturn; onClose: () => void }) {
+  return (
+    <Modal title={`${sentBack.number} · ${sentBack.vendorName}`} size="5xl" onClose={onClose}>
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">Sent back</span>
+          <span className="text-slate-500">
+            {billDate(new Date(sentBack.returnedOn))} by {sentBack.by}
+            {sentBack.againstOrderNumber && ` · on ${sentBack.againstOrderNumber}`}
+          </span>
+          <span className="num ml-auto text-base font-semibold text-rose-700">
+            −{rupees(sentBack.valuePaise)}
+          </span>
+        </div>
+
+        {sentBack.reason && <p className="text-sm text-slate-600">{sentBack.reason}</p>}
+
+        <div className="overflow-auto rounded-md border border-slate-100">
+          <table className="w-full table-fixed text-sm">
+            <colgroup>
+              <col className="w-28" />
+              <col />
+              <col className="w-32" />
+              <col className="w-28" />
+              <col className="w-28" />
+            </colgroup>
+            <thead className="text-xs uppercase tracking-wide text-slate-400">
+              <tr>
+                <th className="py-1 pl-2 text-left">Code</th>
+                <th className="py-1 text-left">Item</th>
+                <th className="py-1 text-right">Went back</th>
+                <th className="py-1 text-right">Each</th>
+                <th className="py-1 pr-2 text-right">Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sentBack.lines.map((line) => (
+                <tr key={line.id} className="border-t border-slate-100">
+                  <td className="num py-1.5 pl-2 text-slate-500">{line.itemCode || '—'}</td>
+                  <td className="truncate py-1.5" title={line.name}>
+                    {line.name}
+                    <span className="ml-2 text-xs text-slate-400">
+                      {line.oneOff ? 'one-off' : line.fromTheStore ? 'non billable' : 'sold'}
+                    </span>
+                  </td>
+                  <td className="num py-1.5 text-right">{quantity(line.quantityMilli)} {line.unit}</td>
+                  <td className="num py-1.5 text-right text-slate-500">{rupees(line.unitCostPaise)}</td>
+                  <td className="num py-1.5 pr-2 text-right">{rupees(line.valuePaise)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <p className="text-xs text-slate-400">
+          The stock came off when this was written, and {rupees(sentBack.valuePaise)} came off what the
+          shop owes {sentBack.vendorName}. Nothing here can be changed: goods that went back went back.
+        </p>
+      </div>
     </Modal>
   )
 }

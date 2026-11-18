@@ -19,7 +19,7 @@ on different floors.
 | Billing | Keyboard-first grid: code or name lookup in each row, rate, quantity and discount cells, Space to take the bill, hold and resume, split payments (cash / UPI / card / voucher), change due, print |
 | GST | Tax-inclusive or exclusive pricing, CGST + SGST or IGST by place of supply, cess, round-off to the rupee, gapless numbering per till. Shops without a GSTIN bill without tax |
 | Items | One screen for what the shop sells and how many there are. Stock is the sum of movements, never a number that gets overwritten, and it never goes below zero. Items that are never counted (cooked food, loose produce) bill without it |
-| Buying | Purchase orders a manager writes and an administrator approves; counts move only when the goods are taken in. Vendors, what is owed them, and what every item has cost on every delivery. Non billable items - the store behind the kitchen - bought and corrected the same way |
+| Buying | Purchase orders written on the billing grid, approved by an administrator, and received when the lorry comes; money out by cash, UPI, card or bank, orders held like bills, one-offs the shop does not keep, and goods sent back to a vendor. Vendors, what is owed them, and what every item has cost on every delivery |
 | Bills | Day list of bills and returns worked from the keyboard, search by bill number, full bill view with every version of an edited bill, reprint as DUPLICATE, edit, return, cancel with a reason (stock goes back) |
 | Reports | Day takings by tender, cashier and till; best sellers; GST rate-wise and HSN summaries for GSTR-1; the audit trail |
 | Staff | Cashier, manager, auditor and admin accounts; PIN sign-in that lasts the shift |
@@ -188,10 +188,36 @@ the shop needs and from whom; it sits as **Waiting** until an **administrator ap
 they can agree to the money. When the lorry arrives, **Take the goods in** moves the counts, and
 not before.
 
-Write one from the orders screen (`F3`), or straight from Items and Non billable items with
-**Purchase** (`F7`), which starts the order with whatever was ticked. The item box searches as you
-type, by code or by name, across both lists at once: `↓` and `↑` walk the matches, `Enter` or `Tab`
-takes one and the cursor lands on the quantity.
+**An order is written on the billing screen's own grid.** `F3` on Purchase orders opens it full
+screen, and the keys are the ones the counter already knows: the cursor starts at the vendor, then
+goes to the first row; typing a code or part of a name looks it up as you type, across items and
+non billable items at once; `↓` `↑` walk the matches and `Enter` takes one; the arrows move
+between cells, `Enter` moves on, `F2` starts a new row, `F3` jumps to the quantity, `F5` deletes
+the row and `Space` writes the order. `Esc` asks before it clears anything, exactly as it does on
+a bill. Where a bill asks for the table and the steward, an order asks for the **date it is
+expected, the vendor and a note**.
+
+Every rate opens on **what the shop paid for that item last time**, which is usually the number
+about to be typed.
+
+**Anything that is on neither list goes on as a one-off.** Type a name nothing matches, press
+`Enter`, and it is on the order, marked. Shops buy gas regulators and hours of a plumber's time;
+nothing counts those when they arrive, because there is nothing to count, and the vendor is owed
+for them all the same.
+
+**Money out** (`Space`) is the bill's payment screen the other way round: cash, UPI, card, bank
+account, and **Pay later**, which is what most orders use. UPI, card and bank transfers ask for
+the transaction details, because a payment the shop cannot find again is not a record of anything.
+Whatever is handed over is recorded against that order and waits for an administrator, exactly as
+any other payment to a vendor does. Nothing is owed on an order until the goods are in the shop.
+
+**Hold an order** with `F6` and pick it up again with `F7`, the way a bill is held: name it, and
+it waits on this till until somebody resumes it. Resuming one holds whatever is on screen first,
+so nothing is ever thrown away.
+
+**An order being written is kept by the machine.** Walk to another screen, refresh, lose the
+network or restart the till, and it is still there when Purchase orders opens again. It is let go
+only when the order is written, held or cleared.
 
 The receiving screen opens on what was ordered, so a delivery that came in full needs one key. If
 the lorry brought eight of the twelve, change the figure and that is what is recorded — the order
@@ -202,16 +228,33 @@ up.
 An order can hold things off the shelf and out of the store together, because a vendor who sells
 you bottled water and onions sends one lorry.
 
-**The list is worked like Items.** `F2` searches everything on an order — its number, the vendor,
-the people who wrote, approved and received it, and the things on its lines, so an order can be
-found by the onions on it. `←` `→` pick which states to show, the **Money** chips pick paid or
-unpaid, and the two date boxes pick a window (the last 90 days by default). `F4` sorts by date,
-vendor, item, how much, cost each, total, approval or payment, either way up, and the choice is
-remembered on that machine.
+**The list is worked like Items**, and it holds the returns as well as the orders: `F2` searches
+everything — the number, the vendor, the people who wrote, approved and received it, and the
+things on the lines, so an order can be found by the onions on it. `←` `→` pick which states to
+show, the **Money** chips pick paid or unpaid, and the two date boxes pick a window (the last 90
+days by default). `F4` sorts by date, vendor, item, how much, cost each, total, approval or
+payment, either way up, and the choice is remembered on that machine.
 
-**Nothing is owed until the goods are in the shop.** An order waiting or approved shows no money
-at all; once it is received it is owed for what actually arrived, and the vendor's payments say
-whether it has been paid.
+**Writing an order from the item lists.** On Items and Non billable items, `Space` ticks rows and
+**Purchase** (`F7`) opens the same screen as a dialog with them already on it. It behaves exactly
+as the full screen one does, including `Esc` asking before it clears, and the cursor cannot wander
+out of it while an order is half written.
+
+### Sending goods back
+
+**`F12` sends goods back to the vendor** — the other end of a customer's return, and written the
+same way. Give it the order the goods came in on and the lines fill in with what actually arrived,
+less whatever has already gone back; lower the amounts, delete the rows that are staying, and
+`Space` sends it. A return with no order behind it is typed from scratch.
+
+What happens then is what a shopkeeper would expect: the **stock comes off at once**, because the
+goods are going out of the shop, and **what the shop owes that vendor drops by what went back**.
+The return gets a number of its own (`PR-2627-0001`), reads as a negative line on the Purchase
+orders list, and can never be edited — goods that went back went back.
+
+No money changes hands on a return. A vendor settles against the next delivery far more often than
+he hands cash across a counter; if he does hand it back, record it as a payment on his page, where
+an administrator sees it.
 
 ### Vendors
 
@@ -436,6 +479,7 @@ is not a loopback name are refused. Together these stop a web page open on the t
 | Catalogue | `GET /api/products?q=`, `POST /api/products`, `PUT /api/products/{id}`, `POST /api/products/{id}/deactivate` |
 | Catalogue as a sheet | `GET /api/products/export` (CSV out), `POST /api/products/import` (CSV in, all rows or none) |
 | Stock | `GET /api/stock`, `/history`, `/correction-reasons`, `POST /api/stock/corrections` |
+| Buying | `GET/POST /api/purchase-orders`, `/{id}/approve`, `/reject`, `/receive`, `/holds`, `/prices`; `GET/POST /api/purchase-returns`, `/can-go-back` |
 | Billing | `POST /api/sales`, `POST /api/sales/quote`, `GET /api/invoices`, `GET /api/invoices/last`, `GET /api/invoices/lookup?number=`, `GET /api/invoices/{id}`, `GET /api/invoices/{id}/history`, `POST /api/invoices/{id}/cancel`, `POST /api/invoices/{id}/replace` (edit), `POST /api/invoices/{id}/receipt` |
 | Returns | `GET /api/invoices/{id}/returnable`, `POST /api/returns/quote`, `POST /api/returns`, `GET /api/returns`, `GET /api/returns/lookup?number=`, `GET /api/returns/{id}`, `POST /api/returns/{id}/receipt` |
 | Held bills | `GET/POST /api/holds`, `DELETE /api/holds/{id}` |

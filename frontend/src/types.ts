@@ -156,7 +156,10 @@ export interface PurchaseOrderLine {
   id: string
   /** True when it is a raw material rather than something off the shelf. */
   fromTheStore: boolean
-  itemId: string
+  /** True for something the shop does not keep: a name on the order and nothing else. */
+  oneOff: boolean
+  /** Null on a one-off: there is no item to open. */
+  itemId: string | null
   itemCode: string
   name: string
   unit: Unit
@@ -190,6 +193,81 @@ export interface PurchaseOrder {
   paidPaise: number
   settled: Settled
   lines: PurchaseOrderLine[]
+}
+
+/** An order put aside half written, the way a bill is held. */
+export interface HeldOrder {
+  id: string
+  label: string
+  by: string
+  heldAt: string
+  estimatedTotalPaise: number
+  /** The screen's own shape, written back as it was held. */
+  order: HeldOrderBody
+}
+
+/** What the writing screen keeps of an order it has not written yet. */
+export interface HeldOrderBody {
+  vendorId: string
+  vendorText: string
+  expectedOn: string
+  note: string
+  lines: OrderLineDraft[]
+}
+
+/** One line of an order being written: an item from either list, or a name typed in. */
+export interface OrderLineDraft {
+  productId: string | null
+  rawMaterialId: string | null
+  /** Set on a one-off, which is a line for something the shop does not keep. */
+  itemName: string
+  itemCode: string
+  name: string
+  unit: Unit
+  quantityMilli: number
+  unitCostPaise: number
+}
+
+export interface PurchaseReturnLine {
+  id: string
+  fromTheStore: boolean
+  oneOff: boolean
+  itemId: string | null
+  itemCode: string
+  name: string
+  unit: Unit
+  quantityMilli: number
+  unitCostPaise: number
+  valuePaise: number
+}
+
+/** Goods that went back to a vendor. */
+export interface PurchaseReturn {
+  id: string
+  number: string
+  vendorId: string
+  vendorName: string
+  againstOrderId: string | null
+  againstOrderNumber: string
+  returnedOn: string
+  reason: string
+  by: string
+  valuePaise: number
+  lines: PurchaseReturnLine[]
+}
+
+/** What can still go back off a received order. */
+export interface CanGoBack {
+  lineId: string
+  fromTheStore: boolean
+  oneOff: boolean
+  itemId: string | null
+  itemCode: string
+  name: string
+  unit: Unit
+  receivedMilli: number
+  alreadyBackMilli: number
+  unitCostPaise: number
 }
 
 /** Somebody the shop buys from. Not a Supplier: that word means the steward on a hotel bill. */

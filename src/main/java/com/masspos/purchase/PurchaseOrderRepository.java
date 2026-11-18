@@ -35,6 +35,29 @@ public interface PurchaseOrderRepository extends JpaRepository<PurchaseOrder, UU
     @Query("select o from PurchaseOrder o where o.number in :numbers")
     List<PurchaseOrder> byNumbers(@Param("numbers") Collection<String> numbers);
 
+    /**
+     * What the one-off lines of received orders have come to, per vendor. Nothing counts them, so
+     * nothing else can tell a vendor's balance about them. Summed in milli-units times paise and
+     * divided by the caller, as money is everywhere here.
+     */
+    @Query("""
+            select l.order.vendor.id, coalesce(sum(l.receivedMilli * l.unitCostPaise), 0)
+            from PurchaseOrderLine l
+            where l.order.status = com.masspos.purchase.PurchaseOrderStatus.RECEIVED
+              and l.product is null and l.rawMaterial is null
+            group by l.order.vendor.id
+            """)
+    List<Object[]> oneOffsPerVendor();
+
+    /** One vendor's received orders, newest first, for the one-off lines on his page. */
+    @Query("""
+            select o from PurchaseOrder o
+            where o.vendor.id = :vendorId
+              and o.status = com.masspos.purchase.PurchaseOrderStatus.RECEIVED
+            order by o.orderedOn desc, o.id desc
+            """)
+    List<PurchaseOrder> receivedFrom(@Param("vendorId") UUID vendorId);
+
     /** What is waiting on an administrator, oldest first: the queue to work through. */
     @Query("""
             select o from PurchaseOrder o

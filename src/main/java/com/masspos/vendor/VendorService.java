@@ -38,15 +38,17 @@ public class VendorService {
     private final InventoryLedgerRepository shelf;
     private final RawMaterialLedgerRepository store;
     private final UserRepository users;
+    private final AlsoBought alsoBought;
 
     public VendorService(VendorRepository vendors, VendorPaymentRepository payments,
                          InventoryLedgerRepository shelf, RawMaterialLedgerRepository store,
-                         UserRepository users) {
+                         UserRepository users, AlsoBought alsoBought) {
         this.vendors = vendors;
         this.payments = payments;
         this.shelf = shelf;
         this.store = store;
         this.users = users;
+        this.alsoBought = alsoBought;
     }
 
     @Transactional(readOnly = true)
@@ -59,11 +61,14 @@ public class VendorService {
         addUpByName(store.boughtPerVendorName(), boughtByName);
         Map<UUID, Long> paid = byId(payments.approvedPerVendor());
         Map<UUID, Long> waiting = byId(payments.waitingPerVendor());
+        // And the things no ledger counts, which are money all the same.
+        Map<UUID, Long> oneOffs = alsoBought.perVendor();
 
         return vendors.onTheList().stream()
                 .map(vendor -> VendorView.of(vendor,
                         money(boughtById.getOrDefault(vendor.getId(), 0L)
-                                + boughtByName.getOrDefault(vendor.getName(), 0L)),
+                                + boughtByName.getOrDefault(vendor.getName(), 0L))
+                                + oneOffs.getOrDefault(vendor.getId(), 0L),
                         paid.getOrDefault(vendor.getId(), 0L),
                         waiting.getOrDefault(vendor.getId(), 0L)))
                 .toList();
@@ -88,6 +93,7 @@ public class VendorService {
                     money(event.getQuantityDeltaMilli() * event.getBuyingPricePaise()),
                     event.getNote(), who(event.getRecordedBy())));
         }
+        bought.addAll(alsoBought.of(id));
         // One vendor, one page: the shelf and the store are the shop's business, not his.
         bought.sort(Comparator.comparing(VendorProfile.Purchase::occurredAt).reversed());
 

@@ -78,6 +78,7 @@ public final class PrintAgent implements AutoCloseable {
     private static final int MAX_DRAFT_BYTES = 512 * 1024;
 
     private static final String DRAFT_FILE = "bill-draft.json";
+    private static final String ORDER_DRAFT_FILE = "order-draft.json";
 
     /** Its own lock: the bill on screen has nothing to do with which printer this counter has. */
     private final Object drafts = new Object();
@@ -142,7 +143,10 @@ public final class PrintAgent implements AutoCloseable {
         http.createContext("/settings", answering(this::onSettings));
         http.createContext("/setup", answering(this::onSetup));
         http.createContext("/status", answering(this::onStatus));
-        http.createContext("/bill-draft", answering(this::onBillDraft));
+        http.createContext("/bill-draft", answering(exchange -> onDraft(exchange, DRAFT_FILE)));
+        // The purchase order on screen, kept on this machine for the same reason the bill is: a
+        // manager halfway through a long order must not lose it to a reload or a moved cable.
+        http.createContext("/order-draft", answering(exchange -> onDraft(exchange, ORDER_DRAFT_FILE)));
         http.createContext("/test-page", answering(this::onTestPage));
         // A handful of threads, not the listener's own: asking the printer how it is waits for the
         // printer thread, and on the listener's thread that wait would hold up the next bill.
@@ -383,7 +387,7 @@ public final class PrintAgent implements AutoCloseable {
      * <p>Written through a temporary file and moved into place, so a counter switched off
      * mid-write leaves either the bill before it or the bill after it, never half of each.
      */
-    private void onBillDraft(HttpExchange exchange) throws IOException {
+    private void onDraft(HttpExchange exchange, String fileName) throws IOException {
         if (cors(exchange)) {
             return;
         }
@@ -393,7 +397,7 @@ public final class PrintAgent implements AutoCloseable {
         byte[] body = "PUT".equalsIgnoreCase(asked) || "POST".equalsIgnoreCase(asked)
                 ? exchange.getRequestBody().readNBytes(MAX_DRAFT_BYTES)
                 : new byte[0];
-        Path file = config.ownFolder().resolve(DRAFT_FILE);
+        Path file = config.ownFolder().resolve(fileName);
         synchronized (drafts) {
             if ("GET".equalsIgnoreCase(asked)) {
                 byte[] saved = Files.isRegularFile(file) ? Files.readAllBytes(file) : new byte[0];
@@ -406,10 +410,10 @@ public final class PrintAgent implements AutoCloseable {
                 return;
             }
             if (body.length == 0) {
-                respond(exchange, 400, "{\"error\":\"there was no bill in that\"}");
+                respond(exchange, 400, "{\"error\":\"there was nothing in that\"}");
                 return;
             }
-            Path writing = file.resolveSibling(DRAFT_FILE + ".writing");
+            Path writing = file.resolveSibling(fileName + ".writing");
             Files.createDirectories(file.getParent());
             Files.write(writing, body);
             Files.move(writing, file, StandardCopyOption.REPLACE_EXISTING);

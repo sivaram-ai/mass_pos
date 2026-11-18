@@ -163,6 +163,31 @@ public class InventoryService {
 
 
     /**
+     * Goods going back to the vendor, with what they cost and the return they went back on.
+     *
+     * <p>Written like a delivery in reverse, and deliberately so: it carries the vendor and the
+     * price, so what the shop owes him comes down by exactly what went back without anybody
+     * working anything out. Capped at what the shelf has - goods that are not there cannot be put
+     * on a lorry.
+     *
+     * @return what actually went back, which is less than asked for when the shelf no longer has it
+     */
+    @Transactional
+    public long sendBack(UUID productId, long quantityMilli, String note, long buyingPricePaise,
+                         String vendorName, UUID vendorId, String returnNumber) {
+        Product product = productOrRefuse(productId);
+        long onShelf = Math.max(0, onHand(productId));
+        long going = Math.min(onShelf, Math.abs(quantityMilli));
+        if (going <= 0) {
+            return 0;
+        }
+        ledger.save(new InventoryLedgerEvent(product, LedgerEventType.PURCHASE_RETURN, -going, null,
+                counter.code(), Instant.now(), currentUser(), note, buyingPricePaise, vendorName, vendorId,
+                returnNumber));
+        return going;
+    }
+
+    /**
      * A count put right by hand: how much it moves, why, and whatever was typed beside it.
      *
      * <p>The one way a manager moves a count now, and the reason is what decides which movement

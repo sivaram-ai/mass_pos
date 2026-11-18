@@ -94,6 +94,27 @@ public class RawMaterialService {
                 buyingPricePaise, vendorName, vendorId, orderNumber), id);
     }
 
+    /**
+     * Going back to the vendor, with what it cost and the return it went back on - the store's
+     * half of the same movement the shelf records, and carrying the same figures so that what the
+     * shop owes comes down by what went back.
+     *
+     * @return what actually went back, which is less than asked for when the store has run down
+     */
+    @Transactional
+    public long sendBack(UUID id, long quantityMilli, String note, long buyingPricePaise,
+                         String vendorName, UUID vendorId, String returnNumber) {
+        long inStore = Math.max(0, ledger.inStore(id));
+        long going = Math.min(inStore, Math.abs(quantityMilli));
+        if (going <= 0) {
+            onTheList(id);
+            return 0;
+        }
+        record(id, RawMaterialMovement.RETURNED_TO_VENDOR, -going, note, buyingPricePaise, vendorName,
+                vendorId, returnNumber);
+        return going;
+    }
+
     /** Taken into the kitchen. */
     @Transactional
     public RawMaterialView consume(UUID id, long quantityMilli, String note) {

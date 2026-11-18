@@ -12,8 +12,10 @@ import com.masspos.rawmaterial.RawMaterialService;
 import com.masspos.user.User;
 import com.masspos.user.UserRepository;
 import com.masspos.vendor.Vendor;
+import com.masspos.vendor.VendorPaymentMode;
 import com.masspos.vendor.VendorPaymentRepository;
 import com.masspos.vendor.VendorRepository;
+import com.masspos.vendor.VendorService;
 import com.masspos.web.FieldRejectedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -50,12 +52,17 @@ public class PurchaseOrderService {
     private final RawMaterialService store;
     private final UserRepository users;
     private final VendorPaymentRepository paid;
+    private final VendorService vendorPayments;
+    private final PurchaseReturnRepository sentBack;
 
     public PurchaseOrderService(PurchaseOrderRepository orders, PurchaseOrderSequenceRepository sequences,
                                 VendorRepository vendors, ProductRepository products,
                                 RawMaterialRepository materials, InventoryService shelf,
                                 RawMaterialService store, UserRepository users,
-                                VendorPaymentRepository paid) {
+                                VendorPaymentRepository paid, VendorService vendorPayments,
+                                PurchaseReturnRepository sentBack) {
+        this.vendorPayments = vendorPayments;
+        this.sentBack = sentBack;
         this.orders = orders;
         this.sequences = sequences;
         this.vendors = vendors;
@@ -67,8 +74,19 @@ public class PurchaseOrderService {
         this.paid = paid;
     }
 
-    /** What to put on an order: one item, how much of it, and what it is expected to cost. */
-    public record Wanted(UUID productId, UUID rawMaterialId, long quantityMilli, long unitCostPaise) {
+    /**
+     * What to put on an order: one item, how much of it, and what it is expected to cost.
+     *
+     * @param itemName where neither id is given, what the thing is called - a one-off the shop
+     *                 does not keep a count of
+     * @param itemCode whatever the vendor calls it, if anything
+     */
+    public record Wanted(UUID productId, UUID rawMaterialId, String itemName, String itemCode,
+                         long quantityMilli, long unitCostPaise) {
+    }
+
+    /** Money handed over as the order is written, which is ordinary with a vendor who wants it. */
+    public record PaidNow(VendorPaymentMode mode, long amountPaise, String reference) {
     }
 
     /** What actually turned up, per line, when the lorry is unloaded. */
@@ -85,8 +103,10 @@ public class PurchaseOrderService {
     public List<PurchaseOrderView> search(LocalDate from, LocalDate to, UUID vendorId,
                                           PurchaseOrderStatus status) {
         Map<UUID, Long> settled = allocated();
+        Map<UUID, Long> back = whatWentBack();
         return orders.search(from, to, vendorId, status).stream()
-                .map(order -> PurchaseOrderView.of(order, settled.getOrDefault(order.getId(), 0L)))
+                .map(order -> PurchaseOrderView.of(order, settled.getOrDefault(order.getId(), 0L),
+                        back.getOrDefault(order.getId(), 0L)))
                 .toList();
     }
 
@@ -98,14 +118,26 @@ public class PurchaseOrderService {
     @Transactional(readOnly = true)
     public List<PurchaseOrderView> waitingForApproval() {
         Map<UUID, Long> settled = allocated();
+        Map<UUID, Long> back = whatWentBack();
         return orders.waitingForApproval().stream()
-                .map(order -> PurchaseOrderView.of(order, settled.getOrDefault(order.getId(), 0L)))
+                .map(order -> PurchaseOrderView.of(order, settled.getOrDefault(order.getId(), 0L),
+                        back.getOrDefault(order.getId(), 0L)))
                 .toList();
     }
 
-    /** One order, with whatever an administrator has agreed was paid against it. */
+    /** One order, with what has been paid against it and what has gone back off it. */
     private PurchaseOrderView view(PurchaseOrder order) {
-        return PurchaseOrderView.of(order, paid.approvedForOrder(order.getId()));
+        return PurchaseOrderView.of(order, paid.approvedForOrder(order.getId()),
+                Math.round(sentBack.sentBackForOrder(order.getId()) / 1000.0));
+    }
+
+    /** Every order's returns in one query, so a list of two hundred costs one. */
+    private Map<UUID, Long> whatWentBack() {
+        Map<UUID, Long> back = new HashMap<>();
+        for (Object[] row : sentBack.sentBackPerOrder()) {
+            back.put((UUID) row[0], Math.round(((Number) row[1]).doubleValue() / 1000.0));
+        }
+        return back;
     }
 
     /** Every order's approved payments in one query, so a list of two hundred costs one. */
@@ -117,8 +149,18 @@ public class PurchaseOrderService {
         return settled;
     }
 
+    /**
+     * Writes one down.
+     *
+     * @param paidNow money handed over there and then. It is recorded against this order as any
+     *                other payment to a vendor is, and waits for an administrator before it counts
+     *                - the person who hands money over is rarely the person who decides it should
+     *                be handed over, and that does not change because an order was written at the
+     *                same moment.
+     */
     @Transactional
-    public PurchaseOrderView create(UUID vendorId, LocalDate expectedOn, String note, List<Wanted> wanted) {
+    public PurchaseOrderView create(UUID vendorId, LocalDate expectedOn, String note, List<Wanted> wanted,
+                                    List<PaidNow> paidNow) {
         if (wanted == null || wanted.isEmpty()) {
             throw new FieldRejectedException("lines", "cannot be empty: say what the shop is ordering");
         }
@@ -130,10 +172,26 @@ public class PurchaseOrderService {
             if (line.quantityMilli() <= 0) {
                 throw new FieldRejectedException("quantityMilli", "must be more than nothing");
             }
-            order.add(new PurchaseOrderLine(productFor(line), materialFor(line), line.quantityMilli(),
-                    line.unitCostPaise()));
+            order.add(lineFor(line));
         }
-        return view(orders.save(order));
+        PurchaseOrder written = orders.save(order);
+        for (PaidNow paid : paidNow == null ? List.<PaidNow>of() : paidNow) {
+            if (paid.amountPaise() > 0) {
+                vendorPayments.pay(vendorId, paid.amountPaise(), today, paid.mode(), paid.reference(),
+                        "With order " + written.getNumber(), written.getId());
+            }
+        }
+        return view(written);
+    }
+
+    /** A line for something on one of the shop's lists, or for something it does not keep. */
+    private PurchaseOrderLine lineFor(Wanted line) {
+        if (line.productId() == null && line.rawMaterialId() == null) {
+            return new PurchaseOrderLine(line.itemName(), line.itemCode(), line.quantityMilli(),
+                    line.unitCostPaise());
+        }
+        return new PurchaseOrderLine(productFor(line), materialFor(line), line.quantityMilli(),
+                line.unitCostPaise());
     }
 
     @Transactional
@@ -178,7 +236,9 @@ public class PurchaseOrderService {
             long quantity = came == null ? line.getQuantityMilli() : Math.max(0, came.quantityMilli());
             long cost = came == null || came.unitCostPaise() < 0 ? line.getUnitCostPaise() : came.unitCostPaise();
             line.received(quantity);
-            if (quantity == 0) {
+            if (quantity == 0 || line.isOneOff()) {
+                // A one-off has nothing to count: no item on either list carries it, which is what
+                // made it a one-off. What it cost is on the order, and the vendor is owed for it.
                 continue;
             }
             String note = "Order " + order.getNumber();

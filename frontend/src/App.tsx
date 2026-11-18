@@ -21,7 +21,7 @@ import ThemeSettings from './screens/ThemeSettings'
 import { useThemeSync } from './themeSync'
 import License, { LicenseBanner } from './screens/License'
 import { Banner, isModalOpen } from './components/ui'
-import { MENU_KEY, useScreenKeys } from './shortcuts'
+import { gridInFront, MENU_KEY, useScreenKeys } from './shortcuts'
 
 type Screen = 'billing' | 'items' | 'raw' | 'vendors' | 'purchases' | 'invoices'
   | 'reports' | 'users' | 'theme' | 'settings' | 'license'
@@ -271,7 +271,9 @@ export default function App() {
       return
     }
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'F5' && !event.repeat) {
+      // Not while a grid is being typed into: there F5 deletes the row the cursor is on, and a
+      // reload would take that row and everything above it away instead.
+      if (event.key === 'F5' && !event.repeat && !gridInFront()) {
         event.preventDefault()
         void refresh()
       }

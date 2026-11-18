@@ -63,6 +63,34 @@ export const ASSIGNABLE_KEYS = [
 /** Opens the menu from anywhere, so no screen needs the mouse to move to another one. */
 export const MENU_KEY = 'F9'
 
+/**
+ * How many bill-like grids are open. There is at most one, but a counter rather than a flag
+ * survives a screen being built again before the old one has been taken down.
+ *
+ * <p>It exists for one key. F5 is what everybody reaches for to refresh a screen, so the shell
+ * reloads on it - except where a grid is being typed into, which is the billing screen and now
+ * the order-writing screen too. There F5 has long meant "delete this row", and reloading instead
+ * would take away the row the cursor is on and the work above it.
+ */
+let grids = 0
+
+export function gridInFront(): boolean {
+  return grids > 0
+}
+
+/** Marks a bill-like grid as being in front for as long as the screen is mounted. */
+export function useGridKeys(enabled = true) {
+  useEffect(() => {
+    if (!enabled) {
+      return
+    }
+    grids += 1
+    return () => {
+      grids -= 1
+    }
+  }, [enabled])
+}
+
 const STORAGE_KEY = 'masspos.shortcuts'
 
 export function loadShortcuts(): Record<ShortcutAction, string> {
