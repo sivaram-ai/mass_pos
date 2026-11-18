@@ -14,6 +14,7 @@ import { useScreenKeys } from '../shortcuts'
 import { SortMenu } from '../components/SortMenu'
 import { WriteOrder } from '../components/WriteOrder'
 import { PriceHistory } from '../components/PriceHistory'
+import { OrderHistory } from '../components/OrderHistory'
 import type { PricesOf } from '../components/PriceHistory'
 import { savedOrderDraft } from '../orderDraft'
 import type { SortDir } from '../sorting'
@@ -22,6 +23,7 @@ import type { Toast } from '../App'
 const SEARCH_KEY = 'F2'
 const ADD_KEY = 'F3'
 const SORT_KEY = 'F4'
+const HISTORY_KEY = 'F6'
 const WHICH_KEY = 'F8'
 const RETURN_KEY = 'F12'
 
@@ -241,10 +243,13 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
   const [openReturn, setOpenReturn] = useState<PurchaseReturn | null>(null)
   const [paying, setPaying] = useState<PurchaseOrder | null>(null)
   const [pricesOn, setPricesOn] = useState<PricesOf | null>(null)
+  /** The order whose whole story - written, decided, delivered, paid, sent back - is on screen. */
+  const [historyOn, setHistoryOn] = useState<PurchaseOrder | null>(null)
   const list = useRef<HTMLDivElement>(null)
   const searchBox = useRef<HTMLInputElement>(null)
   const lines = useRef(new Map<string, HTMLTableRowElement>())
   const dialogOpen = openOn !== null || openReturn !== null || pricesOn !== null || paying !== null
+    || historyOn !== null
   const canManage = role === 'MANAGER' || role === 'ADMIN'
 
   const load = useCallback(() => {
@@ -404,6 +409,15 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
     },
     [ADD_KEY]: () => setWriting({ startReturn: null, startEdit: null }),
     [SORT_KEY]: () => setSortOpen(true),
+    // The same key the Items list uses for the same question: how did this get to be what it is.
+    [HISTORY_KEY]: () => {
+      // On a return, the order it came off: its story is where that return belongs.
+      const on = current?.order
+        ?? orders.find((one) => one.id === current?.sentBack?.againstOrderId)
+      if (on) {
+        setHistoryOn(on)
+      }
+    },
     // The chips move with a key of their own now that ← → belong to the row's actions.
     [WHICH_KEY]: () => {
       setKind((now) => (now + 1) % FILTERS.length)
@@ -416,6 +430,7 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
   const backToList = (reload = false) => {
     setWriting(null)
     setOpenOn(null)
+    setHistoryOn(null)
     setOpenReturn(null)
     setPricesOn(null)
     setPaying(null)
@@ -636,7 +651,8 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
         <span><kbd>←</kbd> <kbd>→</kbd> Open, Edit, Pay, Receive or Send back</span>
         <span><kbd>Enter</kbd> do it</span>
         <span>
-          <kbd>{SEARCH_KEY}</kbd> search · <kbd>{SORT_KEY}</kbd> sort · <kbd>{WHICH_KEY}</kbd> which ones
+          <kbd>{SEARCH_KEY}</kbd> search · <kbd>{SORT_KEY}</kbd> sort · <kbd>{HISTORY_KEY}</kbd> history
+          · <kbd>{WHICH_KEY}</kbd> which ones
           {' · '}<kbd>{ADD_KEY}</kbd> write one · <kbd>{RETURN_KEY}</kbd> send goods back
         </span>
         <span><kbd>F9</kbd> menu · <kbd>Esc</kbd> <kbd>Esc</kbd> billing</span>
@@ -797,6 +813,10 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
             setOpenOn(null)
             setPaying(order)
           }}
+          onHistory={(order) => {
+            setOpenOn(null)
+            setHistoryOn(order)
+          }}
           onClose={() => backToList()}
         />
       )}
@@ -812,13 +832,16 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
 
       {openReturn && <ReturnPage sentBack={openReturn} onClose={() => backToList()} />}
 
+      {historyOn && <OrderHistory order={historyOn} onClose={() => backToList()} />}
+
       {pricesOn && <PriceHistory of={pricesOn} onClose={() => setPricesOn(null)} />}
     </Panel>
   )
 }
 
 /** One order: what was asked for, who decided what, and whatever can be done to it next. */
-function OrderPage({ orderId, role, onToast, onChanged, onPrices, onSendBack, onEdit, onPay, onClose }: {
+function OrderPage({ orderId, role, onToast, onChanged, onPrices, onSendBack, onEdit, onPay,
+                    onHistory, onClose }: {
   orderId: string
   role: Role
   onToast: Toast
@@ -827,6 +850,7 @@ function OrderPage({ orderId, role, onToast, onChanged, onPrices, onSendBack, on
   onSendBack: (order: PurchaseOrder) => void
   onEdit: (order: PurchaseOrder) => void
   onPay: (order: PurchaseOrder) => void
+  onHistory: (order: PurchaseOrder) => void
   onClose: () => void
 }) {
   const [order, setOrder] = useState<PurchaseOrder | null>(null)
@@ -981,6 +1005,7 @@ function OrderPage({ orderId, role, onToast, onChanged, onPrices, onSendBack, on
                     {/* What can be done to it, wherever it has got to. Changing one writes a new
                         order in its place; paying one records money against it. */}
                     <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <Button hint="F6" onClick={() => onHistory(shown)}>History</Button>
                       {shown.status !== 'RECEIVED' && shown.status !== 'REJECTED'
                         && shown.status !== 'CANCELLED' && (
                         <Button onClick={() => onEdit(shown)}>Change this order</Button>

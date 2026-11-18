@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { api, billDate, fieldErrorsOf, messageOfFailure, paiseFromRupees, quantity, rupees } from '../api'
 import type { PurchaseOrder, Role, Vendor, VendorPaymentMode, VendorProfile } from '../types'
@@ -6,11 +6,88 @@ import {
   Banner, Button, Empty, errorFor, Field, inputClass, KeyBox, Modal, Panel, smallInputClass,
 } from '../components/ui'
 import { useScreenKeys } from '../shortcuts'
+import { SortMenu } from '../components/SortMenu'
+import { VendorHistory } from '../components/VendorHistory'
+import type { SortDir } from '../sorting'
 import type { Toast } from '../App'
 
 const SEARCH_KEY = 'F2'
 const ADD_KEY = 'F3'
-const OPEN_KEY = 'F6'
+const SORT_KEY = 'F4'
+const HISTORY_KEY = 'F6'
+const WHICH_KEY = 'F8'
+
+/**
+ * How this list can be ordered. Its own set rather than the Items one, for the same reason the
+ * orders list has its own: a vendor has no stock and no selling price, and the questions asked of
+ * this list are about money owed rather than about a shelf.
+ */
+type SortBy = 'code' | 'name' | 'bought' | 'paid' | 'waiting' | 'owed' | 'status'
+
+const FIELDS: SortBy[] = ['code', 'name', 'bought', 'paid', 'waiting', 'owed', 'status']
+
+const LABELS: Record<SortBy, string> = {
+  code: 'Code',
+  name: 'Vendor',
+  bought: 'Bought',
+  paid: 'Paid',
+  waiting: 'Waiting to be approved',
+  owed: 'Owed',
+  status: 'Status',
+}
+
+/** Code order: the one field no two vendors share, so the list never shifts under the cursor. */
+const DEFAULT_SORT: { field: SortBy; dir: SortDir } = { field: 'code', dir: 'asc' }
+
+const SORT_KEY_NAME = 'masspos.vendorSort'
+
+/** Which vendors to show at all, the way the orders list picks states. */
+const WHICH: { label: string; keep: (vendor: Vendor) => boolean }[] = [
+  { label: 'Everyone', keep: () => true },
+  { label: 'Owed money', keep: (vendor) => vendor.outstandingPaise > 0 },
+  { label: 'Settled up', keep: (vendor) => vendor.outstandingPaise <= 0 },
+  { label: 'Money waiting', keep: (vendor) => vendor.waitingPaise > 0 },
+  { label: 'Stopped', keep: (vendor) => !vendor.active },
+]
+
+const collator = new Intl.Collator('en-IN', { numeric: true, sensitivity: 'base' })
+
+function compareBy(field: SortBy, left: Vendor, right: Vendor): number {
+  switch (field) {
+    case 'code':
+      return collator.compare(left.code, right.code)
+    case 'name':
+      return collator.compare(left.name, right.name)
+    case 'bought':
+      return left.boughtPaise - right.boughtPaise
+    case 'paid':
+      return left.paidPaise - right.paidPaise
+    case 'waiting':
+      return left.waitingPaise - right.waitingPaise
+    case 'owed':
+      return left.outstandingPaise - right.outstandingPaise
+    case 'status':
+      // Ascending puts the ones still being bought from first.
+      return Number(right.active) - Number(left.active)
+  }
+}
+
+/** A field saved by an older build that no longer exists falls back, never crashes. */
+function loadSort(): { field: SortBy; dir: SortDir } {
+  try {
+    const saved = localStorage.getItem(SORT_KEY_NAME)
+    if (!saved) {
+      return DEFAULT_SORT
+    }
+    const { field, dir } = JSON.parse(saved) as Partial<{ field: SortBy; dir: SortDir }>
+    return {
+      field: field && FIELDS.includes(field) ? field : DEFAULT_SORT.field,
+      dir: dir === 'desc' ? 'desc' : 'asc',
+    }
+  } catch {
+    return DEFAULT_SORT
+  }
+}
 
 const MODES: { key: VendorPaymentMode; label: string }[] = [
   { key: 'CASH', label: 'Cash' },
@@ -56,11 +133,16 @@ export default function Vendors({ role, onToast }: { role: Role; onToast: Toast 
   const [selected, setSelected] = useState(0)
   const [editing, setEditing] = useState<Editing | null>(null)
   const [openOn, setOpenOn] = useState<string | null>(null)
+  const [historyOf, setHistoryOf] = useState<Vendor | null>(null)
   const [removing, setRemoving] = useState<Vendor | null>(null)
+  const [sort, setSort] = useState(loadSort)
+  const [sorting, setSorting] = useState(false)
+  const [which, setWhich] = useState(0)
   const list = useRef<HTMLDivElement>(null)
   const searchBox = useRef<HTMLInputElement>(null)
   const lines = useRef(new Map<string, HTMLTableRowElement>())
-  const dialogOpen = editing !== null || openOn !== null || removing !== null
+  const dialogOpen = editing !== null || openOn !== null || removing !== null || historyOf !== null
+    || sorting
 
   const load = useCallback(() => {
     api.get<Vendor[]>('/api/vendors')
@@ -75,8 +157,22 @@ export default function Vendors({ role, onToast }: { role: Role; onToast: Toast 
   }, [])
 
   const looking = filter.trim().toLowerCase()
-  const shown = rows.filter((row) =>
-    `${row.name} ${row.code} ${row.phone} ${row.gstin}`.toLowerCase().includes(looking))
+  /**
+   * Sifted and ordered here, over everything the server sent, exactly as the Items list does it.
+   * A shop's vendor list is short enough to hold, and sorting a server-capped answer would sort
+   * the wrong rows.
+   */
+  const shown = useMemo(() => {
+    const kept = rows.filter((row) =>
+      `${row.name} ${row.code} ${row.phone} ${row.gstin} ${row.address} ${row.note}`
+        .toLowerCase().includes(looking) && WHICH[which].keep(row))
+    const sign = sort.dir === 'asc' ? 1 : -1
+    // Ties fall back to the code, so two vendors owed the same keep a settled order.
+    return [...kept].sort((left, right) => {
+      const by = compareBy(sort.field, left, right) * sign
+      return by !== 0 ? by : collator.compare(left.code, right.code)
+    })
+  }, [rows, looking, which, sort])
   const owed = rows.reduce((sum, row) => sum + Math.max(0, row.outstandingPaise), 0)
   const waiting = rows.reduce((sum, row) => sum + row.waitingPaise, 0)
 
@@ -95,12 +191,28 @@ export default function Vendors({ role, onToast }: { role: Role; onToast: Toast 
       searchBox.current?.select()
     },
     [ADD_KEY]: () => setEditing(BLANK),
-    [OPEN_KEY]: () => current && setOpenOn(current.id),
+    [SORT_KEY]: () => setSorting(true),
+    [HISTORY_KEY]: () => current && setHistoryOf(current),
+    [WHICH_KEY]: () => {
+      setWhich((now) => (now + 1) % WHICH.length)
+      setSelected(0)
+    },
   }, !dialogOpen)
+
+  const choose = (sorting: { field: SortBy; dir: SortDir }) => {
+    setSort(sorting)
+    try {
+      localStorage.setItem(SORT_KEY_NAME, JSON.stringify(sorting))
+    } catch {
+      // Not fatal: the list falls back to code order next time.
+    }
+  }
 
   const backToList = (reload = false) => {
     setEditing(null)
     setOpenOn(null)
+    setHistoryOf(null)
+    setSorting(false)
     setRemoving(null)
     if (reload) {
       load()
@@ -161,6 +273,20 @@ export default function Vendors({ role, onToast }: { role: Role; onToast: Toast 
               </span>
             )}
           </span>
+          <div className="relative">
+            <Button className="whitespace-nowrap px-2 py-1" hint={SORT_KEY}
+                    title="Choose what the list is ordered by"
+                    onClick={() => setSorting((open) => !open)}>
+              {LABELS[sort.field]} {sort.dir === 'asc' ? '↑' : '↓'}
+            </Button>
+            {sorting && (
+              <SortMenu sort={sort} fields={FIELDS} labels={LABELS} onChange={choose}
+                        onClose={() => {
+                          setSorting(false)
+                          requestAnimationFrame(() => list.current?.focus())
+                        }} />
+            )}
+          </div>
           <Button className="whitespace-nowrap px-2 py-1" tone="primary" hint={ADD_KEY}
                   onClick={() => setEditing(BLANK)}>
             Add a vendor
@@ -182,10 +308,33 @@ export default function Vendors({ role, onToast }: { role: Role; onToast: Toast 
         </div>
       }
     >
+      {/* Which vendors to show, chosen with F8 or with the mouse, as the orders list does it. */}
+      <div className="mb-2 flex flex-wrap items-center gap-1">
+        <span className="mr-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Show</span>
+        {WHICH.map((one, index) => (
+          <button
+            key={one.label}
+            type="button"
+            role="tab"
+            aria-selected={index === which}
+            onClick={() => {
+              setWhich(index)
+              setSelected(0)
+              requestAnimationFrame(() => list.current?.focus())
+            }}
+            className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition ${
+              index === which ? 'bg-sky-600 text-on-primary' : 'text-slate-600 hover:bg-slate-100'}`}
+          >
+            {one.label}
+          </button>
+        ))}
+        <KeyBox hint={WHICH_KEY}><span className="pr-6 text-xs text-slate-400">which ones</span></KeyBox>
+      </div>
+
       <p className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
         <span><kbd>↑</kbd> <kbd>↓</kbd> choose</span>
-        <span><kbd>Enter</kbd> or <kbd>{OPEN_KEY}</kbd> open · <kbd>Delete</kbd> remove</span>
-        <span><kbd>{SEARCH_KEY}</kbd> search · <kbd>{ADD_KEY}</kbd> add</span>
+        <span><kbd>Enter</kbd> open · <kbd>{HISTORY_KEY}</kbd> history · <kbd>Delete</kbd> remove</span>
+        <span><kbd>{SEARCH_KEY}</kbd> search · <kbd>{SORT_KEY}</kbd> sort · <kbd>{WHICH_KEY}</kbd> which ones · <kbd>{ADD_KEY}</kbd> add</span>
         <span><kbd>F9</kbd> menu · <kbd>Esc</kbd> <kbd>Esc</kbd> billing</span>
       </p>
 
@@ -274,8 +423,16 @@ export default function Vendors({ role, onToast }: { role: Role; onToast: Toast 
           onToast={onToast}
           onChanged={load}
           onEdit={edit}
+          onHistory={(vendor) => {
+            setOpenOn(null)
+            setHistoryOf(vendor)
+          }}
           onClose={() => backToList()}
         />
+      )}
+
+      {historyOf && (
+        <VendorHistory of={historyOf} onClose={() => backToList()} />
       )}
 
       {editing && (
@@ -317,12 +474,13 @@ export default function Vendors({ role, onToast }: { role: Role; onToast: Toast 
 }
 
 /** One vendor: what was bought, what was paid, what is left, and the way to settle some of it. */
-function VendorPage({ vendorId, role, onToast, onChanged, onEdit, onClose }: {
+function VendorPage({ vendorId, role, onToast, onChanged, onEdit, onHistory, onClose }: {
   vendorId: string
   role: Role
   onToast: Toast
   onChanged: () => void
   onEdit: (vendor: Vendor) => void
+  onHistory: (vendor: Vendor) => void
   onClose: () => void
 }) {
   const [profile, setProfile] = useState<VendorProfile | null>(null)
@@ -380,6 +538,8 @@ function VendorPage({ vendorId, role, onToast, onChanged, onEdit, onClose }: {
             </dl>
             <div className="flex gap-2">
               <Button onClick={() => onEdit(vendor)}>Edit</Button>
+              {/* The two tables below are the last of each; this is all of it, in one line each. */}
+              <Button hint={HISTORY_KEY} onClick={() => onHistory(vendor)}>History</Button>
               <Button tone="primary" onClick={() => setPaying(true)}>Record a payment</Button>
             </div>
           </div>

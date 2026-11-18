@@ -23,4 +23,13 @@ public interface AlsoBought {
 
     /** One vendor's, for his own page, newest first. */
     List<VendorProfile.Purchase> of(UUID vendorId);
+
+    /**
+     * The orders written to one vendor, as lines of his history.
+     *
+     * <p>An order is not money owed - the goods have to turn up first - so this changes no
+     * balance. It belongs on the history all the same: "when did we last order from him, and what
+     * happened to it" is half of what anybody opens a vendor's page to find out.
+     */
+    List<VendorHistory.Event> ordersOf(UUID vendorId);
 }

@@ -23,7 +23,10 @@ import org.springframework.util.FileSystemUtils;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
@@ -132,6 +135,54 @@ class VendorApiIntegrationTest {
         assertThat(settled.at("/vendor/outstandingPaise").asLong()).isEqualTo(80_000);
         assertThat(settled.at("/payments/0/approved").asBoolean()).isTrue();
         assertThat(settled.at("/payments/0/approvedBy").asText()).isNotEmpty();
+    }
+
+    /**
+     * A vendor's history is the balance taken apart: every order written to him, everything that
+     * arrived, everything that went back and every rupee handed over, newest first.
+     *
+     * <p>It is assembled from the records themselves rather than stored, so a delivery and a
+     * return are the same ledger row with opposite signs - and the sign is what tells the two
+     * apart, which is the one thing this could get wrong.
+     */
+    @Test
+    void tellsTheWholeStoryOfOneVendor() throws Exception {
+        String vendorId = newVendor("V-9", "Dairy");
+        String productId = newProduct("VP-9", "Butter 500g");
+        delivered(vendorId, productId, 10_000, 30_000, null, 0, 0);
+        String orderId = call(get("/api/purchase-orders?vendorId=" + vendorId), managerToken, null,
+                status().isOk()).get(0).get("id").asText();
+
+        call(post("/api/purchase-returns"), managerToken, """
+                {"vendorId":"%s","againstOrderId":"%s","reason":"Two tubs spoiled","lines":[
+                  {"productId":"%s","rawMaterialId":null,"quantityMilli":2000,"unitCostPaise":30000}]}"""
+                .formatted(vendorId, orderId, productId), status().isCreated());
+        call(post("/api/vendors/" + vendorId + "/payments"), managerToken, """
+                {"amountPaise":240000,"paidOn":"2026-11-17","mode":"CASH","reference":"","note":"Settled up"}""",
+                status().isCreated());
+
+        JsonNode history = call(get("/api/vendors/" + vendorId + "/history"), managerToken, null,
+                status().isOk());
+
+        Map<String, Long> most = new HashMap<>();
+        for (JsonNode event : history) {
+            most.merge(event.get("kind").asText(), event.get("amountPaise").asLong(), Long::sum);
+        }
+        assertThat(most).containsOnlyKeys("ORDERED", "BOUGHT", "SENT_BACK", "PAID");
+        assertThat(most.get("ORDERED")).as("what the order was written for").isEqualTo(300_000);
+        assertThat(most.get("BOUGHT")).as("what arrived").isEqualTo(300_000);
+        assertThat(most.get("SENT_BACK")).as("and what went back, as a figure of its own")
+                .isEqualTo(60_000);
+        assertThat(most.get("PAID")).isEqualTo(240_000);
+
+        // Newest first, and a payment nobody has agreed to says so where the screen can show it.
+        List<String> when = new ArrayList<>();
+        for (JsonNode event : history) {
+            when.add(event.get("when").asText());
+        }
+        assertThat(when).isSortedAccordingTo(Comparator.reverseOrder());
+        assertThat(history.get(0).get("kind").asText()).isEqualTo("PAID");
+        assertThat(history.get(0).get("state").asText()).isEqualTo("Waiting");
     }
 
     /**

@@ -74,6 +74,16 @@ public class VendorController {
         return vendors.profile(id);
     }
 
+    /**
+     * Everything that has happened with one vendor, newest first: what was ordered, what arrived,
+     * what went back and what was paid. The answer to "why does he say we owe him that".
+     */
+    @GetMapping("/{id}/history")
+    @RequiresRole({UserRole.MANAGER, UserRole.AUDITOR})
+    public List<VendorHistory.Event> history(@PathVariable UUID id) {
+        return vendors.history(id);
+    }
+
     @PostMapping
     @RequiresRole({UserRole.MANAGER})
     @ResponseStatus(HttpStatus.CREATED)

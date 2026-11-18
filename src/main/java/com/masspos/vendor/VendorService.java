@@ -109,6 +109,72 @@ public class VendorService {
         return new VendorProfile(VendorView.of(vendor, boughtPaise, approved, waiting), bought, paid);
     }
 
+    /**
+     * Everything that has happened with one vendor, newest first.
+     *
+     * <p>The profile answers what the shop owes him; this answers why, which is the question
+     * anybody asks the moment the figure looks wrong. Assembled from the records themselves - the
+     * orders, both ledgers and the payments - so it can never drift from them, and nothing here is
+     * stored as history.
+     *
+     * <p>A delivery and a return are the same ledger row with opposite signs, so the sign is what
+     * decides which it was. Nothing else can: a return carries a negative quantity precisely so
+     * that quantity times price takes money off the balance without anybody working anything out.
+     */
+    @Transactional(readOnly = true)
+    public List<VendorHistory.Event> history(UUID id) {
+        Vendor vendor = onTheList(id);
+        List<VendorHistory.Event> events = new ArrayList<>(alsoBought.ordersOf(id));
+
+        for (InventoryLedgerEvent event : shelf.boughtFrom(id, vendor.getName())) {
+            events.add(movement(event.getId().toString(), event.getOccurredAt(),
+                    event.getQuantityDeltaMilli(), event.getBuyingPricePaise(),
+                    event.getProduct().getSku() + " " + event.getProduct().getName(),
+                    event.getProduct().getUnit().name(), event.getOrderNumber(),
+                    event.getNote() == null ? "" : event.getNote(), who(event.getRecordedBy())));
+        }
+        for (RawMaterialLedgerEvent event : store.boughtFrom(id, vendor.getName())) {
+            events.add(movement(event.getId().toString(), event.getOccurredAt(),
+                    event.getQuantityDeltaMilli(), event.getBuyingPricePaise(),
+                    event.getRawMaterial().getCode() + " " + event.getRawMaterial().getName(),
+                    event.getRawMaterial().getUnit().name(), event.getOrderNumber(),
+                    event.getNote(), who(event.getRecordedBy())));
+        }
+        // The things no ledger counts, which the shop bought and paid for all the same.
+        for (VendorProfile.Purchase oneOff : alsoBought.of(id)) {
+            events.add(new VendorHistory.Event(oneOff.id().toString(), oneOff.occurredAt(),
+                    VendorHistory.Kind.BOUGHT, oneOff.note(), oneOff.name(), oneOff.quantityMilli(),
+                    oneOff.unit().name(), oneOff.valuePaise(), oneOff.by(), "Not counted"));
+        }
+        for (VendorPayment payment : payments.paidTo(id)) {
+            events.add(new VendorHistory.Event(payment.getId().toString(), payment.getRecordedAt(),
+                    VendorHistory.Kind.PAID, reference(payment), payment.getNote(), 0, "",
+                    payment.getAmountPaise(), who(payment.getRecordedBy()),
+                    payment.isApproved() ? "Approved" : "Waiting"));
+        }
+
+        events.sort(Comparator.comparing(VendorHistory.Event::when).reversed());
+        return events;
+    }
+
+    /** A delivery, or the same thing in reverse: the sign on the quantity is what tells them apart. */
+    private static VendorHistory.Event movement(String id, Instant when, long quantityMilli,
+                                                long pricePaise, String what, String unit,
+                                                String orderNumber, String note, String by) {
+        boolean back = quantityMilli < 0;
+        long value = Math.round(Math.abs(quantityMilli) * pricePaise / 1000.0);
+        return new VendorHistory.Event(id, when,
+                back ? VendorHistory.Kind.SENT_BACK : VendorHistory.Kind.BOUGHT,
+                orderNumber == null || orderNumber.isEmpty() ? note : orderNumber,
+                what, Math.abs(quantityMilli), unit, value, by, back ? "Went back" : "");
+    }
+
+    /** What a payment can be found by again: the way it was paid, and the reference if there is one. */
+    private static String reference(VendorPayment payment) {
+        String how = payment.getMode().name();
+        return payment.getReference().isEmpty() ? how : how + " " + payment.getReference();
+    }
+
     @Transactional
     public VendorView create(String code, String name, String phone, String gstin, String address, String note) {
         refuseATakenCode(code, null);

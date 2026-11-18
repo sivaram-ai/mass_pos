@@ -1,7 +1,9 @@
 package com.masspos.purchase;
 
 import com.masspos.catalog.UnitOfMeasure;
+import com.masspos.common.IndiaTime;
 import com.masspos.vendor.AlsoBought;
+import com.masspos.vendor.VendorHistory;
 import com.masspos.vendor.VendorProfile;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,6 +42,45 @@ public class OneOffPurchases implements AlsoBought {
             spent.put((UUID) row[0], Math.round(((Number) row[1]).doubleValue() / 1000.0));
         }
         return spent;
+    }
+
+    /**
+     * The orders written to one vendor, newest first.
+     *
+     * <p>Dated by the day it was written rather than by any later decision: "when did we order
+     * this" is the question, and the state beside it says what became of it.
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public List<VendorHistory.Event> ordersOf(UUID vendorId) {
+        List<VendorHistory.Event> written = new ArrayList<>();
+        for (PurchaseOrder order : orders.everOrderedFrom(vendorId)) {
+            written.add(new VendorHistory.Event(order.getId().toString(),
+                    order.getOrderedOn().atStartOfDay(IndiaTime.ZONE).toInstant(),
+                    VendorHistory.Kind.ORDERED, order.getNumber(), whatIsOnIt(order),
+                    0, "", order.getValuePaise(),
+                    order.getCreatedBy() == null ? "" : order.getCreatedBy().getDisplayName(),
+                    WORDS.get(order.getStatus())));
+        }
+        return written;
+    }
+
+    /** The shop's own word for where an order has got to, the same five the screens use. */
+    private static final Map<PurchaseOrderStatus, String> WORDS = Map.of(
+            PurchaseOrderStatus.PENDING_APPROVAL, "Waiting",
+            PurchaseOrderStatus.APPROVED, "Approved",
+            PurchaseOrderStatus.RECEIVED, "Received",
+            PurchaseOrderStatus.REJECTED, "Turned down",
+            PurchaseOrderStatus.CANCELLED, "Called off");
+
+    /** What the order was for, in as many words as one line of a history can hold. */
+    private static String whatIsOnIt(PurchaseOrder order) {
+        List<PurchaseOrderLine> lines = order.getLines();
+        if (lines.isEmpty()) {
+            return "Nothing on it";
+        }
+        String first = lines.get(0).getItemName();
+        return lines.size() == 1 ? first : first + " and " + (lines.size() - 1) + " more";
     }
 
     @Override

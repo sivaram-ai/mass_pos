@@ -254,6 +254,8 @@ export interface PurchaseReturn {
   againstOrderId: string | null
   againstOrderNumber: string
   returnedOn: string
+  /** When it was written down, which is where a history places it. */
+  writtenAt: string
   reason: string
   by: string
   valuePaise: number
@@ -319,7 +321,10 @@ export interface VendorPurchase {
 
 export interface VendorPaymentRow {
   id: string
+  /** The day the shop says the money changed hands. */
   paidOn: string
+  /** When it was written down here, which is what a history can order by. */
+  recordedAt: string
   amountPaise: number
   mode: VendorPaymentMode
   reference: string
@@ -340,6 +345,29 @@ export interface VendorProfile {
   vendor: Vendor
   purchases: VendorPurchase[]
   payments: VendorPaymentRow[]
+}
+
+/** The four things that can happen with somebody the shop buys from. */
+export type VendorEventKind = 'ORDERED' | 'BOUGHT' | 'SENT_BACK' | 'PAID'
+
+/**
+ * One line of a vendor's history: assembled from the orders, both ledgers and the payments, so it
+ * can never drift from them. Nothing is stored as history.
+ */
+export interface VendorEvent {
+  id: string
+  when: string
+  kind: VendorEventKind
+  /** The order, return or bill number, or how a payment was made. */
+  reference: string
+  /** The item, or what the money or the order was for. */
+  what: string
+  quantityMilli: number
+  unit: string
+  amountPaise: number
+  by: string
+  /** Where it has got to, in the shop's words. Empty where the question does not arise. */
+  state: string
 }
 
 /** Something the shop buys and uses but never sells: butter, onions, oil, carrier bags. */

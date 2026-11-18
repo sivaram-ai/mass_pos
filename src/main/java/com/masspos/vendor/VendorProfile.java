@@ -32,17 +32,22 @@ public record VendorProfile(VendorView vendor, List<Purchase> purchases, List<Pa
      *
      * @param purchaseOrderId the order it was against, or null where it was against the running
      *                        account rather than one delivery
+     * @param paidOn          the day the shop says the money changed hands, which it may type
+     * @param recordedAt      when it was written down here, which it cannot. The history orders
+     *                        by this: a day on its own has no place among a morning's events
      * @param vendorId        null where the money went to somebody not on the shop's list
      * @param vendorName      who was paid either way, which is the whole of what a payment to
      *                        somebody off the list can be known by
      */
-    public record Payment(UUID id, LocalDate paidOn, long amountPaise, VendorPaymentMode mode, String reference,
+    public record Payment(UUID id, LocalDate paidOn, Instant recordedAt, long amountPaise,
+                          VendorPaymentMode mode, String reference,
                           String note, String by, boolean approved, String approvedBy, Instant approvedAt,
                           UUID purchaseOrderId, UUID vendorId, String vendorName) {
 
         /** One way of reading a payment, wherever it is being read - a vendor's page or an order's. */
         public static Payment of(VendorPayment payment) {
-            return new Payment(payment.getId(), payment.getPaidOn(), payment.getAmountPaise(),
+            return new Payment(payment.getId(), payment.getPaidOn(), payment.getRecordedAt(),
+                    payment.getAmountPaise(),
                     payment.getMode(), payment.getReference(), payment.getNote(),
                     who(payment.getRecordedBy()), payment.isApproved(), who(payment.getApprovedBy()),
                     payment.getApprovedAt(), payment.getPurchaseOrderId(),

@@ -29,6 +29,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3Q | Signing in where that account is already open on another till stops and says where - counter, number, floor and when - and offers Go back or sign that one out and carry on here, chosen with the arrow keys and Enter | Done: 368 tests green, driven in the browser |
 | 3R | Nothing from inside the program reaches a counter's screen: every refusal is a sentence written for a shop, and the exception, its stack, the SQL, the paths and the ids go to the log. `ApiExceptionHandler.forTheScreen` is the gate; `api.ts` guards the browser end | Done: 377 tests green, refusals driven against a running till |
 | 3S | A counter's settings are reachable while nobody is signed in: the sign-in screen opens, from its corner, the very page the counter serves itself at first start, so the connection mode, the server's address and which of the shop's counters this machine is can all be changed without closing the program. A counter that is already billing is given a way back that changes nothing | Done: 385 tests green, driven in the browser |
+| 4G | A vendor's page and an order's page each answer "why": every order, delivery, return and payment for one vendor, and everything that happened to one order, on a screen worked exactly like the Items list - searched, filtered by kind and ordered on any column, from the keyboard. The vendors list gains the same sort and the same chips | Done: 428 tests green, driven in the browser |
 | 4F | Money paid to somebody the shop does not keep on its vendor list is written down like anybody else's, on the order it was paid for, where an administrator agrees to it; and an order opens on its whole story - every version with its own lines, what it replaces and what replaced it, the goods that went back off it, and the one that was clicked ringed and named | Done: 427 tests green, driven in the browser |
 | 4E | A vendor is optional on an order, which a shop buys from a man off a lorry as often as from its list; an order is changed the way a bill is, by cancelling it and writing a new one that carries the old number, with what was paid following it; every version shows on the order when it is opened; and an order can be paid from the order itself, which is the same payment the vendor's page records | Done: 425 tests green, driven in the browser |
 | 4D | A purchase order is written on the billing screen's own grid - full screen from Purchase orders, the same component in a dialog from Items - with the vendor where the steward goes, money out where the payment screen goes, orders held like bills, things the shop does not keep going on as one-offs, and goods going back to a vendor the way a customer's goods come back | Done: 422 tests green, driven in the browser |
@@ -267,6 +268,36 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
     a frame, because the screen underneath hands focus back to its own list when a dialog closes
     and does that through a frame, so Esc then F6 would otherwise leave the cursor behind. **Both
     were real, and both were found by driving it.**
+- **A history is assembled from the records, never stored** (`components/VendorHistory.tsx`,
+  `components/OrderHistory.tsx`, `VendorService.history`). Both are the stock history's shape -
+  **F2** searches, **F3** or `←` `→` pick which kind, **F4** orders, `↑` `↓` walk it, Esc hands the
+  cursor back - because "why does it say that" is the same question wherever it is asked.
+  - **The vendor's is the server's** (`GET /api/vendors/{id}/history`), because it gathers four
+    places: the orders, both stock ledgers and the payments. **The order's is the screen's**, built
+    from `/history` and `/payments`, which the order page already asks for - a third endpoint would
+    be a second copy of one answer.
+  - **A delivery and a return are one ledger row with opposite signs**, so the sign is what tells
+    them apart (`VendorService.movement`). Nothing else can: a return's quantity is negative
+    precisely so that quantity times price takes money off the balance.
+  - **The orders reach the vendor package through `AlsoBought`** (`ordersOf`), the same interface
+    one-off purchases came in by. Purchases already read vendors; vendors reading purchases back
+    would be the cycle that interface exists to avoid.
+  - **A day is not a time, and the screen must not pretend otherwise.** An order carries the day it
+    was written and nothing finer, so a clock beside it would be a figure nobody recorded -
+    `atMidnight()` and `onlyADay` leave it off. The two things that *did* have a moment and were
+    being read off a typed day are now exposed as instants: `VendorProfile.Payment.recordedAt` and
+    `PurchaseReturnView.writtenAt`. Ordering a history by a day somebody typed puts last week's
+    payment in the middle of this morning.
+  - **A decision says what was decided, not where the order has got to since.** Reading the status
+    at render time called a received order's approval "Called off", because RECEIVED is neither
+    APPROVED nor REJECTED and the fallback took over. A decision with no words on it is an
+    approval; turning one down and calling one off both carry a reason.
+- **The vendors list sorts and filters like Items** (`screens/Vendors.tsx`): seven fields through
+  the shared `SortMenu` (**F4**, kept per machine in `masspos.vendorSort`), five chips for who to
+  show (**F8**), **F2** over the name, code, phone, GSTIN, address and note, and **F6** for the
+  history. Sifted and ordered on the screen over everything the server sent, as the Items list is
+  and for the same reason. Each list keeps its own fields and its own comparator - a vendor has no
+  stock and no selling price - and shares only the popover.
 - **What an item has cost is its own screen** (`components/PriceHistory.tsx`, **F8**,
   `GET /api/purchase-orders/prices`). An item carries one buying price - whatever the last lorry
   charged - and that answers none of the questions a shopkeeper asks. Every delivery, with the

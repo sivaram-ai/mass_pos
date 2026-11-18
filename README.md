@@ -239,6 +239,11 @@ ordered can never quietly differ. It goes back to waiting, because the money cha
 has to agree to it again, and whatever has been paid against it follows it. Once the goods are in,
 an order cannot be changed — what should not have come goes back on a lorry instead.
 
+**F6 shows how an order got to be what it is**: written, changed, approved or turned down, the
+goods arriving (and whether anything came up short), every payment and its approval, and anything
+that went back — each with its time and the person who did it. `←` `→` pick which kind, **F2**
+searches, **F4** orders. On a row that is goods going back, F6 opens the order they came off.
+
 **Opening an order shows its whole story**, the way a bill does: every version it went through,
 oldest first, each with its own lines and what was decided about it, saying what it replaces and
 what replaced it, with the goods that went back listed beneath — and the one you clicked named
@@ -292,7 +297,16 @@ an administrator sees it.
 **Vendors** are the people the shop buys from. The list shows what has been bought from each of
 them, what has been paid, and what is still owed; **Enter** opens one, where you get every
 delivery — off the shelf and out of the store together — and every payment. **F3** adds one, **F2**
-searches.
+searches, **F4** sorts by code, name, bought, paid, waiting, owed or status either way up
+(remembered on that machine), and **F8** picks who to show: everyone, those owed money, those
+settled up, those with money waiting, or the stopped ones.
+
+**F6 is the whole story of one vendor.** The balance says what the shop owes him; this says why —
+every order written to him, everything that arrived on the shelf or in the store, everything that
+went back on a lorry and every rupee handed over, newest first, with who did it and when. `←` `→`
+pick which of those four to look at, **F2** searches all of it, **F4** orders by any column, and
+the three figures at the foot are the balance taken apart. Nothing here can be edited: every line
+is a record of something that actually happened.
 
 **A payment waits for an administrator.** A manager records money handed over and it shows at once,
 marked as waiting; it does not change what the shop believes it owes until an administrator
@@ -511,6 +525,7 @@ is not a loopback name are refused. Together these stop a web page open on the t
 | Catalogue as a sheet | `GET /api/products/export` (CSV out), `POST /api/products/import` (CSV in, all rows or none) |
 | Stock | `GET /api/stock`, `/history`, `/correction-reasons`, `POST /api/stock/corrections` |
 | Buying | `GET/POST /api/purchase-orders`, `/{id}/approve`, `/reject`, `/receive`, `/replace`, `/history`, `/payments`, `/holds`, `/prices`; `GET/POST /api/purchase-returns`, `/can-go-back` |
+| Vendors | `GET/POST/PUT/DELETE /api/vendors`, `/{id}` (page), `/{id}/history`, `/{id}/payments`, `/payments/{id}/approve`, `/payments/waiting` |
 | Billing | `POST /api/sales`, `POST /api/sales/quote`, `GET /api/invoices`, `GET /api/invoices/last`, `GET /api/invoices/lookup?number=`, `GET /api/invoices/{id}`, `GET /api/invoices/{id}/history`, `POST /api/invoices/{id}/cancel`, `POST /api/invoices/{id}/replace` (edit), `POST /api/invoices/{id}/receipt` |
 | Returns | `GET /api/invoices/{id}/returnable`, `POST /api/returns/quote`, `POST /api/returns`, `GET /api/returns`, `GET /api/returns/lookup?number=`, `GET /api/returns/{id}`, `POST /api/returns/{id}/receipt` |
 | Held bills | `GET/POST /api/holds`, `DELETE /api/holds/{id}` |

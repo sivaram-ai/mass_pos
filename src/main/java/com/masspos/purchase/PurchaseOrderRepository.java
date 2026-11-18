@@ -62,6 +62,14 @@ public interface PurchaseOrderRepository extends JpaRepository<PurchaseOrder, UU
             """)
     List<PurchaseOrder> receivedFrom(@Param("vendorId") UUID vendorId);
 
+    /** Every order ever written to one vendor, newest first: his history, whatever became of them. */
+    @Query("""
+            select o from PurchaseOrder o
+            where o.vendor.id = :vendorId
+            order by o.orderedOn desc, o.id desc
+            """)
+    List<PurchaseOrder> everOrderedFrom(@Param("vendorId") UUID vendorId);
+
     /** What is waiting on an administrator, oldest first: the queue to work through. */
     @Query("""
             select o from PurchaseOrder o
