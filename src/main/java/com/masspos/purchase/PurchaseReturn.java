@@ -46,9 +46,16 @@ public class PurchaseReturn extends BaseEntity {
     @Column(nullable = false, length = 16, updatable = false)
     private String number;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "vendor_id", nullable = false, updatable = false)
+    /** Who they are going back to, where that is somebody on the list. Null is ordinary. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "vendor_id", updatable = false)
     private Vendor vendor;
+
+    /** And in words, as it was written: the vendor's name, or whatever was typed. */
+    @Size(max = 120)
+    @Column(name = "vendor_name", length = 120, nullable = false, updatable = false,
+            columnDefinition = "varchar(120) default ''")
+    private String vendorName = "";
 
     /**
      * The order the goods came in on, where anybody knows which one it was. Null is ordinary: a
@@ -80,10 +87,11 @@ public class PurchaseReturn extends BaseEntity {
     protected PurchaseReturn() {
     }
 
-    public PurchaseReturn(String number, Vendor vendor, UUID againstOrderId, String againstOrderNumber,
-                          LocalDate returnedOn, String reason, User createdBy) {
+    public PurchaseReturn(String number, Vendor vendor, String vendorName, UUID againstOrderId,
+                          String againstOrderNumber, LocalDate returnedOn, String reason, User createdBy) {
         this.number = number;
         this.vendor = vendor;
+        this.vendorName = vendorName == null ? "" : vendorName.trim();
         this.againstOrderId = againstOrderId;
         this.againstOrderNumber = againstOrderNumber == null ? "" : againstOrderNumber;
         this.returnedOn = returnedOn;
@@ -107,6 +115,14 @@ public class PurchaseReturn extends BaseEntity {
 
     public Vendor getVendor() {
         return vendor;
+    }
+
+    /** Who they went back to, in words: the vendor's name, what was typed, or nothing. */
+    public String getVendorName() {
+        if (vendorName != null && !vendorName.isEmpty()) {
+            return vendorName;
+        }
+        return vendor == null ? "" : vendor.getName();
     }
 
     public UUID getAgainstOrderId() {

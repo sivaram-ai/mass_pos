@@ -188,6 +188,11 @@ the shop needs and from whom; it sits as **Waiting** until an **administrator ap
 they can agree to the money. When the lorry arrives, **Take the goods in** moves the counts, and
 not before.
 
+**The vendor is optional.** Type a name nothing matches and the order carries it as written —
+shops buy from a man off a lorry, and nobody should have to add him to the vendor list first. A
+vendor off the list cannot be *paid* from here, because a payment belongs to a vendor's account:
+add them on the Vendors screen when the shop starts buying from them regularly.
+
 **An order is written on the billing screen's own grid.** `F3` on Purchase orders opens it full
 screen, and the keys are the ones the counter already knows: the cursor starts at the vendor, then
 goes to the first row; typing a code or part of a name looks it up as you type, across items and
@@ -228,12 +233,27 @@ up.
 An order can hold things off the shelf and out of the store together, because a vendor who sells
 you bottled water and onions sends one lorry.
 
-**The list is worked like Items**, and it holds the returns as well as the orders: `F2` searches
+**An order can be changed** (`Edit`), the way today's bill can: the old order is cancelled and a
+new one is written in its place carrying the old number, so what was agreed to and what was
+ordered can never quietly differ. It goes back to waiting, because the money changed and somebody
+has to agree to it again, and whatever has been paid against it follows it. Opening any version
+shows the whole line of them, oldest first, with the one you are looking at marked **Opened** and
+anything that went back listed beneath. Once the goods are in, an order cannot be changed — what
+should not have come goes back on a lorry instead.
+
+**Pay** records money against an order from the order itself, which is where somebody standing in
+front of a delivery is looking. It is the same payment the vendor's page records — one row, one
+balance — allocated to that order, waiting for an administrator, and showing on both screens at
+once.
+
+**The list is worked like Items and like Bills**, and it holds the returns as well as the orders: `F2` searches
 everything — the number, the vendor, the people who wrote, approved and received it, and the
-things on the lines, so an order can be found by the onions on it. `←` `→` pick which states to
-show, the **Money** chips pick paid or unpaid, and the two date boxes pick a window (the last 90
-days by default). `F4` sorts by date, vendor, item, how much, cost each, total, approval or
-payment, either way up, and the choice is remembered on that machine.
+things on the lines, so an order can be found by the onions on it. `←` `→` choose what to do with
+the row — **Open · Edit · Pay · Receive · Send back** — skipping whatever cannot be done and saying
+why when you press it anyway; `Enter` does it. `F8` picks which states to show, the **Money** chips
+pick paid or unpaid, and the two date boxes pick a window (the last 90 days by default). `F4` sorts
+by date, vendor, item, how much, cost each, total, approval or payment, either way up, and the
+choice is remembered on that machine.
 
 **Writing an order from the item lists.** On Items and Non billable items, `Space` ticks rows and
 **Purchase** (`F7`) opens the same screen as a dialog with them already on it. It behaves exactly
@@ -479,7 +499,7 @@ is not a loopback name are refused. Together these stop a web page open on the t
 | Catalogue | `GET /api/products?q=`, `POST /api/products`, `PUT /api/products/{id}`, `POST /api/products/{id}/deactivate` |
 | Catalogue as a sheet | `GET /api/products/export` (CSV out), `POST /api/products/import` (CSV in, all rows or none) |
 | Stock | `GET /api/stock`, `/history`, `/correction-reasons`, `POST /api/stock/corrections` |
-| Buying | `GET/POST /api/purchase-orders`, `/{id}/approve`, `/reject`, `/receive`, `/holds`, `/prices`; `GET/POST /api/purchase-returns`, `/can-go-back` |
+| Buying | `GET/POST /api/purchase-orders`, `/{id}/approve`, `/reject`, `/receive`, `/replace`, `/history`, `/holds`, `/prices`; `GET/POST /api/purchase-returns`, `/can-go-back` |
 | Billing | `POST /api/sales`, `POST /api/sales/quote`, `GET /api/invoices`, `GET /api/invoices/last`, `GET /api/invoices/lookup?number=`, `GET /api/invoices/{id}`, `GET /api/invoices/{id}/history`, `POST /api/invoices/{id}/cancel`, `POST /api/invoices/{id}/replace` (edit), `POST /api/invoices/{id}/receipt` |
 | Returns | `GET /api/invoices/{id}/returnable`, `POST /api/returns/quote`, `POST /api/returns`, `GET /api/returns`, `GET /api/returns/lookup?number=`, `GET /api/returns/{id}`, `POST /api/returns/{id}/receipt` |
 | Held bills | `GET/POST /api/holds`, `DELETE /api/holds/{id}` |

@@ -47,9 +47,37 @@ public class PurchaseOrder extends BaseEntity {
     @Column(nullable = false, length = 16, updatable = false)
     private String number;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "vendor_id", nullable = false, updatable = false)
+    /**
+     * Who it is going to, where that is somebody on the shop's list.
+     *
+     * <p>Null is ordinary. A shop buys from a man off a lorry, from the hardware shop on the
+     * corner, from somebody it will never buy from again - and making it write all of them down
+     * as vendors before it can write an order is how shops end up with a vendor list of
+     * one-offs and an order nobody wrote at all.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "vendor_id", updatable = false)
     private Vendor vendor;
+
+    /**
+     * Who it is going to, in words, as it was written. The vendor's own name where there is a
+     * vendor - a snapshot, like the seller on an invoice, so renaming him next year does not
+     * rewrite this year's orders - and whatever was typed where there is not.
+     */
+    @Size(max = 120)
+    @Column(name = "vendor_name", length = 120, nullable = false, updatable = false,
+            columnDefinition = "varchar(120) default ''")
+    private String vendorName = "";
+
+    /**
+     * The order this one was written to replace, by number. An order is edited the way a bill is:
+     * the old one is cancelled and a new one takes its place, so what was agreed to and what was
+     * ordered can never quietly differ.
+     */
+    @Size(max = 16)
+    @Column(name = "replaces_order_number", length = 16, nullable = false, updatable = false,
+            columnDefinition = "varchar(16) default ''")
+    private String replacesOrderNumber = "";
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
@@ -92,14 +120,16 @@ public class PurchaseOrder extends BaseEntity {
     protected PurchaseOrder() {
     }
 
-    public PurchaseOrder(String number, Vendor vendor, LocalDate orderedOn, LocalDate expectedOn, String note,
-                         User createdBy) {
+    public PurchaseOrder(String number, Vendor vendor, String vendorName, LocalDate orderedOn,
+                         LocalDate expectedOn, String note, User createdBy, String replacesOrderNumber) {
         this.number = number;
         this.vendor = vendor;
+        this.vendorName = vendorName == null ? "" : vendorName.trim();
         this.orderedOn = orderedOn;
         this.expectedOn = expectedOn;
         this.note = note;
         this.createdBy = createdBy;
+        this.replacesOrderNumber = replacesOrderNumber == null ? "" : replacesOrderNumber;
     }
 
     public void add(PurchaseOrderLine line) {
@@ -147,6 +177,26 @@ public class PurchaseOrder extends BaseEntity {
         this.receivedAt = when;
     }
 
+    /**
+     * Edited: this one is cancelled and the number of the one taking its place is written on it,
+     * exactly as an edited bill is. An order whose goods have arrived cannot be edited - the
+     * counts have moved - and neither can one already decided against.
+     */
+    public void replacedBy(User by, Instant when, String newNumber) {
+        if (status == PurchaseOrderStatus.RECEIVED) {
+            throw new IllegalStateException("The goods on order " + number + " have already come in, so it "
+                    + "cannot be changed now. Send back what should not have come.");
+        }
+        if (status == PurchaseOrderStatus.REJECTED || status == PurchaseOrderStatus.CANCELLED) {
+            throw new IllegalStateException("Order " + number + " is "
+                    + status.name().toLowerCase().replace('_', ' ') + ", so there is nothing to change.");
+        }
+        this.status = PurchaseOrderStatus.CANCELLED;
+        this.decidedBy = by;
+        this.decidedAt = when;
+        this.decision = "Edited, replaced by " + newNumber;
+    }
+
     private void requirePending(String what) {
         if (status != PurchaseOrderStatus.PENDING_APPROVAL) {
             throw new IllegalStateException("Order " + number + " has already been decided, so it cannot be "
@@ -173,6 +223,19 @@ public class PurchaseOrder extends BaseEntity {
 
     public Vendor getVendor() {
         return vendor;
+    }
+
+    /** Who it is going to, in words: the vendor's name, what was typed, or nothing at all. */
+    public String getVendorName() {
+        if (vendorName != null && !vendorName.isEmpty()) {
+            return vendorName;
+        }
+        return vendor == null ? "" : vendor.getName();
+    }
+
+    /** The order this one replaced, or empty where it is the first of its line. */
+    public String getReplacesOrderNumber() {
+        return replacesOrderNumber == null ? "" : replacesOrderNumber;
     }
 
     public PurchaseOrderStatus getStatus() {

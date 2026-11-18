@@ -31,6 +31,10 @@ public interface PurchaseOrderRepository extends JpaRepository<PurchaseOrder, UU
     @Query("select o from PurchaseOrder o where o.number = :number")
     Optional<PurchaseOrder> findByNumber(@Param("number") String number);
 
+    /** The order written to replace this one, where there is one: the next version of it. */
+    @Query("select o from PurchaseOrder o where o.replacesOrderNumber = :number")
+    Optional<PurchaseOrder> replacing(@Param("number") String number);
+
     /** The orders a list of deliveries names, in one query rather than one apiece. */
     @Query("select o from PurchaseOrder o where o.number in :numbers")
     List<PurchaseOrder> byNumbers(@Param("numbers") Collection<String> numbers);
@@ -44,7 +48,7 @@ public interface PurchaseOrderRepository extends JpaRepository<PurchaseOrder, UU
             select l.order.vendor.id, coalesce(sum(l.receivedMilli * l.unitCostPaise), 0)
             from PurchaseOrderLine l
             where l.order.status = com.masspos.purchase.PurchaseOrderStatus.RECEIVED
-              and l.product is null and l.rawMaterial is null
+              and l.product is null and l.rawMaterial is null and l.order.vendor is not null
             group by l.order.vendor.id
             """)
     List<Object[]> oneOffsPerVendor();

@@ -29,6 +29,7 @@ This file holds engineering context: invariants, gotchas and tuning. The user-fa
 | 3Q | Signing in where that account is already open on another till stops and says where - counter, number, floor and when - and offers Go back or sign that one out and carry on here, chosen with the arrow keys and Enter | Done: 368 tests green, driven in the browser |
 | 3R | Nothing from inside the program reaches a counter's screen: every refusal is a sentence written for a shop, and the exception, its stack, the SQL, the paths and the ids go to the log. `ApiExceptionHandler.forTheScreen` is the gate; `api.ts` guards the browser end | Done: 377 tests green, refusals driven against a running till |
 | 3S | A counter's settings are reachable while nobody is signed in: the sign-in screen opens, from its corner, the very page the counter serves itself at first start, so the connection mode, the server's address and which of the shop's counters this machine is can all be changed without closing the program. A counter that is already billing is given a way back that changes nothing | Done: 385 tests green, driven in the browser |
+| 4E | A vendor is optional on an order, which a shop buys from a man off a lorry as often as from its list; an order is changed the way a bill is, by cancelling it and writing a new one that carries the old number, with what was paid following it; every version shows on the order when it is opened; and an order can be paid from the order itself, which is the same payment the vendor's page records | Done: 425 tests green, driven in the browser |
 | 4D | A purchase order is written on the billing screen's own grid - full screen from Purchase orders, the same component in a dialog from Items - with the vendor where the steward goes, money out where the payment screen goes, orders held like bills, things the shop does not keep going on as one-offs, and goods going back to a vendor the way a customer's goods come back | Done: 422 tests green, driven in the browser |
 | 4C | One **Items** screen where Products and Stock were two; stock reaches a count only through a purchase order somebody approved, and **Correct** moves one by hand with a reason that decides the movement; **Space** ticks several items onto one order; the order dialog searches both lists as you type; the orders list searches and sorts like Items and says whether each one has been paid for; **F8** shows what an item has cost on every delivery; raw materials are **Non billable items** | Done: 416 tests green, driven in the browser |
 | 4B | Counts that went below zero on an older build are brought up to it, one correction each with its reason; and a stock-take correction can no longer go under either, which was the last way in | Done: 413 tests green, driven against a till carrying a -357 |
@@ -683,6 +684,49 @@ folder and everything under it, so that is the only copy that survives one.
   - **Numbered `PO-2627-0001` from a per-year sequence**, advanced in the transaction that writes
     the order, exactly as invoice numbers are. It carries no legal weight - it is a handle for
     chasing a delivery down a telephone - but gapless still matters for that.
+- **A vendor is optional on an order and on a return** (`vendor_id` nullable, `vendor_name
+  varchar(120) default ''` beside it). A shop buys from a man off a lorry, from the hardware shop
+  on the corner, from somebody it will never buy from again; making it write all of them down as
+  vendors before it can write an order is how a vendor list fills up with one-offs - and how an
+  order ends up not being written at all.
+  - **The name is a snapshot either way**, as the seller on an invoice is: the vendor's own name
+    where there is a vendor, so renaming him next year does not rewrite this year's orders, and
+    whatever was typed where there is not. `getVendorName()` answers both.
+  - **The delivery carries the name with no link**, which the stock ledger has handled since
+    vendors existed: `vendor_id` null, `vendor_name` filled in. Nothing is added to the vendor
+    list by writing an order.
+  - **Money cannot be paid to somebody who is not on the list.** A payment belongs to a vendor
+    row, so the money screen refuses it with a sentence saying to add them first. The order is
+    still written; only the payment waits.
+  - **On SQLite a column does not become nullable by itself.** `ddl-auto=update` will not alter
+    the old NOT NULL, so a development database written before this release has to be deleted (or
+    the till is a fresh install, which is every till in the field - `purchase_order` has never
+    shipped). Worth remembering the next time something becomes optional.
+- **An order is changed by writing a new one** (`PurchaseOrderService.replace`,
+  `POST /api/purchase-orders/{id}/replace`), exactly as a bill is edited: the old one is cancelled
+  with "Edited, replaced by PO-…" on it, the new one carries `replaces_order_number`, and it goes
+  back to waiting because the money changed and somebody has to agree to it again.
+  - **The number is reserved before the old order is cancelled**, as an invoice's is: the
+    cancellation has to be able to name what replaced it.
+  - **Only before the goods come in.** After that the counts have moved, and what should not have
+    come goes back on a lorry rather than being edited away - `replacedBy` refuses it, and the
+    screen greys the action out with the reason on it.
+  - **What was paid follows the order it was paid for** (`VendorPayment.nowAgainst`). That is the
+    one thing on a payment that may change, and it changes for the same reason a bill's paid
+    amounts carry over to the bill that replaces it. The amount, the vendor and who recorded it
+    stay frozen.
+  - **The whole line of it is one query** (`history`): back through what it replaced, on through
+    what replaced it, and the returns against any of them - the same walk `SaleService.history`
+    does, with the same guard against a loop in hand-edited data.
+- **The orders list is the Bills list** (`screens/Purchases.tsx`): every row carries Open, Edit,
+  Pay, Receive and Send back, the arrows walk only the ones that are available, and a blocked one
+  says why rather than doing nothing. Leaving the search box puts the choice back to Open, because
+  arriving at a row and pressing Enter should open it rather than run whatever was last chosen.
+  `←` `→` belong to the actions now, so the state chips move with **F8**.
+- **An order can be paid from the order** (`PayOrderDialog`), which is where somebody standing in
+  front of a delivery is looking. It posts the same payment the vendor's page posts, against the
+  same vendor, allocated to the order: one row, one balance, whichever screen it was recorded on.
+  There is deliberately no second kind of payment.
 - **An order line may point at nothing and carry its own name** (`PurchaseOrderLine`, `item_name`
   and `item_code`, both `default ''`). A shop buys things it does not keep a count of, and the
   alternative was a manager inventing a catalogue item to get an order written. Three consequences

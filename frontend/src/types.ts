@@ -174,7 +174,9 @@ export interface PurchaseOrder {
   id: string
   number: string
   status: PurchaseOrderStatus
-  vendorId: string
+  /** Null for a vendor the shop does not keep on its list. */
+  vendorId: string | null
+  /** Who it is going to, in words: the vendor's name, what was typed, or empty. */
   vendorName: string
   orderedOn: string
   expectedOn: string | null
@@ -187,6 +189,8 @@ export interface PurchaseOrder {
   decision: string
   receivedBy: string
   receivedAt: string | null
+  /** The order this one was written to replace, or empty where it is the first of its line. */
+  replacesOrderNumber: string
   /** What the vendor can ask for: what arrived once received, what was asked for before that. */
   owedPaise: number
   /** What an administrator has agreed was paid against this order. */
@@ -245,7 +249,7 @@ export interface PurchaseReturnLine {
 export interface PurchaseReturn {
   id: string
   number: string
-  vendorId: string
+  vendorId: string | null
   vendorName: string
   againstOrderId: string | null
   againstOrderNumber: string
@@ -254,6 +258,12 @@ export interface PurchaseReturn {
   by: string
   valuePaise: number
   lines: PurchaseReturnLine[]
+}
+
+/** Every version an order went through, and whatever went back against any of them. */
+export interface OrderStory {
+  versions: PurchaseOrder[]
+  returns: PurchaseReturn[]
 }
 
 /** What can still go back off a received order. */

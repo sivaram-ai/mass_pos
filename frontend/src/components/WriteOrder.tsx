@@ -53,9 +53,10 @@ type Cell = { row: number; col: Col }
 type Edit = Cell & { text: string; dirty: boolean }
 type Found = Cell & { text: string; items: Orderable[] }
 
-/** Writing an order, or sending goods back on one. */
+/** Writing an order, changing one, or sending goods back on one. */
 type Mode =
   | { kind: 'order' }
+  | { kind: 'edit'; order: PurchaseOrder }
   | { kind: 'return'; against: PurchaseOrder | null }
 
 type Ask = { action: 'hold' | 'return'; title: string; label: string; initial: string }
@@ -154,7 +155,7 @@ export type PaidNow = { mode: VendorPaymentMode; amountPaise: number; reference:
  * differs between them, so nothing about this does either.
  */
 export function WriteOrder({ start = [], framed = false, active = true, blocked = false, startReturn,
-                             onToast, onClose, onWritten }: {
+                             startEdit, onToast, onClose, onWritten }: {
   /** Items the screen that opened this had already chosen. */
   start?: Orderable[]
   /** True inside a dialog: the grid scrolls in a box rather than filling the screen. */
@@ -163,6 +164,8 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
   blocked?: boolean
   /** Open straight into sending goods back on this order. */
   startReturn?: PurchaseOrder | null
+  /** Open straight into changing this order, which writes a new one in its place. */
+  startEdit?: PurchaseOrder | null
   onToast: Toast
   /** Back to wherever this was opened from, with nothing written. */
   onClose: () => void
@@ -214,6 +217,7 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
   const inFront = active && !blocked && !dialogOpen
   const blankRow = lines.length
   const returning = mode.kind === 'return'
+  const editing = mode.kind === 'edit'
   /** Sending back what came in on an order: the items are the order's and only the amount moves. */
   const againstOrder = returning && mode.against !== null
 
@@ -359,6 +363,9 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
     if (!restored) {
       return
     }
+    // Only a new order. An edit and a return are documents the server already has, and half of
+    // one brought back out of storage - against an order that may since have been received - is
+    // worse than none.
     if (mode.kind !== 'order' || lines.length === 0) {
       void forgetOrderDraft()
       return
@@ -366,22 +373,27 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
     void saveOrderDraft({ vendorId, vendorText, expectedOn, note, lines: lines.map(draftOf) })
   }, [restored, lines, vendorId, vendorText, expectedOn, note, mode])
 
-  // The cursor starts where the order does, once the screen has its draft back.
+  // The cursor starts where the order does, once the screen has its draft back. Not when this
+  // was opened to change an order or to send goods back: those put it on the first row's amount
+  // themselves, which is the only cell on them worth typing in.
   useEffect(() => {
-    if (restored && start.length === 0) {
+    if (restored && start.length === 0 && modeRef.current.kind === 'order') {
       focusStart()
     }
     // Only when the draft lands.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restored])
 
-  // Opened straight into sending goods back: the Purchase orders screen asked for it.
+  // Opened straight into sending goods back, or into changing an order: the Purchase orders
+  // screen asked for one of them.
   useEffect(() => {
     if (startReturn) {
       void openReturn(startReturn)
+    } else if (startEdit) {
+      openEdit(startEdit)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [startReturn])
+  }, [startReturn, startEdit])
 
   useEffect(() => {
     listItems.current.get(highlight)?.scrollIntoView({ block: 'nearest' })
@@ -581,7 +593,7 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
     requestFocus(Math.min(row, updated.length), againstOrder ? 'qty' : 'code')
   }
 
-  /** Empties the screen. Nothing is ordered and nothing is sent back. */
+  /** Empties the screen. Nothing is ordered, nothing is changed and nothing is sent back. */
   const clearOrder = () => {
     replaceLines([])
     setVendorId('')
@@ -629,10 +641,17 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
     setVendorText(known ? vendorLabel(known) : '')
   }
 
+  /**
+   * Takes a vendor off the list - or, where nothing matched, leaves what was typed exactly where
+   * it is. That text is the vendor: the shop buys from a man off a lorry as well as from its own
+   * list, and a box that emptied itself would lose the only record of who the goods came from.
+   */
   const takeVendor = (id: string) => {
     setVendorId(id)
     vendorRef.current = id
-    showVendor(id)
+    if (id) {
+      showVendor(id)
+    }
     setVendorOpen(false)
   }
 
@@ -641,11 +660,6 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
     if (cart.length === 0) {
       setError(returning ? 'Nothing is going back' : 'Put something on the order first')
       focusEntry()
-      return false
-    }
-    if (!vendorRef.current) {
-      setError('Choose the vendor this is going to')
-      focusEnd(vendorBox.current)
       return false
     }
     const unpriced = cart.findIndex((line) => line.unitCostPaise <= 0)
@@ -684,8 +698,12 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
     busy.current = true
     setSaving(true)
     try {
-      const made = await api.post<PurchaseOrder>('/api/purchase-orders', {
-        vendorId,
+      const current = modeRef.current
+      const made = await api.post<PurchaseOrder>(
+        current.kind === 'edit' ? `/api/purchase-orders/${current.order.id}/replace` : '/api/purchase-orders', {
+        vendorId: vendorId || null,
+        // Nobody on the list: whatever was typed is the vendor, as it is on a delivery.
+        vendorName: vendorId ? null : vendorText.trim(),
         expectedOn: expectedOn || null,
         note: note.trim(),
         lines: linesRef.current.map((line) => ({
@@ -703,12 +721,15 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
         })),
       })
       const paid = paidNow.reduce((sum, one) => sum + one.amountPaise, 0)
+      const replaced = current.kind === 'edit' ? current.order.number : ''
       clearOrder()
       onToast({
         tone: 'good',
-        text: paid > 0
-          ? `${made.number} written, with ${rupees(paid)} paid. Both wait for an administrator.`
-          : `${made.number} written. It waits for an administrator.`,
+        text: replaced
+          ? `${replaced} is cancelled and ${made.number} takes its place. It waits for an administrator.`
+          : paid > 0
+            ? `${made.number} written, with ${rupees(paid)} paid. Both wait for an administrator.`
+            : `${made.number} written. It waits for an administrator.`,
       })
       onWritten?.()
     } catch (failure) {
@@ -732,7 +753,8 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
     setSaving(true)
     try {
       const done = await api.post<PurchaseReturn>('/api/purchase-returns', {
-        vendorId,
+        vendorId: vendorId || null,
+        vendorName: vendorId ? null : vendorText.trim(),
         againstOrderId: mode.against?.id ?? null,
         reason: reason.trim(),
         lines: linesRef.current.map((line) => ({
@@ -758,6 +780,36 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
       busy.current = false
       setSaving(false)
     }
+  }
+
+  /**
+   * Puts an order on the screen to be changed. Writing it does not edit anything: it cancels this
+   * one and writes a new one in its place, exactly as editing a bill reissues it, so what was
+   * agreed to and what was ordered can never quietly differ.
+   */
+  const openEdit = (order: PurchaseOrder) => {
+    replaceLines(order.lines.map<Row>((line) => ({
+      key: nextKey.current++,
+      productId: line.oneOff || line.fromTheStore ? null : line.itemId,
+      rawMaterialId: line.fromTheStore ? line.itemId : null,
+      oneOff: line.oneOff,
+      code: line.itemCode,
+      name: line.name,
+      unit: line.unit,
+      quantityMilli: line.quantityMilli,
+      unitCostPaise: line.unitCostPaise,
+    })))
+    setVendorId(order.vendorId ?? '')
+    vendorRef.current = order.vendorId ?? ''
+    setVendorText(order.vendorName)
+    setExpectedOn(order.expectedOn ?? '')
+    setNote(order.note)
+    const next: Mode = { kind: 'edit', order }
+    modeRef.current = next
+    setMode(next)
+    setError(null)
+    setInvalid(null)
+    requestFocus(0, 'qty')
   }
 
   /** Puts an order's delivery on the screen to send back, as a bill goes on to be returned. */
@@ -787,7 +839,11 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
       }
       replaceLines(rows)
       if (order) {
-        takeVendor(order.vendorId)
+        // The order's own vendor, whether that is somebody on the list or only a name.
+        takeVendor(order.vendorId ?? '')
+        if (!order.vendorId) {
+          setVendorText(order.vendorName)
+        }
       }
       setNote('')
       setExpectedOn('')
@@ -816,8 +872,8 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
   })
 
   const askHold = () => {
-    if (returning) {
-      onToast({ tone: 'warn', text: 'Finish or cancel the return first' })
+    if (returning || editing) {
+      onToast({ tone: 'warn', text: 'Finish or put down the change first' })
       return
     }
     const cart = commitEdit()
@@ -827,8 +883,8 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
   }
 
   const openHolds = async () => {
-    if (returning) {
-      onToast({ tone: 'warn', text: 'Finish or cancel the return first' })
+    if (returning || editing) {
+      onToast({ tone: 'warn', text: 'Finish or put down the change first' })
       return
     }
     try {
@@ -937,7 +993,7 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
       initial: '',
     }),
     clearBill: () => {
-      if (linesRef.current.length > 0 || vendorRef.current || returning) {
+      if (linesRef.current.length > 0 || vendorRef.current || returning || editing) {
         setConfirmClear(true)
       } else {
         onClose()
@@ -1164,7 +1220,7 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
     if (dialogOpen) {
       return
     }
-    if (linesRef.current.length > 0 || vendorRef.current || returning) {
+    if (linesRef.current.length > 0 || vendorRef.current || returning || editing) {
       setConfirmClear(true)
     } else {
       onClose()
@@ -1175,6 +1231,15 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
     <div ref={frame} onKeyDown={trapTab}
          className={framed ? 'flex max-h-[76vh] flex-col gap-2' : 'flex h-full min-h-0 flex-col gap-2'}>
       {error && <Banner tone="bad" onDismiss={() => setError(null)}>{error}</Banner>}
+
+      {editing && mode.kind === 'edit' && (
+        <Banner tone="warn">
+          <span className="font-semibold">Changing {mode.order.number}.</span>
+          {' '}Add, change or delete rows, then press <kbd>{shortcuts.takeBill}</kbd>: that order is
+          cancelled and a new one is written in its place, carrying whatever has been paid against
+          it. <kbd>{shortcuts.clearBill}</kbd> leaves it exactly as it is.
+        </Banner>
+      )}
 
       {returning && (
         <Banner tone="bad">
@@ -1202,7 +1267,7 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
             value={vendorText}
             aria-label="Vendor"
             readOnly={againstOrder}
-            placeholder={vendors.length === 0 ? 'None added yet' : 'Code or name'}
+            placeholder={vendors.length === 0 ? 'A name, or add them on the Vendors screen' : 'Code or name'}
             onChange={(event) => {
               setVendorText(event.target.value)
               setVendorOpen(true)
@@ -1219,7 +1284,12 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
               const resolved = commitVendor(vendorText)
               setVendorId(resolved)
               vendorRef.current = resolved
-              showVendor(resolved)
+              // Nothing on the list matches: what was typed stays, as the name of somebody the
+              // shop does not keep. A box that emptied itself would lose the only record of who
+              // the goods are coming from.
+              if (resolved) {
+                showVendor(resolved)
+              }
             }}
             onKeyDown={(event) => {
               if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -1241,7 +1311,9 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
                 takeVendor(picked)
                 focusEntry()
               } else {
-                showVendor(vendorRef.current)
+                if (vendorRef.current) {
+                  showVendor(vendorRef.current)
+                }
                 setVendorOpen(false)
                 focusEntry()
               }
@@ -1441,8 +1513,9 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
             <div className="min-w-0 leading-4">
               <div className="text-xs text-white/70">{returning ? 'Going back' : 'Comes to'}</div>
               <div className="num truncate text-[11px] text-white/55">
-                {vendor ? vendor.name : 'No vendor chosen'}
+                {vendor ? vendor.name : vendorText.trim() || 'No vendor yet'}
                 {vendor && vendor.outstandingPaise > 0 && ` · owed ${rupees(vendor.outstandingPaise)}`}
+                {!vendor && vendorText.trim() && ' · not on the list'}
               </div>
             </div>
             <span className="num shrink-0 text-2xl font-bold leading-none">{rupees(total)}</span>
@@ -1453,7 +1526,7 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
             ref={cancelButton}
             type="button"
             onClick={() => {
-              if (lines.length > 0 || vendorId || returning) {
+              if (lines.length > 0 || vendorId || returning || editing) {
                 setConfirmClear(true)
               } else {
                 onClose()
@@ -1471,13 +1544,15 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
             disabled={lines.length === 0 || saving}
             onClick={takeOrder}
           >
-            {saving ? 'Saving…' : returning ? 'Send it back' : 'Write the order'}
+            {saving ? 'Saving…' : returning ? 'Send it back' : editing ? 'Save the change' : 'Write the order'}
           </Button>
         </section>
       </div>
 
       <p className="flex shrink-0 flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
-        <span><kbd>{shortcuts.takeBill}</kbd> {returning ? 'send it back' : 'write it'}</span>
+        <span>
+          <kbd>{shortcuts.takeBill}</kbd> {returning ? 'send it back' : editing ? 'save the change' : 'write it'}
+        </span>
         <span><kbd>{shortcuts.focusSearch}</kbd> new row</span>
         <span><kbd>{shortcuts.setQuantity}</kbd> how much</span>
         <span><kbd>{shortcuts.removeLine}</kbd> delete row</span>
@@ -1495,7 +1570,8 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
       {paying && (
         <MoneyOutDialog
           due={total}
-          vendorName={vendor?.name ?? ''}
+          editing={editing}
+          vendorName={vendor?.name ?? vendorText.trim()}
           saving={saving}
           onClose={() => { setPaying(false); focusEntry() }}
           onConfirm={(paidNow) => void write(paidNow)}
@@ -1524,21 +1600,24 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
 
       {confirmClear && (
         <Modal
-          title={returning ? 'Cancel this return?' : 'Clear this order?'}
+          title={returning ? 'Cancel this return?'
+            : editing && mode.kind === 'edit' ? `Stop changing ${mode.order.number}?` : 'Clear this order?'}
           onClose={() => { setConfirmClear(false); focusEntry() }}
         >
           <p className="text-sm text-slate-600">
             {returning
               ? 'Nothing goes back and no stock moves.'
-              : `${lines.length} line${lines.length === 1 ? '' : 's'} will be taken off the screen. `
-                + 'Nothing is ordered and nothing is paid.'}
+              : editing && mode.kind === 'edit'
+                ? `Your changes are dropped and order ${mode.order.number} stays exactly as it is.`
+                : `${lines.length} line${lines.length === 1 ? '' : 's'} will be taken off the screen. `
+                  + 'Nothing is ordered and nothing is paid.'}
           </p>
           <div className="mt-4 flex justify-end gap-2">
             <Button onClick={() => { setConfirmClear(false); focusEntry() }} hint="Esc">
               {returning ? 'Keep going' : 'Keep it'}
             </Button>
             <ConfirmButton onClick={clearOrder}>
-              {returning ? 'Cancel the return' : 'Clear it'}
+              {returning ? 'Cancel the return' : editing ? 'Stop changing it' : 'Clear it'}
             </ConfirmButton>
           </div>
         </Modal>
@@ -1549,7 +1628,16 @@ export function WriteOrder({ start = [], framed = false, active = true, blocked 
   // In a dialog it brings its own frame, so Esc, the backdrop and the cross all come here rather
   // than to a parent that cannot know whether there is an order half written inside.
   return framed
-    ? <Modal title={returning ? 'Send goods back' : 'Write a purchase order'} size="5xl" onClose={askToClose}>{body}</Modal>
+    ? (
+      <Modal
+        title={returning ? 'Send goods back'
+          : editing && mode.kind === 'edit' ? `Change ${mode.order.number}` : 'Write a purchase order'}
+        size="5xl"
+        onClose={askToClose}
+      >
+        {body}
+      </Modal>
+    )
     : body
 }
 
@@ -1669,9 +1757,11 @@ function ItemList({ anchor, found, typedText, highlight, itemRefs, onHover, onPi
  * usually pays when the goods come, or at the end of the month, and a screen that insisted on
  * money now would have every manager typing a zero to get past it.
  */
-function MoneyOutDialog({ due, vendorName, saving, onClose, onConfirm }: {
+function MoneyOutDialog({ due, vendorName, editing = false, saving, onClose, onConfirm }: {
   due: number
   vendorName: string
+  /** Changing an order rather than writing a new one, which is all the wording changes. */
+  editing?: boolean
   saving: boolean
   onClose: () => void
   onConfirm: (paid: PaidNow[]) => void
@@ -1879,8 +1969,10 @@ function MoneyOutDialog({ due, vendorName, saving, onClose, onConfirm }: {
               disabled={saving}
               className="inline-flex items-center gap-2 rounded-md bg-sky-600 px-3 py-2 text-sm font-medium text-on-primary hover:bg-sky-500 disabled:opacity-50"
             >
-              {saving ? 'Saving…' : mode === null ? 'Write the order'
-                : amount >= remaining ? `Pay ${rupees(remaining)} and write it` : 'Add part payment'}
+              {saving ? 'Saving…' : mode === null ? (editing ? 'Save the change' : 'Write the order')
+                : amount >= remaining
+                  ? `Pay ${rupees(remaining)} and ${editing ? 'save it' : 'write it'}`
+                  : 'Add part payment'}
               <kbd>Enter</kbd>
             </button>
           </div>

@@ -61,4 +61,8 @@ public interface VendorPaymentRepository extends JpaRepository<VendorPayment, UU
             where p.approved = true and p.purchaseOrderId = :orderId
             """)
     long approvedForOrder(@Param("orderId") UUID orderId);
+
+    /** Everything paid against one order, agreed to or not: what follows it when it is edited. */
+    @Query("select p from VendorPayment p where p.purchaseOrderId = :orderId")
+    List<VendorPayment> allocatedTo(@Param("orderId") UUID orderId);
 }

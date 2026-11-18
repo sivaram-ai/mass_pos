@@ -236,6 +236,99 @@ class PurchaseWritingApiIntegrationTest {
                 .contains("is on this till to send back");
     }
 
+    /**
+     * A shop buys from a man off a lorry. The order carries his name and nothing else, the
+     * delivery carries it onto the ledger, and nobody is added to the vendor list for it.
+     */
+    @Test
+    void ordersFromSomebodyWhoIsNotOnTheList() throws Exception {
+        String productId = newProduct("WP-7", "Coconuts");
+
+        JsonNode order = call(post("/api/purchase-orders"), managerToken, """
+                {"vendorId":null,"vendorName":"The lorry man","expectedOn":null,"note":"","lines":[
+                  {"productId":"%s","rawMaterialId":null,"quantityMilli":30000,"unitCostPaise":1500}]}"""
+                .formatted(productId), status().isCreated());
+
+        assertThat(order.get("vendorId").isNull()).isTrue();
+        assertThat(order.get("vendorName").asText()).isEqualTo("The lorry man");
+
+        String orderId = order.get("id").asText();
+        call(post("/api/purchase-orders/" + orderId + "/approve"), adminToken, null, status().isOk());
+        call(post("/api/purchase-orders/" + orderId + "/receive"), managerToken, "{}", status().isOk());
+
+        JsonNode movement = call(get("/api/stock/history?productId=" + productId), managerToken, null,
+                status().isOk()).get(0);
+        assertThat(movement.get("vendorName").asText()).isEqualTo("The lorry man");
+        assertThat(stockOf(productId)).isEqualTo(30_000);
+        assertThat(call(get("/api/vendors"), managerToken, null, status().isOk()).toString())
+                .as("and nobody was added to the list for him").doesNotContain("The lorry man");
+    }
+
+    /**
+     * Changing an order is writing a new one, the way changing a bill reissues it: the old one is
+     * cancelled with the new number on it, the new one carries the old number, both are in the
+     * history, and what has been paid follows the order it was paid for.
+     */
+    @Test
+    void changesAnOrderByWritingANewOneInItsPlace() throws Exception {
+        String vendorId = newVendor("WV-8", "Tea merchant");
+        String productId = newProduct("WP-8", "Tea 1kg");
+        JsonNode first = call(post("/api/purchase-orders"), managerToken, """
+                {"vendorId":"%s","expectedOn":null,"note":"Weekly","lines":[
+                  {"productId":"%s","rawMaterialId":null,"quantityMilli":5000,"unitCostPaise":30000}],
+                 "payments":[{"mode":"CASH","amountPaise":50000,"reference":""}]}"""
+                .formatted(vendorId, productId), status().isCreated());
+        String firstId = first.get("id").asText();
+        String paymentId = call(get("/api/vendors/" + vendorId), managerToken, null, status().isOk())
+                .at("/payments/0/id").asText();
+        call(post("/api/vendors/payments/" + paymentId + "/approve"), adminToken, null, status().isNoContent());
+
+        JsonNode second = call(post("/api/purchase-orders/" + firstId + "/replace"), managerToken, """
+                {"vendorId":"%s","expectedOn":null,"note":"Weekly, more of it","lines":[
+                  {"productId":"%s","rawMaterialId":null,"quantityMilli":8000,"unitCostPaise":30000}]}"""
+                .formatted(vendorId, productId), status().isOk());
+
+        assertThat(second.get("number").asText()).isNotEqualTo(first.get("number").asText());
+        assertThat(second.get("replacesOrderNumber").asText()).isEqualTo(first.get("number").asText());
+        assertThat(second.get("status").asText())
+                .as("the money changed, so it waits to be agreed to again").isEqualTo("PENDING_APPROVAL");
+        assertThat(second.get("valuePaise").asLong()).isEqualTo(240_000);
+        assertThat(second.get("paidPaise").asLong())
+                .as("what was paid follows the order it was paid for").isEqualTo(50_000);
+
+        JsonNode cancelled = call(get("/api/purchase-orders/" + firstId), managerToken, null, status().isOk());
+        assertThat(cancelled.get("status").asText()).isEqualTo("CANCELLED");
+        assertThat(cancelled.get("decision").asText()).contains("Edited, replaced by")
+                .contains(second.get("number").asText());
+        assertThat(cancelled.get("paidPaise").asLong()).as("and no longer counts on the old one").isZero();
+
+        // Both versions are on the story, oldest first, whichever end it is opened from.
+        JsonNode story = call(get("/api/purchase-orders/" + firstId + "/history"), managerToken, null,
+                status().isOk());
+        assertThat(story.get("versions")).hasSize(2);
+        assertThat(story.at("/versions/0/number").asText()).isEqualTo(first.get("number").asText());
+        assertThat(story.at("/versions/1/number").asText()).isEqualTo(second.get("number").asText());
+    }
+
+    /** Once the goods are in the shop the counts have moved, so there is nothing left to change. */
+    @Test
+    void refusesToChangeAnOrderThatHasAlreadyComeIn() throws Exception {
+        String vendorId = newVendor("WV-9", "Spice merchant");
+        String productId = newProduct("WP-9", "Pepper 1kg");
+        String orderId = call(post("/api/purchase-orders"), managerToken, """
+                {"vendorId":"%s","expectedOn":null,"note":"","lines":[
+                  {"productId":"%s","rawMaterialId":null,"quantityMilli":2000,"unitCostPaise":80000}]}"""
+                .formatted(vendorId, productId), status().isCreated()).get("id").asText();
+        call(post("/api/purchase-orders/" + orderId + "/approve"), adminToken, null, status().isOk());
+        call(post("/api/purchase-orders/" + orderId + "/receive"), managerToken, "{}", status().isOk());
+
+        assertThat(call(post("/api/purchase-orders/" + orderId + "/replace"), managerToken, """
+                {"vendorId":"%s","expectedOn":null,"note":"","lines":[
+                  {"productId":"%s","rawMaterialId":null,"quantityMilli":1000,"unitCostPaise":80000}]}"""
+                .formatted(vendorId, productId), status().isConflict()).get("detail").asText())
+                .contains("already come in");
+    }
+
     private long owed(String vendorId) throws Exception {
         return call(get("/api/vendors/" + vendorId), managerToken, null, status().isOk())
                 .at("/vendor/outstandingPaise").asLong();

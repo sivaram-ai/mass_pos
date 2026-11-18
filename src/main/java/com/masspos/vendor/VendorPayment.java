@@ -73,7 +73,7 @@ public class VendorPayment extends BaseEntity {
      * so is one paying for a delivery taken before orders existed. It is what lets an order say
      * whether it has been paid for, which cannot be worked out from a vendor's running balance.
      */
-    @Column(name = "purchase_order_id", updatable = false)
+    @Column(name = "purchase_order_id")
     private UUID purchaseOrderId;
 
     @Column(nullable = false)
@@ -100,6 +100,15 @@ public class VendorPayment extends BaseEntity {
         this.note = note;
         this.recordedBy = recordedBy;
         this.recordedAt = recordedAt;
+    }
+
+    /**
+     * The order it was paid for was edited, so the money follows the order under its new number -
+     * the way the amounts paid on a bill carry over to the bill that replaces it. The amount, the
+     * vendor and who recorded it do not move: the thing approved is still the thing recorded.
+     */
+    public void nowAgainst(UUID purchaseOrderId) {
+        this.purchaseOrderId = purchaseOrderId;
     }
 
     /** An administrator agrees to it, and only then does the vendor's balance move. */

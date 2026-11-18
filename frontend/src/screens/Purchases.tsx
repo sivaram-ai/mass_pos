@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { api, billDate, messageOfFailure, milliFromUnits, quantity, rupees } from '../api'
+import {
+  api, billDate, fieldErrorsOf, messageOfFailure, milliFromUnits, paiseFromRupees, quantity, rupees,
+} from '../api'
 import type {
-  PurchaseOrder, PurchaseOrderStatus, PurchaseReturn, Role, Settled,
+  OrderStory, PurchaseOrder, PurchaseOrderStatus, PurchaseReturn, Role, Settled, VendorPaymentMode,
 } from '../types'
 import {
-  Banner, Button, Empty, Field, inputClass, KeyBox, Modal, Panel, smallInputClass,
+  Banner, Button, Empty, errorFor, Field, inputClass, KeyBox, Modal, Panel, smallInputClass,
 } from '../components/ui'
 import { useScreenKeys } from '../shortcuts'
 import { SortMenu } from '../components/SortMenu'
@@ -19,7 +21,15 @@ import type { Toast } from '../App'
 const SEARCH_KEY = 'F2'
 const ADD_KEY = 'F3'
 const SORT_KEY = 'F4'
+const WHICH_KEY = 'F8'
 const RETURN_KEY = 'F12'
+
+/** What can be done to the row the cursor is on, chosen with ← →, exactly as on the Bills list. */
+type Action = 'open' | 'edit' | 'pay' | 'receive' | 'back'
+
+const ACTION_LABELS: Record<Action, string> = {
+  open: 'Open', edit: 'Edit', pay: 'Pay', receive: 'Receive', back: 'Send back',
+}
 
 /** Where a line of this list has got to: the five an order has, and goods that went back. */
 type State = PurchaseOrderStatus | 'SENT_BACK'
@@ -218,15 +228,23 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
   const [sort, setSort] = useState(loadSort)
   const [sortOpen, setSortOpen] = useState(false)
   const [selected, setSelected] = useState(0)
-  /** Writing one takes the screen. `startReturn` opens it straight into sending goods back. */
-  const [writing, setWriting] = useState<{ startReturn: PurchaseOrder | null } | null>(null)
+  /**
+   * Writing one takes the screen. `startReturn` opens it straight into sending goods back and
+   * `startEdit` straight into changing an order, which writes a new one in its place.
+   */
+  const [writing, setWriting] = useState<
+    { startReturn: PurchaseOrder | null; startEdit: PurchaseOrder | null } | null>(null)
+  const [action, setAction] = useState<Action>('open')
+  const [listFocused, setListFocused] = useState(false)
   const [openOn, setOpenOn] = useState<string | null>(null)
   const [openReturn, setOpenReturn] = useState<PurchaseReturn | null>(null)
+  const [paying, setPaying] = useState<PurchaseOrder | null>(null)
   const [pricesOn, setPricesOn] = useState<PricesOf | null>(null)
   const list = useRef<HTMLDivElement>(null)
   const searchBox = useRef<HTMLInputElement>(null)
   const lines = useRef(new Map<string, HTMLTableRowElement>())
-  const dialogOpen = openOn !== null || openReturn !== null || pricesOn !== null
+  const dialogOpen = openOn !== null || openReturn !== null || pricesOn !== null || paying !== null
+  const canManage = role === 'MANAGER' || role === 'ADMIN'
 
   const load = useCallback(() => {
     const asking = new URLSearchParams()
@@ -273,7 +291,7 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
     savedOrderDraft()
       .then((draft) => {
         if (!gone && draft && draft.lines.length > 0) {
-          setWriting({ startReturn: null })
+          setWriting({ startReturn: null, startEdit: null })
         }
       })
       .catch(() => undefined)
@@ -330,7 +348,50 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
   /** Goods go back on an order that has actually arrived; anything else needs no order at all. */
   const sendGoodsBack = () => {
     const on = current?.kind === 'order' && current.order?.status === 'RECEIVED' ? current.order : null
-    setWriting({ startReturn: on })
+    setWriting({ startReturn: on, startEdit: null })
+  }
+
+  /**
+   * What can be done to a row, and why not where it cannot. The same shape the Bills list uses,
+   * so the arrows skip what is blocked and a click on it says why rather than doing nothing.
+   */
+  const actionsFor = (row: Listed): [Action, string | null][] => {
+    const manager = canManage ? null : 'Only a manager can do this'
+    if (row.kind === 'return' || !row.order) {
+      return [['open', null]];
+    }
+    const order = row.order
+    const gone = order.status === 'RECEIVED' ? 'The goods have already come in' : null
+    const decided = order.status === 'REJECTED' ? 'This order was turned down'
+      : order.status === 'CANCELLED' ? 'This order was called off' : null
+    const noVendor = order.vendorId ? null : 'Add this vendor to the list before paying them'
+    const owes = order.owedPaise > order.paidPaise ? null : 'Nothing is owed on this order'
+    return [
+      ['open', null],
+      ['edit', manager ?? gone ?? decided],
+      ['pay', manager ?? noVendor ?? owes],
+      ['receive', manager ?? (order.status === 'APPROVED' ? null : 'It has not been approved yet')],
+      ['back', manager ?? (order.status === 'RECEIVED' ? null : 'Nothing has come in on it yet')],
+    ]
+  }
+
+  const run = (row: Listed, chosen: Action) => {
+    const blocked = actionsFor(row).find(([name]) => name === chosen)?.[1]
+    if (blocked) {
+      onToast({ tone: 'warn', text: blocked })
+      return
+    }
+    if (chosen === 'open' || !row.order) {
+      open(row)
+    } else if (chosen === 'edit') {
+      setWriting({ startReturn: null, startEdit: row.order })
+    } else if (chosen === 'pay') {
+      setPaying(row.order)
+    } else if (chosen === 'receive') {
+      setOpenOn(row.id)
+    } else {
+      setWriting({ startReturn: row.order, startEdit: null })
+    }
   }
 
   useScreenKeys({
@@ -338,8 +399,14 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
       searchBox.current?.focus()
       searchBox.current?.select()
     },
-    [ADD_KEY]: () => setWriting({ startReturn: null }),
+    [ADD_KEY]: () => setWriting({ startReturn: null, startEdit: null }),
     [SORT_KEY]: () => setSortOpen(true),
+    // The chips move with a key of their own now that ← → belong to the row's actions.
+    [WHICH_KEY]: () => {
+      setKind((now) => (now + 1) % FILTERS.length)
+      setSelected(0)
+      list.current?.focus()
+    },
     [RETURN_KEY]: sendGoodsBack,
   }, !dialogOpen && !sortOpen && !writing)
 
@@ -348,6 +415,7 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
     setOpenOn(null)
     setOpenReturn(null)
     setPricesOn(null)
+    setPaying(null)
     if (reload) {
       load()
     }
@@ -362,23 +430,31 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
     }
   }
 
+  const choose = (index: number) => {
+    setSelected(index)
+    setAction('open')
+  }
+
   const onListKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (dialogOpen || sortOpen) {
+    if (dialogOpen || sortOpen || !current) {
       return
     }
+    // ← → walk what can be done to this row, as they do on the Bills list, skipping what cannot.
+    const available = actionsFor(current).filter(([, blocked]) => !blocked).map(([name]) => name)
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
-      setSelected(Math.max(0, Math.min(shown.length - 1, at + (event.key === 'ArrowDown' ? 1 : -1))))
+      choose(Math.max(0, Math.min(shown.length - 1, at + (event.key === 'ArrowDown' ? 1 : -1))))
     } else if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
       event.preventDefault()
-      setKind((now) => Math.max(0, Math.min(FILTERS.length - 1, now + (event.key === 'ArrowRight' ? 1 : -1))))
-      setSelected(0)
+      const from = Math.max(0, available.indexOf(action))
+      const to = Math.max(0, Math.min(available.length - 1, from + (event.key === 'ArrowRight' ? 1 : -1)))
+      setAction(available[to] ?? 'open')
     } else if (event.key === 'Home' || event.key === 'End') {
       event.preventDefault()
-      setSelected(event.key === 'Home' ? 0 : shown.length - 1)
-    } else if (event.key === 'Enter' && current && !event.repeat) {
+      choose(event.key === 'Home' ? 0 : shown.length - 1)
+    } else if (event.key === 'Enter' && !event.repeat) {
       event.preventDefault()
-      open(current)
+      run(current, available.includes(action) ? action : 'open')
     }
   }
 
@@ -388,7 +464,9 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
       event.preventDefault()
       event.stopPropagation()
       event.nativeEvent.stopImmediatePropagation()
-      setSelected(0)
+      // Back to Open as well as back to the list: coming out of the search box is arriving at a
+      // row, and Enter on arrival should open it rather than run whatever was last chosen.
+      choose(0)
       list.current?.focus()
     }
   }
@@ -398,7 +476,8 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
   if (writing) {
     return (
       <Panel
-        title={writing.startReturn ? `Send goods back on ${writing.startReturn.number}` : 'Write a purchase order'}
+        title={writing.startReturn ? `Send goods back on ${writing.startReturn.number}`
+          : writing.startEdit ? `Change ${writing.startEdit.number}` : 'Write a purchase order'}
         actions={
           <Button className="whitespace-nowrap px-2 py-1" onClick={() => backToList()}>
             Back to the list
@@ -407,6 +486,7 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
       >
         <WriteOrder
           startReturn={writing.startReturn}
+          startEdit={writing.startEdit}
           onToast={onToast}
           onClose={() => backToList()}
           onWritten={() => backToList(true)}
@@ -453,7 +533,7 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
             Send goods back
           </Button>
           <Button tone="primary" className="whitespace-nowrap px-2 py-1" hint={ADD_KEY}
-                  onClick={() => setWriting({ startReturn: null })}>
+                  onClick={() => setWriting({ startReturn: null, startEdit: null })}>
             Write an order
           </Button>
           <KeyBox hint={SEARCH_KEY}>
@@ -549,12 +629,12 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
       </div>
 
       <p className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
-        <span><kbd>↑</kbd> <kbd>↓</kbd> choose</span>
-        <span><kbd>←</kbd> <kbd>→</kbd> which ones</span>
-        <span><kbd>Enter</kbd> open</span>
+        <span><kbd>↑</kbd> <kbd>↓</kbd> choose a row</span>
+        <span><kbd>←</kbd> <kbd>→</kbd> Open, Edit, Pay, Receive or Send back</span>
+        <span><kbd>Enter</kbd> do it</span>
         <span>
-          <kbd>{SEARCH_KEY}</kbd> search · <kbd>{SORT_KEY}</kbd> sort · <kbd>{ADD_KEY}</kbd> write one
-          {' · '}<kbd>{RETURN_KEY}</kbd> send goods back
+          <kbd>{SEARCH_KEY}</kbd> search · <kbd>{SORT_KEY}</kbd> sort · <kbd>{WHICH_KEY}</kbd> which ones
+          {' · '}<kbd>{ADD_KEY}</kbd> write one · <kbd>{RETURN_KEY}</kbd> send goods back
         </span>
         <span><kbd>F9</kbd> menu · <kbd>Esc</kbd> <kbd>Esc</kbd> billing</span>
       </p>
@@ -565,6 +645,8 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
         role="grid"
         aria-label="Purchase orders"
         onKeyDown={onListKeyDown}
+        onFocus={() => setListFocused(true)}
+        onBlur={() => setListFocused(false)}
         className="overflow-x-auto rounded-md outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
       >
         {shown.length === 0 ? (
@@ -574,16 +656,18 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
               : 'No orders yet. Write one for whatever the shop needs next.'}
           </Empty>
         ) : (
-          <table className="w-full min-w-[68rem] table-fixed text-sm">
+          <table className="w-full min-w-[86rem] table-fixed text-sm">
             <colgroup>
               <col className="w-36" />
               <col className="w-28" />
-              <col className="w-48" />
+              <col className="w-44" />
               <col />
               <col className="w-24" />
               <col className="w-28" />
               <col className="w-28" />
-              <col className="w-28" />
+              <col className="w-24" />
+              {/* Open, Edit, Pay, Receive, Send back. */}
+              <col className="w-[20rem]" />
             </colgroup>
             <thead className="text-xs uppercase tracking-wide text-slate-400">
               <tr>
@@ -594,7 +678,8 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
                 <th className="py-1 text-right">How much</th>
                 <th className="py-1 text-right">Total</th>
                 <th className="py-1 text-right">State</th>
-                <th className="py-1 pr-2 text-right">Money</th>
+                <th className="py-1 text-right">Money</th>
+                <th className="py-1 pr-2"></th>
               </tr>
             </thead>
             <tbody>
@@ -610,7 +695,7 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
                         lines.current.delete(row.id)
                       }
                     }}
-                    onMouseDown={() => setSelected(index)}
+                    onMouseDown={() => choose(index)}
                     onClick={() => open(row)}
                     aria-selected={isSelected}
                     className={`cursor-pointer border-t border-slate-100 ${
@@ -636,13 +721,43 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
                         {STATUS[row.state].label}
                       </span>
                     </td>
-                    <td className={`py-1.5 pr-2 text-right text-xs font-medium ${PAID[row.settled].tone}`}>
+                    <td className={`py-1.5 text-right text-xs font-medium ${PAID[row.settled].tone}`}>
                       {PAID[row.settled].label}
                       {row.settled === 'PART_PAID' && row.order && (
                         <div className="num text-xs font-normal text-slate-400">
                           {rupees(row.order.paidPaise)}
                         </div>
                       )}
+                    </td>
+                    <td className="whitespace-nowrap py-1 pr-2 text-right">
+                      <div className="inline-flex gap-1">
+                        {actionsFor(row).map(([name, blocked]) => {
+                          const focused = isSelected && action === name
+                          return (
+                            <button
+                              key={name}
+                              type="button"
+                              tabIndex={-1}
+                              disabled={Boolean(blocked)}
+                              title={blocked ?? undefined}
+                              onMouseDown={(event) => event.stopPropagation()}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                choose(index)
+                                setAction(name)
+                                run(row, name)
+                              }}
+                              className={`rounded-md px-2 py-1 text-xs font-medium transition disabled:cursor-not-allowed disabled:text-slate-300 ${
+                                focused
+                                  ? `bg-sky-600 text-on-primary ${listFocused ? 'ring-2 ring-sky-300' : ''}`
+                                  : name === 'back' ? 'text-rose-600 hover:bg-rose-50'
+                                    : 'text-slate-600 hover:bg-slate-100'}`}
+                            >
+                              {ACTION_LABELS[name]}
+                            </button>
+                          )
+                        })}
+                      </div>
                     </td>
                   </tr>
                 )
@@ -661,9 +776,26 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
           onPrices={setPricesOn}
           onSendBack={(order) => {
             setOpenOn(null)
-            setWriting({ startReturn: order })
+            setWriting({ startReturn: order, startEdit: null })
+          }}
+          onEdit={(order) => {
+            setOpenOn(null)
+            setWriting({ startReturn: null, startEdit: order })
+          }}
+          onPay={(order) => {
+            setOpenOn(null)
+            setPaying(order)
           }}
           onClose={() => backToList()}
+        />
+      )}
+
+      {paying && (
+        <PayOrderDialog
+          order={paying}
+          onToast={onToast}
+          onClose={() => backToList()}
+          onPaid={() => backToList(true)}
         />
       )}
 
@@ -675,16 +807,20 @@ export default function Purchases({ role, onToast }: { role: Role; onToast: Toas
 }
 
 /** One order: what was asked for, who decided what, and whatever can be done to it next. */
-function OrderPage({ orderId, role, onToast, onChanged, onPrices, onSendBack, onClose }: {
+function OrderPage({ orderId, role, onToast, onChanged, onPrices, onSendBack, onEdit, onPay, onClose }: {
   orderId: string
   role: Role
   onToast: Toast
   onChanged: () => void
   onPrices: (of: PricesOf) => void
   onSendBack: (order: PurchaseOrder) => void
+  onEdit: (order: PurchaseOrder) => void
+  onPay: (order: PurchaseOrder) => void
   onClose: () => void
 }) {
   const [order, setOrder] = useState<PurchaseOrder | null>(null)
+  /** Every version this order went through, and what went back against any of them. */
+  const [story, setStory] = useState<OrderStory | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [why, setWhy] = useState('')
@@ -700,6 +836,11 @@ function OrderPage({ orderId, role, onToast, onChanged, onPrices, onSendBack, on
         setReceiving(Object.fromEntries(one.lines.map((line) => [line.id, quantity(line.quantityMilli)])))
       })
       .catch((failure) => setError(messageOfFailure(failure, 'Could not open this order')))
+    // The whole line of it, so a manager opening a cancelled version is told what replaced it
+    // rather than left wondering where the order went.
+    api.get<OrderStory>(`/api/purchase-orders/${orderId}/history`)
+      .then(setStory)
+      .catch(() => setStory(null))
   }, [orderId])
 
   useEffect(load, [load])
@@ -751,6 +892,50 @@ function OrderPage({ orderId, role, onToast, onChanged, onPrices, onSendBack, on
             <Banner tone={order.status === 'REJECTED' ? 'bad' : 'warn'}>
               {STATUS[order.status].label} by {order.decidedBy}: {order.decision}
             </Banner>
+          )}
+
+          {/* Every version of it, oldest first, with the one being looked at named and ringed -
+              the same story a bill tells when it has been edited. With three documents stacked in
+              one dialog, the first question is always which one was clicked. */}
+          {story && (story.versions.length > 1 || story.returns.length > 0) && (
+            <section className="rounded-md border border-slate-200 bg-slate-50 p-2">
+              <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                This order's history
+              </h3>
+              <ul className="space-y-1 text-sm">
+                {story.versions.map((version) => (
+                  <li key={version.id}
+                      className={`flex flex-wrap items-center gap-2 rounded px-2 py-1 ${
+                        version.id === order.id ? 'bg-surface ring-1 ring-sky-400' : ''}`}>
+                    <span className="num font-medium">{version.number}</span>
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS[version.status].tone}`}>
+                      {STATUS[version.status].label}
+                    </span>
+                    <span className="num text-slate-500">{rupees(version.valuePaise)}</span>
+                    <span className="text-xs text-slate-400">
+                      {billDate(new Date(version.orderedOn))} · {version.createdBy}
+                      {version.replacesOrderNumber && ` · replaced ${version.replacesOrderNumber}`}
+                    </span>
+                    {version.id === order.id && (
+                      <span className="ml-auto text-xs font-medium text-sky-700">Opened</span>
+                    )}
+                  </li>
+                ))}
+                {story.returns.map((sentBack) => (
+                  <li key={sentBack.id} className="flex flex-wrap items-center gap-2 px-2 py-1">
+                    <span className="num font-medium text-rose-700">{sentBack.number}</span>
+                    <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">
+                      Sent back
+                    </span>
+                    <span className="num text-rose-700">−{rupees(sentBack.valuePaise)}</span>
+                    <span className="text-xs text-slate-400">
+                      {billDate(new Date(sentBack.returnedOn))} · {sentBack.by}
+                      {sentBack.reason && ` · ${sentBack.reason}`}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
           )}
 
           <div className="overflow-auto rounded-md border border-slate-100">
@@ -841,6 +1026,19 @@ function OrderPage({ orderId, role, onToast, onChanged, onPrices, onSendBack, on
             </p>
           )}
 
+          {/* What can be done to it, wherever it has got to. Changing one writes a new order in
+              its place; paying one records money against it on the vendor's account. */}
+          <div className="flex flex-wrap items-center gap-2">
+            {order.status !== 'RECEIVED' && order.status !== 'REJECTED' && order.status !== 'CANCELLED' && (
+              <Button onClick={() => onEdit(order)}>Change this order</Button>
+            )}
+            {order.vendorId && order.owedPaise > order.paidPaise && (
+              <Button onClick={() => onPay(order)}>
+                Pay {rupees(order.owedPaise - order.paidPaise)}
+              </Button>
+            )}
+          </div>
+
           {order.status === 'PENDING_APPROVAL' && (
             canDecide ? (
               <div className="flex flex-wrap items-end gap-2">
@@ -888,6 +1086,110 @@ function OrderPage({ orderId, role, onToast, onChanged, onPrices, onSendBack, on
     </Modal>
   )
 }
+
+/**
+ * Money paid against one order, recorded on the vendor's account and waiting for an
+ * administrator - the same payment the vendor's own page records, reached from the order it is
+ * for so nobody has to go and find the vendor to pay for a delivery in front of them.
+ */
+function PayOrderDialog({ order, onToast, onClose, onPaid }: {
+  order: PurchaseOrder
+  onToast: Toast
+  onClose: () => void
+  onPaid: () => void
+}) {
+  const left = Math.max(0, order.owedPaise - order.paidPaise)
+  const [amount, setAmount] = useState((left / 100).toFixed(2))
+  const [mode, setMode] = useState<VendorPaymentMode>('CASH')
+  const [reference, setReference] = useState('')
+  const [note, setNote] = useState('')
+  const [errors, setErrors] = useState<{ message: string; fields: Record<string, string> } | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    const paise = paiseFromRupees(amount)
+    if (paise <= 0) {
+      setErrors({ message: 'Enter how much was paid.', fields: {} })
+      return
+    }
+    if (mode !== 'CASH' && reference.trim() === '') {
+      setErrors({ message: 'Put the transaction details in, so this payment can be found again.', fields: {} })
+      return
+    }
+    setSaving(true)
+    try {
+      await api.post(`/api/vendors/${order.vendorId}/payments`, {
+        amountPaise: paise,
+        paidOn: new Date().toISOString().slice(0, 10),
+        mode,
+        reference: reference.trim(),
+        note: note.trim() || `Against order ${order.number}`,
+        purchaseOrderId: order.id,
+      })
+      onToast({ tone: 'good', text: `Recorded against ${order.number}. It waits for an administrator.` })
+      onPaid()
+    } catch (failure) {
+      setErrors({ message: messageOfFailure(failure, 'Could not record that'), fields: fieldErrorsOf(failure) })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title={`Pay for ${order.number}`} onClose={onClose}>
+      <form onSubmit={submit} className="space-y-3">
+        {errors && <Banner tone="bad" onDismiss={() => setErrors(null)}>{errors.message}</Banner>}
+        <p className="text-sm text-slate-500">
+          {order.vendorName} · owed <span className="num font-medium text-slate-700">{rupees(left)}</span>
+          {order.paidPaise > 0 && (
+            <> · already paid <span className="num">{rupees(order.paidPaise)}</span></>
+          )}
+        </p>
+        <Field label="Amount" error={errorFor(errors?.fields ?? {}, 'amountPaise')}>
+          <input className={`${inputClass} num text-lg`} inputMode="decimal" autoFocus value={amount}
+                 onChange={(event) => setAmount(event.target.value)} />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="How" error={errorFor(errors?.fields ?? {}, 'mode')}>
+            <select className={inputClass} value={mode}
+                    onChange={(event) => setMode(event.target.value as VendorPaymentMode)}>
+              {MODES.map((one) => <option key={one.key} value={one.key}>{one.label}</option>)}
+            </select>
+          </Field>
+          <Field label={mode === 'CASH' ? 'Reference' : 'Transaction details'} optional={mode === 'CASH'}
+                 hint={mode === 'CASH' ? 'Anything worth keeping' : 'The reference the shop can find it by'}
+                 error={errorFor(errors?.fields ?? {}, 'reference')}>
+            <input className={inputClass} value={reference}
+                   onChange={(event) => setReference(event.target.value)} />
+          </Field>
+        </div>
+        <Field label="Note" optional error={errorFor(errors?.fields ?? {}, 'note')}>
+          <input className={inputClass} value={note} onChange={(event) => setNote(event.target.value)} />
+        </Field>
+        <p className="text-xs text-slate-400">
+          It shows on the vendor's page at once, marked as waiting, and counts against what the shop
+          owes once an administrator approves it.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose} hint="Esc">Cancel</Button>
+          <Button type="submit" tone="primary" hint="Enter" disabled={saving}>
+            {saving ? 'Saving…' : 'Record the payment'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+/** How a payment can be made, in the shop's words. The same list the vendor's page offers. */
+const MODES: { key: VendorPaymentMode; label: string }[] = [
+  { key: 'CASH', label: 'Cash' },
+  { key: 'UPI', label: 'UPI' },
+  { key: 'BANK_TRANSFER', label: 'Bank transfer' },
+  { key: 'CHEQUE', label: 'Cheque' },
+  { key: 'CARD', label: 'Card' },
+]
 
 /** Goods that went back: what went, what it was worth, and why. Nothing can be done to it. */
 function ReturnPage({ sentBack, onClose }: { sentBack: PurchaseReturn; onClose: () => void }) {

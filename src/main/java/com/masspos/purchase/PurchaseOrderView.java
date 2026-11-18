@@ -23,6 +23,7 @@ public record PurchaseOrderView(UUID id, String number, PurchaseOrderStatus stat
                                 String vendorName, LocalDate orderedOn, LocalDate expectedOn, String note,
                                 long valuePaise, String createdBy, String decidedBy, Instant decidedAt,
                                 String decision, String receivedBy, Instant receivedAt,
+                                String replacesOrderNumber,
                                 long owedPaise, long paidPaise, Settled settled, List<Line> lines) {
 
     /**
@@ -55,11 +56,12 @@ public record PurchaseOrderView(UUID id, String number, PurchaseOrderStatus stat
     static PurchaseOrderView of(PurchaseOrder order, long paidPaise, long sentBackPaise) {
         long owed = Math.max(0, owedOn(order) - sentBackPaise);
         return new PurchaseOrderView(order.getId(), order.getNumber(), order.getStatus(),
-                order.getVendor().getId(), order.getVendor().getName(), order.getOrderedOn(),
-                order.getExpectedOn(), order.getNote(), order.getValuePaise(),
+                order.getVendor() == null ? null : order.getVendor().getId(), order.getVendorName(),
+                order.getOrderedOn(), order.getExpectedOn(), order.getNote(), order.getValuePaise(),
                 who(order.getCreatedBy()), who(order.getDecidedBy()), order.getDecidedAt(),
                 order.getDecision(), who(order.getReceivedBy()), order.getReceivedAt(),
-                owed, paidPaise, settled(owed, paidPaise), 
+                order.getReplacesOrderNumber(),
+                owed, paidPaise, settled(owed, paidPaise),
                 order.getLines().stream().map(PurchaseOrderView::lineOf).toList());
     }
 

@@ -120,15 +120,19 @@ public class PurchaseReturnService {
      * a lorry - and what actually went is what the return records.
      */
     @Transactional
-    public PurchaseReturnView send(UUID vendorId, UUID againstOrderId, String reason, List<Going> going) {
+    public PurchaseReturnView send(UUID vendorId, String vendorName, UUID againstOrderId, String reason,
+                                   List<Going> going) {
         if (going == null || going.isEmpty()) {
             throw new FieldRejectedException("lines", "cannot be empty: say what is going back");
         }
-        Vendor vendor = vendors.onTheList(vendorId).orElseThrow(() -> new IllegalArgumentException(
-                "That vendor is not on this till any more. Refresh the screen and try again."));
+        // Optional, as it is on an order: goods go back to the man off the lorry as well.
+        Vendor vendor = vendorId == null ? null
+                : vendors.onTheList(vendorId).orElseThrow(() -> new IllegalArgumentException(
+                        "That vendor is not on this till any more. Refresh the screen and try again."));
         PurchaseOrder against = againstOrderId == null ? null : orders.findById(againstOrderId).orElse(null);
         LocalDate today = LocalDate.now(IndiaTime.ZONE);
-        PurchaseReturn sentBack = new PurchaseReturn(nextNumber(today), vendor, againstOrderId,
+        PurchaseReturn sentBack = new PurchaseReturn(nextNumber(today), vendor,
+                vendor != null ? vendor.getName() : vendorName, againstOrderId,
                 against == null ? "" : against.getNumber(), today, reason, currentUser());
 
         String note = "Sent back";
@@ -141,14 +145,16 @@ public class PurchaseReturnService {
             if (line.rawMaterialId() != null) {
                 RawMaterial material = materialOrRefuse(line.rawMaterialId());
                 went = store.sendBack(material.getId(), line.quantityMilli(), note, line.unitCostPaise(),
-                        vendor.getName(), vendor.getId(), sentBack.getNumber());
+                        sentBack.getVendorName(), vendor == null ? null : vendor.getId(),
+                        sentBack.getNumber());
                 if (went > 0) {
                     sentBack.add(new PurchaseReturnLine(null, material, went, line.unitCostPaise()));
                 }
             } else if (line.productId() != null) {
                 Product product = productOrRefuse(line.productId());
                 went = shelf.sendBack(product.getId(), line.quantityMilli(), note, line.unitCostPaise(),
-                        vendor.getName(), vendor.getId(), sentBack.getNumber());
+                        sentBack.getVendorName(), vendor == null ? null : vendor.getId(),
+                        sentBack.getNumber());
                 if (went > 0) {
                     sentBack.add(new PurchaseReturnLine(product, null, went, line.unitCostPaise()));
                 }

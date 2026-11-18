@@ -55,7 +55,13 @@ public class PurchaseOrderController {
                                  @Size(max = 60) String reference) {
     }
 
-    public record OrderRequest(@NotNull UUID vendorId,
+    /**
+     * @param vendorId   somebody on the shop's list, or null for a vendor it does not keep
+     * @param vendorName who it is going to where there is no vendor on the list. Optional too: an
+     *                   order with nobody named is a shop that has not decided yet.
+     */
+    public record OrderRequest(UUID vendorId,
+                               @Size(max = 120) String vendorName,
                                @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate expectedOn,
                                @Size(max = 200) String note,
                                @NotNull List<LineRequest> lines,
@@ -123,15 +129,40 @@ public class PurchaseOrderController {
     @RequiresRole({UserRole.MANAGER})
     @ResponseStatus(HttpStatus.CREATED)
     public PurchaseOrderView create(@Valid @RequestBody OrderRequest request) {
-        return purchases.create(request.vendorId(), request.expectedOn(), request.note(),
-                request.lines().stream()
-                        .map(line -> new PurchaseOrderService.Wanted(line.productId(), line.rawMaterialId(),
-                                line.itemName(), line.itemCode(), line.quantityMilli(), line.unitCostPaise()))
-                        .toList(),
-                (request.payments() == null ? List.<PaymentRequest>of() : request.payments()).stream()
-                        .map(paid -> new PurchaseOrderService.PaidNow(paid.mode(), paid.amountPaise(),
-                                paid.reference()))
-                        .toList());
+        return purchases.create(request.vendorId(), request.vendorName(), request.expectedOn(),
+                request.note(), wanted(request), paidNow(request));
+    }
+
+    /**
+     * Changing an order: this one is cancelled and a new one takes its place, the way an edited
+     * bill is reissued. Only before the goods come in - after that the counts have moved, and
+     * what should not have come goes back rather than being edited away.
+     */
+    @PostMapping("/{id}/replace")
+    @RequiresRole({UserRole.MANAGER})
+    public PurchaseOrderView replace(@PathVariable UUID id, @Valid @RequestBody OrderRequest request) {
+        return purchases.replace(id, request.vendorId(), request.vendorName(), request.expectedOn(),
+                request.note(), wanted(request), paidNow(request));
+    }
+
+    /** Every version of one order, and whatever went back against any of them. */
+    @GetMapping("/{id}/history")
+    @RequiresRole({UserRole.MANAGER, UserRole.AUDITOR})
+    public PurchaseOrderService.Story history(@PathVariable UUID id) {
+        return purchases.history(id);
+    }
+
+    private static List<PurchaseOrderService.Wanted> wanted(OrderRequest request) {
+        return request.lines().stream()
+                .map(line -> new PurchaseOrderService.Wanted(line.productId(), line.rawMaterialId(),
+                        line.itemName(), line.itemCode(), line.quantityMilli(), line.unitCostPaise()))
+                .toList();
+    }
+
+    private static List<PurchaseOrderService.PaidNow> paidNow(OrderRequest request) {
+        return (request.payments() == null ? List.<PaymentRequest>of() : request.payments()).stream()
+                .map(paid -> new PurchaseOrderService.PaidNow(paid.mode(), paid.amountPaise(), paid.reference()))
+                .toList();
     }
 
     /** Administrators only: this is the shop agreeing to spend the money. */

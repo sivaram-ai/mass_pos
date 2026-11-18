@@ -32,8 +32,9 @@ public record PurchaseReturnView(UUID id, String number, UUID vendorId, String v
     }
 
     static PurchaseReturnView of(PurchaseReturn sentBack) {
-        return new PurchaseReturnView(sentBack.getId(), sentBack.getNumber(), sentBack.getVendor().getId(),
-                sentBack.getVendor().getName(), sentBack.getAgainstOrderId(), sentBack.getAgainstOrderNumber(),
+        return new PurchaseReturnView(sentBack.getId(), sentBack.getNumber(),
+                sentBack.getVendor() == null ? null : sentBack.getVendor().getId(),
+                sentBack.getVendorName(), sentBack.getAgainstOrderId(), sentBack.getAgainstOrderNumber(),
                 sentBack.getReturnedOn(), sentBack.getReason(), who(sentBack.getCreatedBy()),
                 sentBack.getValuePaise(), sentBack.getLines().stream().map(PurchaseReturnView::lineOf).toList());
     }

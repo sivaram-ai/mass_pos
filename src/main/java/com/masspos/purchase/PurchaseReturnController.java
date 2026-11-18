@@ -44,7 +44,7 @@ public class PurchaseReturnController {
                               long quantityMilli, long unitCostPaise) {
     }
 
-    public record ReturnRequest(@NotNull UUID vendorId, UUID againstOrderId,
+    public record ReturnRequest(UUID vendorId, @Size(max = 120) String vendorName, UUID againstOrderId,
                                 @Size(max = 200) String reason,
                                 @NotNull List<LineRequest> lines) {
     }
@@ -77,7 +77,8 @@ public class PurchaseReturnController {
     @RequiresRole({UserRole.MANAGER})
     @ResponseStatus(HttpStatus.CREATED)
     public PurchaseReturnView send(@Valid @RequestBody ReturnRequest request) {
-        return returns.send(request.vendorId(), request.againstOrderId(), request.reason(),
+        return returns.send(request.vendorId(), request.vendorName(), request.againstOrderId(),
+                request.reason(),
                 request.lines().stream()
                         .map(line -> new PurchaseReturnService.Going(line.productId(), line.rawMaterialId(),
                                 line.itemName(), line.itemCode(), line.quantityMilli(), line.unitCostPaise()))

@@ -12,6 +12,7 @@ import com.masspos.rawmaterial.RawMaterialService;
 import com.masspos.user.User;
 import com.masspos.user.UserRepository;
 import com.masspos.vendor.Vendor;
+import com.masspos.vendor.VendorPayment;
 import com.masspos.vendor.VendorPaymentMode;
 import com.masspos.vendor.VendorPaymentRepository;
 import com.masspos.vendor.VendorRepository;
@@ -22,7 +23,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -159,15 +162,46 @@ public class PurchaseOrderService {
      *                same moment.
      */
     @Transactional
-    public PurchaseOrderView create(UUID vendorId, LocalDate expectedOn, String note, List<Wanted> wanted,
-                                    List<PaidNow> paidNow) {
+    public PurchaseOrderView create(UUID vendorId, String vendorName, LocalDate expectedOn, String note,
+                                    List<Wanted> wanted, List<PaidNow> paidNow) {
+        return view(write(vendorId, vendorName, expectedOn, note, wanted, paidNow, ""));
+    }
+
+    /**
+     * Changing an order is writing a new one, exactly as changing a bill is: this one is cancelled
+     * with the new number written on it, the new one carries the old number, and what was agreed
+     * to can never quietly differ from what was ordered. An order whose goods have arrived cannot
+     * be changed - the counts have moved - and what has been paid against the old one follows the
+     * order it was paid for.
+     */
+    @Transactional
+    public PurchaseOrderView replace(UUID id, UUID vendorId, String vendorName, LocalDate expectedOn,
+                                     String note, List<Wanted> wanted, List<PaidNow> paidNow) {
+        PurchaseOrder old = order(id);
+        // The number is reserved before the old order is cancelled, as an invoice's is: the
+        // cancellation has to be able to name the order taking its place.
+        PurchaseOrder written = write(vendorId, vendorName, expectedOn, note, wanted, paidNow,
+                old.getNumber());
+        old.replacedBy(currentUser(), Instant.now(), written.getNumber());
+        for (VendorPayment carried : paid.allocatedTo(old.getId())) {
+            carried.nowAgainst(written.getId());
+        }
+        return view(written);
+    }
+
+    private PurchaseOrder write(UUID vendorId, String vendorName, LocalDate expectedOn, String note,
+                                List<Wanted> wanted, List<PaidNow> paidNow, String replaces) {
         if (wanted == null || wanted.isEmpty()) {
             throw new FieldRejectedException("lines", "cannot be empty: say what the shop is ordering");
         }
-        Vendor vendor = vendors.onTheList(vendorId).orElseThrow(() -> new IllegalArgumentException(
-                "That vendor is not on this till any more. Refresh the screen and try again."));
+        // The vendor is optional: a shop buys from a man off a lorry as well as from its list.
+        Vendor vendor = vendorId == null ? null
+                : vendors.onTheList(vendorId).orElseThrow(() -> new IllegalArgumentException(
+                        "That vendor is not on this till any more. Refresh the screen and try again."));
         LocalDate today = LocalDate.now(IndiaTime.ZONE);
-        PurchaseOrder order = new PurchaseOrder(nextNumber(today), vendor, today, expectedOn, note, currentUser());
+        PurchaseOrder order = new PurchaseOrder(nextNumber(today), vendor,
+                vendor != null ? vendor.getName() : vendorName, today, expectedOn, note, currentUser(),
+                replaces);
         for (Wanted line : wanted) {
             if (line.quantityMilli() <= 0) {
                 throw new FieldRejectedException("quantityMilli", "must be more than nothing");
@@ -175,13 +209,57 @@ public class PurchaseOrderService {
             order.add(lineFor(line));
         }
         PurchaseOrder written = orders.save(order);
-        for (PaidNow paid : paidNow == null ? List.<PaidNow>of() : paidNow) {
-            if (paid.amountPaise() > 0) {
-                vendorPayments.pay(vendorId, paid.amountPaise(), today, paid.mode(), paid.reference(),
-                        "With order " + written.getNumber(), written.getId());
+        for (PaidNow handed : paidNow == null ? List.<PaidNow>of() : paidNow) {
+            if (handed.amountPaise() > 0) {
+                if (vendor == null) {
+                    throw new FieldRejectedException("payments",
+                            "cannot be recorded against a vendor who is not on the list. Add them on the "
+                                    + "Vendors screen, or write the order and pay later.");
+                }
+                vendorPayments.pay(vendor.getId(), handed.amountPaise(), today, handed.mode(),
+                        handed.reference(), "With order " + written.getNumber(), written.getId());
             }
         }
-        return view(written);
+        return written;
+    }
+
+    /**
+     * Everything that has happened to one order: back through the orders it replaced, on through
+     * the ones that replaced it, and the goods sent back against any of them.
+     *
+     * @param versions every version it went through, oldest first
+     * @param returns  what went back against any of them, oldest first
+     */
+    public record Story(List<PurchaseOrderView> versions, List<PurchaseReturnView> returns) {
+    }
+
+    /** Guards against a loop in hand-edited data; no shop edits an order sixty times. */
+    private static final int MOST_EDITS = 60;
+
+    @Transactional(readOnly = true)
+    public Story history(UUID id) {
+        PurchaseOrder opened = order(id);
+        LinkedList<PurchaseOrder> chain = new LinkedList<>(List.of(opened));
+        for (int step = 0; step < MOST_EDITS && !chain.getFirst().getReplacesOrderNumber().isEmpty(); step++) {
+            PurchaseOrder earlier = orders.findByNumber(chain.getFirst().getReplacesOrderNumber()).orElse(null);
+            if (earlier == null || chain.contains(earlier)) {
+                break;
+            }
+            chain.addFirst(earlier);
+        }
+        for (int step = 0; step < MOST_EDITS; step++) {
+            PurchaseOrder later = orders.replacing(chain.getLast().getNumber()).orElse(null);
+            if (later == null || chain.contains(later)) {
+                break;
+            }
+            chain.addLast(later);
+        }
+        List<PurchaseReturnView> returns = chain.stream()
+                .flatMap(order -> sentBack.against(order.getId()).stream())
+                .sorted(Comparator.comparing(PurchaseReturn::getReturnedOn))
+                .map(PurchaseReturnView::of)
+                .toList();
+        return new Story(chain.stream().map(this::view).toList(), returns);
     }
 
     /** A line for something on one of the shop's lists, or for something it does not keep. */
@@ -242,12 +320,15 @@ public class PurchaseOrderService {
                 continue;
             }
             String note = "Order " + order.getNumber();
+            // A vendor off the list is a name and no link, exactly as a delivery taken before the
+            // shop kept a list is - the ledger has carried both since there were vendors at all.
+            UUID vendorId = order.getVendor() == null ? null : order.getVendor().getId();
             if (line.isFromTheStore()) {
                 store.purchase(line.getRawMaterial().getId(), quantity, note, cost,
-                        order.getVendor().getName(), order.getVendor().getId(), order.getNumber());
+                        order.getVendorName(), vendorId, order.getNumber());
             } else {
                 shelf.receive(line.getProduct().getId(), quantity, note, cost,
-                        order.getVendor().getName(), order.getVendor().getId(), order.getNumber());
+                        order.getVendorName(), vendorId, order.getNumber());
             }
         }
         return view(order);
